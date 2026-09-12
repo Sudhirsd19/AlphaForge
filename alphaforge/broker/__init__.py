@@ -12,6 +12,7 @@ from alphaforge.broker.models import (
     BrokerPosition,
 )
 from alphaforge.broker.paper import PaperBroker
+from alphaforge.core.exceptions import BrokerPositionConflictError
 
 __all__ = [
     "AbstractBroker",
@@ -20,5 +21,6 @@ __all__ = [
     "BrokerOrderStatus",
     "BrokerOrderType",
     "BrokerPosition",
+    "BrokerPositionConflictError",
     "PaperBroker",
 ]

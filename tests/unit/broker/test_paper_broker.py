@@ -4,6 +4,7 @@ Verifies submission idempotency, timeout-after-acceptance simulation,
 execution fills, position tracking, and failure handling.
 """
 
+import threading
 from decimal import Decimal
 
 import pytest
@@ -16,6 +17,7 @@ from alphaforge.broker.paper import PaperBroker
 from alphaforge.core.exceptions import (
     BrokerError,
     BrokerOrderCollisionError,
+    BrokerPositionConflictError,
     BrokerUnavailableError,
 )
 from alphaforge.execution.enums import OrderSide
@@ -188,3 +190,198 @@ def test_paper_broker_unavailability() -> None:
 
     with pytest.raises(BrokerUnavailableError):
         broker.get_positions()
+
+
+def test_paper_broker_rejects_second_entry_same_symbol() -> None:
+    """Finding 2 Test A: Reject second ENTRY on existing position (no scale-in)."""
+    broker = PaperBroker()
+    req1 = BrokerOrderRequest(
+        client_order_id="AF-E-POS1",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=50,
+        role=OrderRole.ENTRY,
+    )
+    broker.submit_order(req1)
+    broker.simulate_full_fill("AF-E-POS1", Decimal("24500.00"))
+
+    # Verify initial position is 50
+    positions = broker.get_positions()
+    assert len(positions) == 1
+    assert positions[0].quantity == 50
+
+    # Attempt second ENTRY on same symbol
+    req2 = BrokerOrderRequest(
+        client_order_id="AF-E-POS2",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=25,
+        role=OrderRole.ENTRY,
+    )
+    with pytest.raises(BrokerPositionConflictError, match="Scale-in rejected"):
+        broker.submit_order(req2)
+
+    # Position remains strictly 50
+    positions_after = broker.get_positions()
+    assert len(positions_after) == 1
+    assert positions_after[0].quantity == 50
+
+
+def test_paper_broker_rejects_opposite_side_entry() -> None:
+    """Finding 2 Test B: Reject opposite-side ENTRY (no netting/reversal)."""
+    broker = PaperBroker()
+    req1 = BrokerOrderRequest(
+        client_order_id="AF-E-LONG50",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=50,
+        role=OrderRole.ENTRY,
+    )
+    broker.submit_order(req1)
+    broker.simulate_full_fill("AF-E-LONG50", Decimal("24500.00"))
+
+    # Attempt opposite-side ENTRY
+    req2 = BrokerOrderRequest(
+        client_order_id="AF-E-SHORT25",
+        symbol="NIFTY",
+        side=OrderSide.SELL,
+        quantity=25,
+        role=OrderRole.ENTRY,
+    )
+    with pytest.raises(BrokerPositionConflictError, match="Scale-in rejected"):
+        broker.submit_order(req2)
+
+    # Position remains strictly 50
+    positions = broker.get_positions()
+    assert len(positions) == 1
+    assert positions[0].quantity == 50
+
+
+def test_paper_broker_concurrent_duplicate_entries() -> None:
+    """Finding 2 Test C: Concurrent identical submissions produce exactly 1 order and position."""
+    broker = PaperBroker()
+    req = BrokerOrderRequest(
+        client_order_id="AF-E-CONCURRENT",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=50,
+        role=OrderRole.ENTRY,
+    )
+
+    results = []
+    errors = []
+
+    def worker() -> None:
+        try:
+            ord_res = broker.submit_order(req)
+            results.append(ord_res)
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(errors) == 0
+    assert len(results) == 10
+    # All 10 threads received the exact same broker_order_id
+    first_id = results[0].broker_order_id
+    assert all(r.broker_order_id == first_id for r in results)
+
+    # Fill the single order
+    broker.simulate_full_fill("AF-E-CONCURRENT", Decimal("24500.00"))
+    positions = broker.get_positions()
+    assert len(positions) == 1
+    assert positions[0].quantity == 50
+
+
+def test_paper_broker_valid_exit_reduces_quantity() -> None:
+    """Finding 2 Test D: Valid EXIT order reduces active position quantity."""
+    broker = PaperBroker()
+    req_entry = BrokerOrderRequest(
+        client_order_id="AF-E-ENTRY50",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=50,
+        role=OrderRole.ENTRY,
+    )
+    broker.submit_order(req_entry)
+    broker.simulate_full_fill("AF-E-ENTRY50", Decimal("24500.00"))
+
+    # Submit valid EXIT for 20 units
+    req_exit = BrokerOrderRequest(
+        client_order_id="AF-X-EXIT20",
+        symbol="NIFTY",
+        side=OrderSide.SELL,
+        quantity=20,
+        role=OrderRole.EXIT,
+    )
+    broker.submit_order(req_exit)
+    broker.simulate_full_fill("AF-X-EXIT20", Decimal("24600.00"))
+
+    positions = broker.get_positions()
+    assert len(positions) == 1
+    assert positions[0].quantity == 30
+    assert positions[0].status == "OPEN"
+
+
+def test_paper_broker_valid_stop_reduces_quantity() -> None:
+    """Finding 2 Test E: Valid STOP order reduces position to zero / FLAT."""
+    broker = PaperBroker()
+    req_entry = BrokerOrderRequest(
+        client_order_id="AF-E-ENTRY-STOP",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=50,
+        role=OrderRole.ENTRY,
+    )
+    broker.submit_order(req_entry)
+    broker.simulate_full_fill("AF-E-ENTRY-STOP", Decimal("24500.00"))
+
+    # Submit STOP for full 50 units
+    req_stop = BrokerOrderRequest(
+        client_order_id="AF-S-STOP50",
+        symbol="NIFTY",
+        side=OrderSide.SELL,
+        quantity=50,
+        role=OrderRole.STOP,
+    )
+    broker.submit_order(req_stop)
+    broker.simulate_full_fill("AF-S-STOP50", Decimal("24400.00"))
+
+    positions = broker.get_positions()
+    assert len(positions) == 1
+    assert positions[0].quantity == 0
+    assert positions[0].status == "FLAT"
+
+
+def test_paper_broker_exit_cannot_reduce_below_zero() -> None:
+    """Finding 2 Test F: Exit quantity exceeding position is rejected."""
+    broker = PaperBroker()
+    req_entry = BrokerOrderRequest(
+        client_order_id="AF-E-ENTRY-EXCESS",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=50,
+        role=OrderRole.ENTRY,
+    )
+    broker.submit_order(req_entry)
+    broker.simulate_full_fill("AF-E-ENTRY-EXCESS", Decimal("24500.00"))
+
+    # Attempt EXIT for 60 units (exceeds 50)
+    req_excess_exit = BrokerOrderRequest(
+        client_order_id="AF-X-EXCESS60",
+        symbol="NIFTY",
+        side=OrderSide.SELL,
+        quantity=60,
+        role=OrderRole.EXIT,
+    )
+    with pytest.raises(BrokerPositionConflictError, match="exceeds active position quantity"):
+        broker.submit_order(req_excess_exit)
+
+    # Position remains 50
+    positions = broker.get_positions()
+    assert len(positions) == 1
+    assert positions[0].quantity == 50

@@ -65,6 +65,11 @@ The interface contains zero vendor-specific API structures or proprietary networ
 The `PaperBroker` provides an in-memory, thread-safe execution venue for testing:
 - Tracks orders by both `client_order_id` and `broker_order_id`.
 - Rejects conflicting duplicates with `BrokerOrderCollisionError`.
+- **Single-Entry Model & Scale-In Prevention (V1 Invariant):**
+  - Strictly enforces at-most-one active entry order per instrument (`_position_opening_order`).
+  - Rejects any subsequent `ENTRY` order while a position is active (whether same-side scale-in or opposite-side flip) with `BrokerPositionConflictError`.
+  - Rejects `EXIT` or `STOP` orders when no position is open or if order quantity exceeds active position quantity.
+  - Rejects execution fills attempting to increase position beyond the opening entry order quantity.
 - Simulates acknowledgements, partial fills, full fills, rejections, and cancellations.
 - Tracks positions accurately from execution fills.
 - Supports deterministic simulation of broker unavailability and post-acceptance timeouts.
@@ -148,11 +153,21 @@ The `ColdBootReconciler` executes the strict 9-step alignment sequence:
 
 ---
 
-## 13. Protection Re-Verification
+## 13. Protection Re-Verification & Authoritative Broker Override
 
-Active positions are never assumed protected based on stale memory or local booleans:
-1. Resting stop-loss orders must be confirmed directly on the broker's active order book.
-2. If resting protection is absent, the reconciler flags `PROTECTION_UNCONFIRMED`, triggers the Phase 7 emergency protection protocol, and keeps the gate locked.
+Active positions are never assumed protected based on stale memory, cached state, or local boolean flags:
+1. **Local Flag Non-Authoritative:** Stale `local_pos.is_protected = True` is purely descriptive and has zero authority. Authoritative protection status is determined solely by validating resting stop orders on the broker's live order book.
+2. **Authoritative Matching Hierarchy:**
+   - **Symbol:** Order symbol must strictly match position symbol.
+   - **Direction:** Stop direction must oppose the position (`LONG` position requires `SELL` stop; `SHORT` position requires `BUY` stop).
+   - **Quantity:** Stop quantity must match the active position quantity exactly (partial protection is rejected).
+   - **Role & Type:** Order role must be `OrderRole.STOP` and order type must be `SL` or `SL-M`.
+   - **Active Status:** Order status must be active on the broker book (`ACKNOWLEDGED` or `PARTIALLY_FILLED`).
+   - **Protection ID Matching:** First attempts match by explicit `protection_order_id` if known locally; falls back to matching resting stop meeting all physical criteria.
+3. **Fail-Closed Gate Enforcement:** If an authoritative resting stop cannot be verified on the broker for an active position:
+   - `is_protection_confirmed` is set to `False`.
+   - Reconciler flags `ReconciliationAction.TRIGGER_EMERGENCY_PROTECTION` with `ReconciliationReasonCode.PROTECTION_UNCONFIRMED`.
+   - `ReconciliationGate` remains strictly `CLOSED` (`new_entries_allowed = False`), blocking all new order submissions until protection is established.
 
 ---
 

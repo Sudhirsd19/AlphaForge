@@ -6,10 +6,15 @@ FSM state restoration.
 """
 
 import threading
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from alphaforge.broker.interface import AbstractBroker
-from alphaforge.broker.models import BrokerOrderStatus, BrokerOrderType
+from alphaforge.broker.models import (
+    BrokerOrder,
+    BrokerOrderStatus,
+    BrokerOrderType,
+)
 from alphaforge.execution.enums import OrderSide, OrderState
 from alphaforge.execution.idempotency import OrderRole
 from alphaforge.execution.protection_watchdog import ProtectionWatchdog
@@ -62,6 +67,91 @@ class ColdBootReconciler:
     @property
     def gate(self) -> ReconciliationGate:
         return self._gate
+
+    @staticmethod
+    def _is_valid_resting_stop_for_position(
+        order: BrokerOrder,
+        pos_symbol: str,
+        pos_side: TradeSide,
+        pos_quantity: int,
+        protection_order_id: str | None = None,
+    ) -> bool:
+        """
+        Authoritatively determine if a broker order is a valid resting protective stop
+        for an active position using strict matching hierarchy.
+        """
+        if pos_quantity <= 0:
+            return False
+
+        # 1. Correct symbol
+        if order.symbol != pos_symbol:
+            return False
+
+        # 2. Strict resting active status: only ACKNOWLEDGED is a valid resting stop
+        if order.status != BrokerOrderStatus.ACKNOWLEDGED:
+            return False
+
+        # 3. Correct STOP role or type
+        if order.role != OrderRole.STOP and order.order_type != BrokerOrderType.STOP_LOSS:
+            return False
+
+        # 4. Strict directional correctness: LONG exits via SELL, SHORT exits via BUY
+        expected_side = OrderSide.SELL if pos_side == TradeSide.LONG else OrderSide.BUY
+        if order.side != expected_side:
+            return False
+
+        # 5. Exact quantity coverage (stop quantity must strictly equal active position quantity)
+        if order.quantity != pos_quantity:
+            return False
+
+        # 6. Explicit protection identity match if known locally
+        if protection_order_id is not None:
+            clean_prot_id = protection_order_id.strip().upper()
+            if order.client_order_id != clean_prot_id and order.broker_order_id != clean_prot_id:
+                return False
+
+        return True
+
+    def _find_confirmed_resting_stop(
+        self,
+        pos_symbol: str,
+        pos_side: TradeSide,
+        pos_quantity: int,
+        protection_order_id: str | None,
+        broker_open_orders: Sequence[BrokerOrder],
+    ) -> BrokerOrder | None:
+        """
+        Find an authoritative broker-side resting stop order protecting the active position.
+        Matches with explicit protection_order_id first if available; otherwise matches
+        by symbol, quantity, side, role, and active status.
+        """
+        if pos_quantity <= 0:
+            return None
+
+        # 1. First pass: try with explicit protection_order_id if specified
+        if protection_order_id is not None:
+            for ord in broker_open_orders:
+                if self._is_valid_resting_stop_for_position(
+                    order=ord,
+                    pos_symbol=pos_symbol,
+                    pos_side=pos_side,
+                    pos_quantity=pos_quantity,
+                    protection_order_id=protection_order_id,
+                ):
+                    return ord
+
+        # 2. Second pass: match without requiring specific protection_order_id
+        for ord in broker_open_orders:
+            if self._is_valid_resting_stop_for_position(
+                order=ord,
+                pos_symbol=pos_symbol,
+                pos_side=pos_side,
+                pos_quantity=pos_quantity,
+                protection_order_id=None,
+            ):
+                return ord
+
+        return None
 
     def reconcile(self, current_time: datetime | None = None) -> ReconciliationResult:
         """
@@ -328,17 +418,30 @@ class ColdBootReconciler:
             # Check for broker orders not known locally (Case C)
             for client_id, brk_ord in broker_orders_by_client_id.items():
                 if client_id not in local_orders:
-                    # Check if this broker order is a known resting stop protecting a local position
+                    # Check if this broker order is a confirmed resting stop
+                    # protecting an active position
                     is_known_stop = any(
-                        pos.symbol == brk_ord.symbol
-                        and pos.quantity > 0
-                        and (
-                            pos.protection_order_id in (client_id, brk_ord.broker_order_id)
-                            or brk_ord.role == OrderRole.STOP
-                            or brk_ord.order_type == BrokerOrderType.STOP_LOSS
+                        self._is_valid_resting_stop_for_position(
+                            order=brk_ord,
+                            pos_symbol=pos.symbol,
+                            pos_side=pos.side,
+                            pos_quantity=pos.quantity,
+                            protection_order_id=pos.protection_order_id,
                         )
                         for pos in local_positions.values()
                     )
+                    if not is_known_stop:
+                        is_known_stop = any(
+                            self._is_valid_resting_stop_for_position(
+                                order=brk_ord,
+                                pos_symbol=b_pos.symbol,
+                                pos_side=b_pos.side,
+                                pos_quantity=b_pos.quantity,
+                                protection_order_id=None,
+                            )
+                            for b_pos in broker_positions
+                        )
+
                     if is_known_stop:
                         order_records.append(
                             OrderReconciliationRecord(
@@ -362,7 +465,10 @@ class ColdBootReconciler:
                             broker_filled_quantity=brk_ord.filled_quantity,
                             action=ReconciliationAction.ESCALATE_MANUAL,
                             reason_code=ReconciliationReasonCode.UNKNOWN_EXTERNAL_ORDER,
-                            notes="Broker order has no corresponding local record",
+                            notes=(
+                                "Broker order has no corresponding local record "
+                                "and is not a valid resting stop"
+                            ),
                         )
                     )
 
@@ -408,6 +514,15 @@ class ColdBootReconciler:
                             and brk_pos.side == local_pos.side
                         ):
                             # Case D: Matching position
+                            confirmed_stop = self._find_confirmed_resting_stop(
+                                pos_symbol=sym,
+                                pos_side=brk_pos.side,
+                                pos_quantity=brk_pos.quantity,
+                                protection_order_id=local_pos.protection_order_id,
+                                broker_open_orders=broker_open_orders,
+                            )
+                            is_protected = confirmed_stop is not None
+
                             matched_count += 1
                             position_records.append(
                                 PositionReconciliationRecord(
@@ -417,13 +532,23 @@ class ColdBootReconciler:
                                     broker_quantity=brk_pos.quantity,
                                     action=ReconciliationAction.NONE,
                                     reason_code=ReconciliationReasonCode.POSITION_MATCHED,
-                                    is_protection_confirmed=local_pos.is_protected,
-                                    notes="Position quantities and directions match exactly",
+                                    is_protection_confirmed=is_protected,
+                                    notes=(
+                                        "Position quantities and directions match exactly. "
+                                        f"Protection confirmed: {is_protected}"
+                                    ),
                                 )
                             )
                         else:
                             # Case E: Position mismatch
                             mismatch_count += 1
+                            confirmed_stop = self._find_confirmed_resting_stop(
+                                pos_symbol=sym,
+                                pos_side=brk_pos.side,
+                                pos_quantity=brk_pos.quantity,
+                                protection_order_id=local_pos.protection_order_id,
+                                broker_open_orders=broker_open_orders,
+                            )
                             position_records.append(
                                 PositionReconciliationRecord(
                                     position_id=local_pos.position_id,
@@ -432,7 +557,7 @@ class ColdBootReconciler:
                                     broker_quantity=brk_pos.quantity,
                                     action=ReconciliationAction.ESCALATE_MANUAL,
                                     reason_code=ReconciliationReasonCode.POSITION_MISMATCH,
-                                    is_protection_confirmed=local_pos.is_protected,
+                                    is_protection_confirmed=confirmed_stop is not None,
                                     notes=(
                                         f"Position mismatch: Local "
                                         f"({local_pos.quantity}, {local_pos.side}) != "
@@ -451,6 +576,7 @@ class ColdBootReconciler:
                                 broker_quantity=0,
                                 action=ReconciliationAction.ESCALATE_MANUAL,
                                 reason_code=ReconciliationReasonCode.POSITION_MISMATCH,
+                                is_protection_confirmed=False,
                                 notes="Local position open but broker reports no position",
                             )
                         )
@@ -459,6 +585,13 @@ class ColdBootReconciler:
             for sym, brk_pos in broker_positions_by_symbol.items():
                 if brk_pos.quantity > 0 and sym not in local_positions:
                     unknown_count += 1
+                    confirmed_stop = self._find_confirmed_resting_stop(
+                        pos_symbol=sym,
+                        pos_side=brk_pos.side,
+                        pos_quantity=brk_pos.quantity,
+                        protection_order_id=None,
+                        broker_open_orders=broker_open_orders,
+                    )
                     position_records.append(
                         PositionReconciliationRecord(
                             position_id=brk_pos.position_id,
@@ -467,6 +600,7 @@ class ColdBootReconciler:
                             broker_quantity=brk_pos.quantity,
                             action=ReconciliationAction.ESCALATE_MANUAL,
                             reason_code=ReconciliationReasonCode.UNKNOWN_EXTERNAL_POSITION,
+                            is_protection_confirmed=confirmed_stop is not None,
                             notes="Broker position exists without any local record",
                         )
                     )
@@ -474,30 +608,22 @@ class ColdBootReconciler:
             # Step 8: Verify protection for active positions
             protection_hazard = False
             for pos_rec in position_records:
-                if pos_rec.local_quantity > 0:
-                    # Check if resting stop protection exists on broker book
-                    resting_stops = [
-                        ord
-                        for ord in broker_open_orders
-                        if ord.symbol == pos_rec.symbol
-                        and ord.role == OrderRole.STOP
-                        and ord.quantity == pos_rec.local_quantity
-                    ]
-                    if not resting_stops and not pos_rec.is_protection_confirmed:
-                        protection_hazard = True
-                        mismatch_count += 1
-                        # Flag protection hazard
-                        order_records.append(
-                            OrderReconciliationRecord(
-                                client_order_id=f"PROT-HAZARD-{pos_rec.symbol}",
-                                action=ReconciliationAction.TRIGGER_EMERGENCY_PROTECTION,
-                                reason_code=ReconciliationReasonCode.PROTECTION_UNCONFIRMED,
-                                notes=(
-                                    f"Active position in {pos_rec.symbol} "
-                                    "lacks confirmed resting stop protection"
-                                ),
-                            )
+                active_qty = max(pos_rec.local_quantity, pos_rec.broker_quantity)
+                if active_qty > 0 and not pos_rec.is_protection_confirmed:
+                    protection_hazard = True
+                    mismatch_count += 1
+                    # Flag protection hazard
+                    order_records.append(
+                        OrderReconciliationRecord(
+                            client_order_id=f"PROT-HAZARD-{pos_rec.symbol}",
+                            action=ReconciliationAction.TRIGGER_EMERGENCY_PROTECTION,
+                            reason_code=ReconciliationReasonCode.PROTECTION_UNCONFIRMED,
+                            notes=(
+                                f"Active position in {pos_rec.symbol} "
+                                "lacks confirmed resting stop protection on broker"
+                            ),
                         )
+                    )
 
             # Step 9: Resume only after successful reconciliation
             is_matched = mismatch_count == 0 and unknown_count == 0 and not protection_hazard

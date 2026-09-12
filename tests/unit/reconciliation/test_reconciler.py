@@ -383,3 +383,406 @@ def test_reconciler_align_fsm() -> None:
     reconciler.align_fsm(fsm, record)
     aligned_state: OrderState = fsm.current_state
     assert aligned_state == OrderState.ACKNOWLEDGED
+
+
+def test_reconciliation_stale_local_true_flag_no_broker_stop() -> None:
+    """Finding 1 Test A: Stale local is_protected=True must NOT bypass missing broker stop."""
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    # Broker has open position 50 NIFTY LONG, but ZERO resting stops
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id="POS-1",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24500.00"),
+            status="OPEN",
+        )
+    )
+
+    # Local position falsely claims is_protected=True
+    local_pos = LocalPositionRecord(
+        position_id="POS-1",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        quantity=50,
+        average_price=Decimal("24500.00"),
+        status="OPEN",
+        is_protected=True,
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={"NIFTY": local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status != ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is False
+    assert result.manual_escalation_required is True
+    assert gate.is_open is False
+    assert result.mismatch_count >= 1
+    # Verify emergency protection hazard record was created
+    assert any(
+        rec.action == ReconciliationAction.TRIGGER_EMERGENCY_PROTECTION
+        and rec.reason_code == ReconciliationReasonCode.PROTECTION_UNCONFIRMED
+        for rec in result.order_details
+    )
+
+
+def test_reconciliation_local_false_valid_broker_stop() -> None:
+    """Finding 1 Test B: Local is_protected=False is overridden by authoritative broker stop."""
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    # Broker position 50 NIFTY LONG
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id="POS-1",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24500.00"),
+            status="OPEN",
+        )
+    )
+    # Valid resting stop on broker
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id="BRK-STOP-1",
+            client_order_id="AF-S-STOP-1",
+            symbol="NIFTY",
+            side=OrderSide.SELL,
+            quantity=50,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.ACKNOWLEDGED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    # Local position has is_protected=False
+    local_pos = LocalPositionRecord(
+        position_id="POS-1",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        quantity=50,
+        average_price=Decimal("24500.00"),
+        status="OPEN",
+        is_protected=False,
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={"NIFTY": local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status == ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is True
+    assert gate.is_open is True
+    assert result.position_details[0].is_protection_confirmed is True
+
+
+def test_reconciliation_wrong_stop_direction() -> None:
+    """Finding 1 Test C: Stop with wrong side (BUY for LONG) is not valid protection."""
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id="POS-1",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24500.00"),
+            status="OPEN",
+        )
+    )
+    # Wrong direction: BUY stop for LONG position
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id="BRK-STOP-WRONG-SIDE",
+            client_order_id="AF-S-WRONG-SIDE",
+            symbol="NIFTY",
+            side=OrderSide.BUY,
+            quantity=50,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.ACKNOWLEDGED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    local_pos = LocalPositionRecord(
+        position_id="POS-1",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        quantity=50,
+        average_price=Decimal("24500.00"),
+        status="OPEN",
+        is_protected=True,
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={"NIFTY": local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status != ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is False
+    assert gate.is_open is False
+
+
+def test_reconciliation_partial_stop_quantity() -> None:
+    """Finding 1 Test D: Stop with partial quantity (25 for 50) is not fully protected."""
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id="POS-1",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24500.00"),
+            status="OPEN",
+        )
+    )
+    # Partial quantity: 25 instead of 50
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id="BRK-STOP-PARTIAL",
+            client_order_id="AF-S-PARTIAL",
+            symbol="NIFTY",
+            side=OrderSide.SELL,
+            quantity=25,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.ACKNOWLEDGED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    local_pos = LocalPositionRecord(
+        position_id="POS-1",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        quantity=50,
+        average_price=Decimal("24500.00"),
+        status="OPEN",
+        is_protected=True,
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={"NIFTY": local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status != ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is False
+    assert gate.is_open is False
+
+
+def test_reconciliation_wrong_symbol_stop() -> None:
+    """Finding 1 Test E: Stop for different symbol (BANKNIFTY for NIFTY) is not valid."""
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id="POS-1",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24500.00"),
+            status="OPEN",
+        )
+    )
+    # Wrong symbol: BANKNIFTY stop
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id="BRK-STOP-WRONG-SYM",
+            client_order_id="AF-S-WRONG-SYM",
+            symbol="BANKNIFTY",
+            side=OrderSide.SELL,
+            quantity=50,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.ACKNOWLEDGED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    local_pos = LocalPositionRecord(
+        position_id="POS-1",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        quantity=50,
+        average_price=Decimal("24500.00"),
+        status="OPEN",
+        is_protected=True,
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={"NIFTY": local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status != ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is False
+    assert gate.is_open is False
+
+
+def test_reconciliation_cancelled_or_rejected_stop() -> None:
+    """Finding 1 Test F: Cancelled or rejected stop order is not valid protection."""
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id="POS-1",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24500.00"),
+            status="OPEN",
+        )
+    )
+    # Cancelled stop order
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id="BRK-STOP-CANC",
+            client_order_id="AF-S-CANC",
+            symbol="NIFTY",
+            side=OrderSide.SELL,
+            quantity=50,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.CANCELLED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    local_pos = LocalPositionRecord(
+        position_id="POS-1",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        quantity=50,
+        average_price=Decimal("24500.00"),
+        status="OPEN",
+        is_protected=True,
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={"NIFTY": local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status != ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is False
+    assert gate.is_open is False
+
+
+def test_reconciliation_valid_resting_stop() -> None:
+    """Finding 1 Test G: Full matching resting stop validates protection and opens gate."""
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id="POS-1",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24500.00"),
+            status="OPEN",
+        )
+    )
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id="BRK-STOP-VALID",
+            client_order_id="AF-S-VALID",
+            symbol="NIFTY",
+            side=OrderSide.SELL,
+            quantity=50,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.ACKNOWLEDGED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    local_pos = LocalPositionRecord(
+        position_id="POS-1",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        quantity=50,
+        average_price=Decimal("24500.00"),
+        status="OPEN",
+        is_protected=False,
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={"NIFTY": local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status == ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is True
+    assert gate.is_open is True

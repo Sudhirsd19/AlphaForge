@@ -129,6 +129,12 @@ class BrokerOrderCollisionError(BrokerError):
     pass
 
 
+class BrokerPositionConflictError(BrokerError):
+    """Raised when an order violates position concurrency, scale-in, or size rules."""
+
+    pass
+
+
 class BrokerUnavailableError(BrokerError):
     """Raised when broker queries or submissions fail due to broker unavailability."""
 

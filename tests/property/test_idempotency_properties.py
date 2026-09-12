@@ -10,14 +10,16 @@ Proves mathematical invariants across randomized domains:
 
 import contextlib
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from alphaforge.broker.models import BrokerOrderRequest
+from alphaforge.broker.models import BrokerOrderRequest, BrokerPosition
 from alphaforge.broker.paper import PaperBroker
 from alphaforge.core.exceptions import (
+    BrokerPositionConflictError,
     IdempotencyCollisionError,
     ReconciliationError,
 )
@@ -33,6 +35,12 @@ from alphaforge.reconciliation.models import (
     ReconciliationReasonCode,
     ReconciliationResult,
     ReconciliationStatus,
+)
+from alphaforge.reconciliation.reconciler import ColdBootReconciler
+from alphaforge.reconciliation.state_store import (
+    InMemoryStateStore,
+    LocalPositionRecord,
+    RecoverySnapshot,
 )
 from alphaforge.risk.enums import TradeSide
 
@@ -172,3 +180,95 @@ def test_property_gate_blocks_on_any_mismatches(mismatches: int) -> None:
 
     assert not gate.is_open
     assert not gate.can_accept_new_entries()
+
+
+@given(
+    quantity=st.integers(min_value=1, max_value=500),
+    side=st.sampled_from([TradeSide.LONG, TradeSide.SHORT]),
+    symbol=st.sampled_from(["NIFTY", "BANKNIFTY", "FINNIFTY"]),
+)
+@settings(max_examples=35)
+def test_property_stale_local_protection_cannot_bypass_gate(
+    quantity: int,
+    side: TradeSide,
+    symbol: str,
+) -> None:
+    """Property: local is_protected==True without broker stop is strictly NOT PROTECTED."""
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    # Active position on broker without any resting stop
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id=f"POS-PROP-{symbol}",
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            average_price=Decimal("24000.00"),
+            status="OPEN",
+        )
+    )
+
+    # Local position falsely claims protection
+    local_pos = LocalPositionRecord(
+        position_id=f"POS-PROP-{symbol}",
+        symbol=symbol,
+        side=side,
+        quantity=quantity,
+        average_price=Decimal("24000.00"),
+        status="OPEN",
+        is_protected=True,
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={symbol: local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status != ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is False
+    assert gate.is_open is False
+    assert result.manual_escalation_required is True
+
+
+@given(
+    q1=st.integers(min_value=1, max_value=500),
+    q2=st.integers(min_value=1, max_value=500),
+)
+@settings(max_examples=35)
+def test_property_paper_broker_single_entry_invariant(q1: int, q2: int) -> None:
+    """Property: Existing position + additional ENTRY never increases position quantity."""
+    broker = PaperBroker()
+    req1 = BrokerOrderRequest(
+        client_order_id="AF-E-PROP-INIT",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=q1,
+        role=OrderRole.ENTRY,
+    )
+    broker.submit_order(req1)
+    broker.simulate_full_fill("AF-E-PROP-INIT", Decimal("24500.00"))
+
+    # Active position quantity is q1
+    assert broker.get_positions()[0].quantity == q1
+
+    # Any second ENTRY must fail closed with BrokerPositionConflictError
+    req2 = BrokerOrderRequest(
+        client_order_id="AF-E-PROP-SECOND",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=q2,
+        role=OrderRole.ENTRY,
+    )
+    with pytest.raises(BrokerPositionConflictError):
+        broker.submit_order(req2)
+
+    # Position quantity strictly remains q1
+    assert broker.get_positions()[0].quantity == q1

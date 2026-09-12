@@ -18,6 +18,7 @@ from alphaforge.broker.models import (
 from alphaforge.core.exceptions import (
     BrokerError,
     BrokerOrderCollisionError,
+    BrokerPositionConflictError,
     BrokerUnavailableError,
 )
 from alphaforge.execution.enums import OrderSide
@@ -36,6 +37,7 @@ class PaperBroker(AbstractBroker):
         self._orders_by_client_id: dict[str, BrokerOrder] = {}
         self._orders_by_broker_id: dict[str, BrokerOrder] = {}
         self._positions: dict[str, BrokerPosition] = {}
+        self._position_opening_order: dict[str, str] = {}
         self._is_available: bool = True
         self._simulate_timeout_on_submit: bool = False
         self._order_counter: int = 0
@@ -85,7 +87,33 @@ class PaperBroker(AbstractBroker):
                     f"{request.quantity}, {request.role})"
                 )
 
-            # 2. Assign unique deterministic broker order ID
+            # 2. Single-entry / no-scale-in and exit/stop size invariant checks
+            clean_sym = request.symbol.strip().upper()
+            existing_pos = self._positions.get(clean_sym)
+            has_active_pos = existing_pos is not None and existing_pos.quantity > 0
+
+            if request.role == OrderRole.ENTRY and has_active_pos:
+                assert existing_pos is not None
+                raise BrokerPositionConflictError(
+                    f"Scale-in rejected: Active position of {existing_pos.quantity} units "
+                    f"({existing_pos.side}) already exists for '{clean_sym}'. "
+                    "Single-entry model strictly enforced."
+                )
+
+            if request.role in (OrderRole.STOP, OrderRole.EXIT):
+                if not has_active_pos:
+                    raise BrokerPositionConflictError(
+                        f"Cannot submit {request.role} order for '{clean_sym}': "
+                        "No active position exists."
+                    )
+                assert existing_pos is not None
+                if request.quantity > existing_pos.quantity:
+                    raise BrokerPositionConflictError(
+                        f"{request.role} quantity ({request.quantity}) exceeds "
+                        f"active position quantity ({existing_pos.quantity}) for '{clean_sym}'."
+                    )
+
+            # 3. Assign unique deterministic broker order ID
             self._order_counter += 1
             broker_order_id = f"BRK-{self._order_counter:06d}"
             now = datetime.now(UTC)
@@ -306,6 +334,7 @@ class PaperBroker(AbstractBroker):
         """Inject a position into broker state for testing Case F reconciliation."""
         with self._lock:
             self._positions[position.symbol] = position
+            self._position_opening_order[position.symbol] = position.position_id
 
     def clear(self) -> None:
         """Reset broker state."""
@@ -313,6 +342,7 @@ class PaperBroker(AbstractBroker):
             self._orders_by_client_id.clear()
             self._orders_by_broker_id.clear()
             self._positions.clear()
+            self._position_opening_order.clear()
             self._is_available = True
             self._simulate_timeout_on_submit = False
             self._order_counter = 0
@@ -349,9 +379,24 @@ class PaperBroker(AbstractBroker):
                     average_price=fill_price,
                     status="OPEN",
                 )
+                self._position_opening_order[sym] = order.client_order_id
             else:
-                # Add to existing position
+                # Disallow scale-in from a different order
+                if self._position_opening_order.get(sym) != order.client_order_id:
+                    msg = (
+                        f"Scale-in rejected: Active position of {existing.quantity} units "
+                        f"already exists for '{sym}'."
+                    )
+                    raise BrokerPositionConflictError(msg)
+                # Disallow scale-in beyond original order quantity
                 total_qty = existing.quantity + fill_qty
+                if total_qty > order.quantity:
+                    msg = (
+                        f"Cumulative fill ({total_qty}) exceeds order quantity "
+                        f"({order.quantity}) for '{sym}'."
+                    )
+                    raise BrokerPositionConflictError(msg)
+
                 prev_notional = (existing.average_price or fill_price) * Decimal(existing.quantity)
                 curr_notional = fill_price * Decimal(fill_qty)
                 avg_p = (prev_notional + curr_notional) / Decimal(total_qty)
@@ -364,14 +409,27 @@ class PaperBroker(AbstractBroker):
                     status="OPEN",
                 )
         elif order.role in (OrderRole.STOP, OrderRole.EXIT):
-            if existing is not None:
-                new_qty = max(0, existing.quantity - fill_qty)
-                status = "OPEN" if new_qty > 0 else "FLAT"
-                self._positions[sym] = BrokerPosition(
-                    position_id=existing.position_id,
-                    symbol=sym,
-                    side=existing.side,
-                    quantity=new_qty,
-                    average_price=existing.average_price if new_qty > 0 else None,
-                    status=status,
+            if existing is None or existing.quantity == 0:
+                msg = (
+                    f"Cannot fill {order.role.value} order: No active position exists for '{sym}'."
                 )
+                raise BrokerPositionConflictError(msg)
+            if fill_qty > existing.quantity:
+                msg = (
+                    f"{order.role.value} fill quantity ({fill_qty}) exceeds active position "
+                    f"quantity ({existing.quantity}) for '{sym}'."
+                )
+                raise BrokerPositionConflictError(msg)
+
+            new_qty = existing.quantity - fill_qty
+            status = "OPEN" if new_qty > 0 else "FLAT"
+            self._positions[sym] = BrokerPosition(
+                position_id=existing.position_id,
+                symbol=sym,
+                side=existing.side,
+                quantity=new_qty,
+                average_price=existing.average_price if new_qty > 0 else None,
+                status=status,
+            )
+            if new_qty == 0:
+                self._position_opening_order.pop(sym, None)
