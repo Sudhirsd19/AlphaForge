@@ -5,6 +5,7 @@ Enforces strict schema validation, timezone-aware UTC timestamps, and cryptograp
 """
 
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -15,6 +16,62 @@ from alphaforge.core.exceptions import LedgerIntegrityError
 
 GENESIS_PREVIOUS_HASH = "GENESIS"
 _HEX_64_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+
+class FrozenDict(dict[str, Any]):
+    """
+    Recursively immutable dictionary for AuditEvent payloads.
+    Guarantees deep immutability:
+    - Item mutation, deletion, popping, clearing, updating, or setdefault raises TypeError.
+    - Nested dictionaries are recursively frozen into FrozenDict instances.
+    - Nested sequences (lists, sets, tuples) are recursively frozen into immutable tuples.
+    - Outer mutable objects modified after assignment cannot alter the frozen structure.
+    - Fully compatible with Pydantic serialization, JSON dumping, and canonical serialization.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__()
+        raw = dict(*args, **kwargs)
+        for k, v in raw.items():
+            super().__setitem__(str(k), self._freeze(v))
+
+    @classmethod
+    def _freeze(cls, v: Any) -> Any:
+        if isinstance(v, (dict, Mapping)):
+            return cls(v)
+        if isinstance(v, (list, tuple, set, frozenset)):
+            return tuple(cls._freeze(x) for x in v)
+        return v
+
+    def __setitem__(self, _key: str, _value: Any) -> None:
+        raise TypeError("FrozenDict is immutable; item assignment is forbidden")
+
+    def __delitem__(self, _key: str) -> None:
+        raise TypeError("FrozenDict is immutable; item deletion is forbidden")
+
+    def pop(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise TypeError("FrozenDict is immutable; pop() is forbidden")
+
+    def popitem(self) -> Any:
+        raise TypeError("FrozenDict is immutable; popitem() is forbidden")
+
+    def clear(self) -> None:
+        raise TypeError("FrozenDict is immutable; clear() is forbidden")
+
+    def update(self, *_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("FrozenDict is immutable; update() is forbidden")
+
+    def setdefault(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise TypeError("FrozenDict is immutable; setdefault() is forbidden")
+
+    def copy(self) -> "FrozenDict":
+        return self
+
+    def __copy__(self) -> "FrozenDict":
+        return self
+
+    def __deepcopy__(self, memo: Any) -> "FrozenDict":
+        return self
 
 
 class AuditEventType(StrEnum):
@@ -74,10 +131,19 @@ class AuditEvent(BaseModel):
     entity_id: str = Field(description="Unique domain entity identifier")
     correlation_id: str = Field(description="Forensic grouping identifier for logical lifecycle")
     causation_id: str = Field(description="Identifier of causal predecessor event or trigger")
-    payload: dict[str, Any] = Field(description="Deterministic event payload dictionary")
+    payload: Mapping[str, Any] = Field(description="Deterministic event payload dictionary")
     previous_event_hash: str = Field(description="SHA-256 hash of preceding event, or 'GENESIS'")
     event_hash: str = Field(description="SHA-256 canonical hash of this ledger entry")
     schema_version: int = Field(default=1, ge=1, description="Ledger event schema revision")
+
+    @field_validator("payload", mode="after")
+    @classmethod
+    def validate_immutable_payload(cls, v: Any) -> FrozenDict:
+        if isinstance(v, FrozenDict):
+            return v
+        if isinstance(v, Mapping):
+            return FrozenDict(v)
+        raise LedgerIntegrityError(f"Payload must be a mapping, got: {type(v)}")
 
     @field_validator("event_id", "entity_type", "entity_id", "correlation_id", "causation_id")
     @classmethod

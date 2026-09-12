@@ -7,6 +7,7 @@ Guarantees byte-level determinism across platforms and environments.
 
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
@@ -22,8 +23,8 @@ def canonicalize_value(val: Any) -> Any:
     - Decimals serialized as exact fixed-point string (never binary float).
     - Datetimes normalized to timezone-aware UTC ISO 8601 strings.
     - Enums converted to their string values.
-    - Dictionaries sorted recursively by stringified keys.
-    - Lists preserved in original element order, each element canonicalized.
+    - Dictionaries/Mappings sorted recursively by stringified keys.
+    - Lists/tuples preserved in original element order, each element canonicalized.
     """
     if isinstance(val, Decimal):
         # Format as fixed-point string to prevent scientific notation or float conversion
@@ -34,7 +35,7 @@ def canonicalize_value(val: Any) -> Any:
         return val.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     if isinstance(val, Enum):
         return val.value
-    if isinstance(val, dict):
+    if isinstance(val, (dict, Mapping)):
         return {
             str(k): canonicalize_value(v)
             for k, v in sorted(val.items(), key=lambda item: str(item[0]))
@@ -68,7 +69,7 @@ def compute_logical_event_id(
     entity_id: str,
     correlation_id: str,
     causation_id: str,
-    payload: dict[str, Any],
+    payload: Mapping[str, Any],
     schema_version: int = 1,
 ) -> str:
     """
@@ -103,7 +104,7 @@ def compute_event_hash(
     entity_id: str,
     correlation_id: str,
     causation_id: str,
-    payload: dict[str, Any],
+    payload: Mapping[str, Any],
     previous_event_hash: str,
 ) -> str:
     """

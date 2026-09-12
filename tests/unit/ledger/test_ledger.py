@@ -15,10 +15,14 @@ from alphaforge.core.exceptions import (
     LedgerCorruptionError,
     LedgerIntegrityError,
 )
+from alphaforge.execution.enums import OrderState
+from alphaforge.execution.state_machine import OrderStateMachine
+from alphaforge.ledger.adapters import OrderFSMTransitionAuditor
 from alphaforge.ledger.ledger import AuditLedger
 from alphaforge.ledger.models import AuditEventType
 from alphaforge.ledger.serialization import compute_logical_event_id
 from alphaforge.ledger.storage import FileLedgerStorage, InMemoryLedgerStorage
+from alphaforge.risk.enums import TradeSide
 
 
 def test_audit_ledger_genesis_and_chaining() -> None:
@@ -472,3 +476,235 @@ def test_audit_ledger_concurrency_stress(tmp_path: Path) -> None:
     res = ledger.verify_chain()
     assert res.valid is True
     assert res.event_count == total_ops
+
+
+# =========================================================================
+# SECTION 28: FSM CAUSATION LINEAGE TESTS (FINDING 2)
+# =========================================================================
+
+
+def test_fsm_auditor_causal_lineage_first_event_origin() -> None:
+    """Verify first FSM event gets deterministic origin causation (signal_id or ORIGIN marker)."""
+    storage = InMemoryLedgerStorage()
+    ledger = AuditLedger(storage)
+    auditor = OrderFSMTransitionAuditor(ledger)
+
+    # Case A: Order with signal_id
+    fsm_with_sig = OrderStateMachine(
+        order_id="ORD-SIG-01",
+        symbol="NIFTY26MARFUT",
+        side=TradeSide.LONG,
+        quantity=50,
+        signal_id="SIG-ALPHA-101",
+        transition_listener=auditor.on_transition,
+    )
+    fsm_with_sig.transition(OrderState.VALIDATED, reason="Passed validation")
+    events_sig = ledger.get_events_by_entity("ORDER", "ORD-SIG-01")
+    assert len(events_sig) == 1
+    assert events_sig[0].causation_id == "SIG-ALPHA-101"
+    assert events_sig[0].correlation_id == "SIG-ALPHA-101"
+
+    # Case B: Order without signal_id
+    fsm_no_sig = OrderStateMachine(
+        order_id="ORD-MANUAL-01",
+        symbol="NIFTY26MARFUT",
+        side=TradeSide.LONG,
+        quantity=50,
+        transition_listener=auditor.on_transition,
+    )
+    fsm_no_sig.transition(OrderState.VALIDATED, reason="Passed validation")
+    events_manual = ledger.get_events_by_entity("ORDER", "ORD-MANUAL-01")
+    assert len(events_manual) == 1
+    assert events_manual[0].causation_id == "ORIGIN:ORD-MANUAL-01"
+    assert events_manual[0].correlation_id == "ORD-MANUAL-01"
+
+    # Case C: Explicitly registered causation
+    auditor.register_order_causation("ORD-CUSTOM-01", "CUSTOM-UPSTREAM-TX")
+    fsm_custom = OrderStateMachine(
+        order_id="ORD-CUSTOM-01",
+        symbol="NIFTY26MARFUT",
+        side=TradeSide.LONG,
+        quantity=50,
+        transition_listener=auditor.on_transition,
+    )
+    fsm_custom.transition(OrderState.VALIDATED, reason="Passed validation")
+    events_custom = ledger.get_events_by_entity("ORDER", "ORD-CUSTOM-01")
+    assert len(events_custom) == 1
+    assert events_custom[0].causation_id == "CUSTOM-UPSTREAM-TX"
+
+
+def test_fsm_auditor_causal_lineage_sequential_transitions() -> None:
+    """Verify second and subsequent transitions reference the immediately preceding event_id."""
+    storage = InMemoryLedgerStorage()
+    ledger = AuditLedger(storage)
+    auditor = OrderFSMTransitionAuditor(ledger)
+
+    fsm = OrderStateMachine(
+        order_id="ORD-CHAIN-01",
+        symbol="NIFTY26MARFUT",
+        side=TradeSide.LONG,
+        quantity=50,
+        signal_id="SIG-999",
+        transition_listener=auditor.on_transition,
+    )
+
+    # Transition 1: VALIDATED
+    fsm.transition(OrderState.VALIDATED, reason="Validated")
+    ev1 = ledger.get_events_by_entity("ORDER", "ORD-CHAIN-01")[0]
+    assert ev1.causation_id == "SIG-999"
+
+    # Transition 2: SUBMITTED -> causation_id must be ev1.event_id
+    fsm.transition(OrderState.SUBMITTED, reason="Submitted to broker")
+    ev2 = ledger.get_events_by_entity("ORDER", "ORD-CHAIN-01")[1]
+    assert ev2.causation_id == ev1.event_id
+    assert auditor.get_last_event_id("ORD-CHAIN-01") == ev2.event_id
+
+    # Transition 3: ACKNOWLEDGED -> causation_id must be ev2.event_id
+    fsm.transition(OrderState.ACKNOWLEDGED, reason="Broker acknowledged")
+    ev3 = ledger.get_events_by_entity("ORDER", "ORD-CHAIN-01")[2]
+    assert ev3.causation_id == ev2.event_id
+
+    # Transition 4: FILLED -> causation_id must be ev3.event_id
+    fsm.transition(OrderState.FILLED, reason="Executed")
+    ev4 = ledger.get_events_by_entity("ORDER", "ORD-CHAIN-01")[3]
+    assert ev4.causation_id == ev3.event_id
+
+
+def test_fsm_auditor_separate_orders_do_not_share_lineage() -> None:
+    """Verify interleaved transitions for multiple orders maintain isolated causal chains."""
+    storage = InMemoryLedgerStorage()
+    ledger = AuditLedger(storage)
+    auditor = OrderFSMTransitionAuditor(ledger)
+
+    fsm_a = OrderStateMachine(
+        order_id="ORD-AAA",
+        symbol="NIFTY26MARFUT",
+        side=TradeSide.LONG,
+        quantity=50,
+        signal_id="SIG-AAA",
+        transition_listener=auditor.on_transition,
+    )
+    fsm_b = OrderStateMachine(
+        order_id="ORD-BBB",
+        symbol="BANKNIFTY26MARFUT",
+        side=TradeSide.SHORT,
+        quantity=25,
+        signal_id="SIG-BBB",
+        transition_listener=auditor.on_transition,
+    )
+
+    # Interleaved operations
+    fsm_a.transition(OrderState.VALIDATED)
+    fsm_b.transition(OrderState.VALIDATED)
+    fsm_a.transition(OrderState.SUBMITTED)
+    fsm_b.transition(OrderState.SUBMITTED)
+    fsm_a.transition(OrderState.ACKNOWLEDGED)
+    fsm_b.transition(OrderState.ACKNOWLEDGED)
+
+    events_a = ledger.get_events_by_entity("ORDER", "ORD-AAA")
+    events_b = ledger.get_events_by_entity("ORDER", "ORD-BBB")
+
+    assert len(events_a) == 3
+    assert len(events_b) == 3
+
+    # Order A lineage
+    assert events_a[0].causation_id == "SIG-AAA"
+    assert events_a[1].causation_id == events_a[0].event_id
+    assert events_a[2].causation_id == events_a[1].event_id
+
+    # Order B lineage
+    assert events_b[0].causation_id == "SIG-BBB"
+    assert events_b[1].causation_id == events_b[0].event_id
+    assert events_b[2].causation_id == events_b[1].event_id
+
+    # Cross-contamination check
+    event_ids_a = {ev.event_id for ev in events_a}
+    event_ids_b = {ev.event_id for ev in events_b}
+    assert event_ids_a.isdisjoint(event_ids_b)
+    for ev in events_a:
+        assert ev.causation_id not in event_ids_b
+    for ev in events_b:
+        assert ev.causation_id not in event_ids_a
+
+
+def test_fsm_auditor_reattaching_adapter_restores_lineage_from_ledger() -> None:
+    """Verify fresh auditor instance checks ledger history and resumes causal chain seamlessly."""
+    storage = InMemoryLedgerStorage()
+    ledger = AuditLedger(storage)
+
+    auditor_1 = OrderFSMTransitionAuditor(ledger)
+    fsm = OrderStateMachine(
+        order_id="ORD-RESTART-01",
+        symbol="NIFTY26MARFUT",
+        side=TradeSide.LONG,
+        quantity=50,
+        signal_id="SIG-RESTART",
+        transition_listener=auditor_1.on_transition,
+    )
+
+    fsm.transition(OrderState.VALIDATED)
+    fsm.transition(OrderState.SUBMITTED)
+    events_before = ledger.get_events_by_entity("ORDER", "ORD-RESTART-01")
+    assert len(events_before) == 2
+    last_event_before = events_before[-1]
+
+    # Create a completely fresh auditor instance without prior in-memory state
+    auditor_2 = OrderFSMTransitionAuditor(ledger)
+    assert auditor_2.get_last_event_id("ORD-RESTART-01") is None
+
+    # Attach fresh auditor and perform next transition
+    fsm._transition_listener = auditor_2.on_transition
+    fsm.transition(OrderState.ACKNOWLEDGED)
+
+    events_after = ledger.get_events_by_entity("ORDER", "ORD-RESTART-01")
+    assert len(events_after) == 3
+    new_event = events_after[-1]
+
+    # Fresh auditor recovered the previous event_id from ledger queries
+    assert new_event.causation_id == last_event_before.event_id
+
+
+def test_fsm_auditor_concurrent_transitions_remain_isolated() -> None:
+    """Verify concurrent transitions across distinct orders preserve strict lineage isolation."""
+    storage = InMemoryLedgerStorage()
+    ledger = AuditLedger(storage)
+    auditor = OrderFSMTransitionAuditor(ledger)
+
+    num_orders = 10
+    errors: list[Exception] = []
+
+    def run_order_lifecycle(idx: int) -> None:
+        try:
+            ord_id = f"CONCUR-ORD-{idx:02d}"
+            sig_id = f"SIG-{idx:02d}"
+            fsm = OrderStateMachine(
+                order_id=ord_id,
+                symbol="NIFTY26MARFUT",
+                side=TradeSide.LONG,
+                quantity=50,
+                signal_id=sig_id,
+                transition_listener=auditor.on_transition,
+            )
+            fsm.transition(OrderState.VALIDATED)
+            fsm.transition(OrderState.SUBMITTED)
+            fsm.transition(OrderState.ACKNOWLEDGED)
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=run_order_lifecycle, args=(i,)) for i in range(num_orders)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(errors) == 0
+    assert len(ledger) == num_orders * 3
+
+    for i in range(num_orders):
+        ord_id = f"CONCUR-ORD-{i:02d}"
+        sig_id = f"SIG-{i:02d}"
+        events = ledger.get_events_by_entity("ORDER", ord_id)
+        assert len(events) == 3
+        assert events[0].causation_id == sig_id
+        assert events[1].causation_id == events[0].event_id
+        assert events[2].causation_id == events[1].event_id

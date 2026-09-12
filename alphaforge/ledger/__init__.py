@@ -12,6 +12,7 @@ from alphaforge.ledger.models import (
     GENESIS_PREVIOUS_HASH,
     AuditEvent,
     AuditEventType,
+    FrozenDict,
     LedgerVerificationResult,
 )
 from alphaforge.ledger.serialization import (
@@ -32,6 +33,7 @@ __all__ = [
     "AuditEventType",
     "AuditLedger",
     "FileLedgerStorage",
+    "FrozenDict",
     "GENESIS_PREVIOUS_HASH",
     "InMemoryLedgerStorage",
     "LedgerVerificationResult",

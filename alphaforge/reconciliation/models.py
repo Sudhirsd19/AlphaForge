@@ -159,3 +159,17 @@ class ReconciliationResult(BaseModel):
         if v.tzinfo is None or v.utcoffset() != UTC.utcoffset(v):
             raise OrderValidationError(f"Timestamp must be timezone-aware UTC: {v}")
         return v
+
+
+class ReconciliationObserver:
+    """
+    Non-invasive observer protocol/interface for cold-boot and runtime reconciliation events.
+    """
+
+    def on_reconciliation_start(self, reconciliation_id: str) -> None:
+        """Invoked when a reconciliation pass begins."""
+        ...
+
+    def on_reconciliation_result(self, result: ReconciliationResult) -> None:
+        """Invoked when a reconciliation pass completes."""
+        ...

@@ -6,7 +6,7 @@ FSM state restoration.
 """
 
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
 from alphaforge.broker.interface import AbstractBroker
@@ -24,6 +24,7 @@ from alphaforge.reconciliation.models import (
     OrderReconciliationRecord,
     PositionReconciliationRecord,
     ReconciliationAction,
+    ReconciliationObserver,
     ReconciliationReasonCode,
     ReconciliationResult,
     ReconciliationStatus,
@@ -48,11 +49,19 @@ class ColdBootReconciler:
         state_store: AtomicStateStore | InMemoryStateStore,
         gate: ReconciliationGate,
         watchdog: ProtectionWatchdog | None = None,
+        reconciliation_listener: Callable[[ReconciliationResult], None]
+        | ReconciliationObserver
+        | None = None,
+        on_start_listener: Callable[[str], None] | None = None,
     ) -> None:
         self._broker = broker
         self._state_store = state_store
         self._gate = gate
         self._watchdog = watchdog if watchdog is not None else ProtectionWatchdog()
+        self._reconciliation_listener = reconciliation_listener
+        self._on_start_listener = on_start_listener
+        self._last_audit_error: Exception | None = None
+        self._last_result: ReconciliationResult | None = None
         self._lock = threading.RLock()
         self._pass_counter: int = 0
 
@@ -67,6 +76,29 @@ class ColdBootReconciler:
     @property
     def gate(self) -> ReconciliationGate:
         return self._gate
+
+    @property
+    def last_audit_error(self) -> Exception | None:
+        return self._last_audit_error
+
+    @property
+    def last_result(self) -> ReconciliationResult | None:
+        return self._last_result
+
+    def _notify_start(self, recon_id: str) -> None:
+        if self._on_start_listener is not None:
+            self._on_start_listener(recon_id)
+        elif self._reconciliation_listener is not None and hasattr(
+            self._reconciliation_listener, "on_reconciliation_start"
+        ):
+            self._reconciliation_listener.on_reconciliation_start(recon_id)
+
+    def _notify_result(self, result: ReconciliationResult) -> None:
+        if self._reconciliation_listener is not None:
+            if hasattr(self._reconciliation_listener, "on_reconciliation_result"):
+                self._reconciliation_listener.on_reconciliation_result(result)
+            elif callable(self._reconciliation_listener):
+                self._reconciliation_listener(result)
 
     @staticmethod
     def _is_valid_resting_stop_for_position(
@@ -182,6 +214,14 @@ class ColdBootReconciler:
             now = current_time if current_time is not None else datetime.now(UTC)
             recon_id = f"RECON-{int(now.timestamp())}-{self._pass_counter:04d}"
 
+            audit_exc: Exception | None = None
+            self._last_audit_error = None
+            try:
+                self._notify_start(recon_id)
+            except Exception as exc:
+                self._last_audit_error = exc
+                audit_exc = exc
+
             # Step 7 (Pre-emptive): Keep new entries strictly BLOCKED during reconciliation
             self._gate.close("Reconciliation in progress")
 
@@ -210,6 +250,15 @@ class ColdBootReconciler:
                     position_details=(),
                 )
                 self._gate.close("Reconciliation failed: Broker unavailable")
+                self._last_result = result
+                try:
+                    self._notify_result(result)
+                except Exception as exc:
+                    self._last_audit_error = exc
+                    if audit_exc is None:
+                        audit_exc = exc
+                if audit_exc is not None:
+                    raise audit_exc
                 return result
 
             broker_open_orders = self._broker.get_open_orders()
@@ -683,11 +732,23 @@ class ColdBootReconciler:
                 position_details=tuple(position_records),
             )
 
+            self._last_result = result
+
             # Open gate ONLY if 100% matched and safe
             if new_entries_allowed:
                 self._gate.open(result)
             else:
                 self._gate.close(f"Reconciliation {status.value}: {reason_code.value}")
+
+            try:
+                self._notify_result(result)
+            except Exception as exc:
+                self._last_audit_error = exc
+                if audit_exc is None:
+                    audit_exc = exc
+
+            if audit_exc is not None:
+                raise audit_exc
 
             return result
 

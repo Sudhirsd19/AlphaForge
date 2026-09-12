@@ -5,6 +5,7 @@ Provides thread-safe sequence allocation, event-level idempotency, and fail-clos
 """
 
 import threading
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -89,7 +90,7 @@ class AuditLedger:
         entity_id: str,
         correlation_id: str,
         causation_id: str,
-        payload: dict[str, Any],
+        payload: Mapping[str, Any],
         event_timestamp: datetime | None = None,
         schema_version: int = 1,
     ) -> AuditEvent:

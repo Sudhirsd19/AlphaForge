@@ -69,13 +69,19 @@ class AuditEvent(BaseModel):
     entity_id: str = Field(description="Target entity identifier")
     correlation_id: str = Field(description="Trace ID spanning full lifecycle")
     causation_id: str = Field(description="Direct causal trigger of this event")
-    payload: dict[str, Any] = Field(description="Event data payload")
+    payload: Mapping[str, Any] = Field(description="Deeply immutable payload (FrozenDict)")
     previous_event_hash: str = Field(description="'GENESIS' or 64-hex parent hash")
     event_hash: str = Field(description="SHA-256 digest of entire canonical record")
 ```
 
-### Model Invariants:
+### Model Invariants & Deep Immutability:
 - `frozen=True` and `extra="forbid"`: Committed records cannot be mutated.
+- **Deep Immutability via `FrozenDict`:** Unlike standard Pydantic frozen models where nested dictionaries and lists remain mutable at runtime, `AuditEvent.payload` is automatically converted via a Pydantic field validator into a recursive `FrozenDict`:
+  - Any attempt to set, delete, update, pop, or clear an item raises `TypeError`.
+  - Nested mappings are recursively wrapped into nested `FrozenDict` instances.
+  - Nested sequences (lists, sets) are recursively converted into immutable `tuple` instances.
+  - Copying operations (`copy()`, `copy.copy()`, `copy.deepcopy()`) return `self`.
+  - External mutation of input dictionaries or lists after event append has zero effect on the committed record.
 - All timestamps enforce timezone-aware UTC (`datetime.now(UTC)`).
 - `event_id` must follow `EVT-[0-9A-F]{24}`.
 - `previous_event_hash` must be `"GENESIS"` (for sequence 1) or a 64-character lowercase hexadecimal string.
@@ -201,11 +207,26 @@ AlphaForge provides observer adapters to integrate existing Phase 7 and Phase 8 
 ### 1. `OrderFSMTransitionAuditor`:
 - Attaches to `OrderStateMachine(..., transition_listener=auditor.on_transition)`.
 - Translates `TransitionEvent` into `AuditEventType` without modifying FSM transition legality.
-- **Audit Failure Isolation:** If audit recording raises an exception, the FSM state is already committed. The failure is recorded in `auditor.last_audit_error` and re-raised for application logging without corrupting or rolling back legal execution states.
+- **Deterministic Causal Lineage:** Every transition for an order maintains an unbroken causal chain:
+  - **Initial Transition:** If a signal ID is present, `causation_id = event.signal_id`. Otherwise, a deterministic origin marker `f"ORIGIN:{order_key}"` or an explicitly registered upstream causation is assigned. Never uses pseudo-random UUIDs.
+  - **Subsequent Transitions:** `causation_id` is assigned the `event_id` of the immediately preceding `AuditEvent` for that order (`causation_id(event[n]) == event_id(event[n-1])`).
+  - **Restart / Reattachment Resilience:** If the auditor is reattached or restarted with empty in-memory tracking, it queries the ledger's existing historical events for that order to seamlessly recover the predecessor `event_id`.
+- **Audit Failure Isolation:** If audit recording raises an exception, the operational FSM state transition is already committed. The error is captured in `auditor.last_audit_error` and re-raised to surface to the application layer.
 
-### 2. `ReconciliationAuditor`:
-- Translates `ReconciliationResult` from Phase 8 cold-boot checks into `RECONCILIATION_STARTED`, `RECONCILIATION_MATCHED`, or `RECONCILIATION_MISMATCH`.
-- If an unconfirmed protection hazard is present, automatically records `PROTECTION_UNCONFIRMED` and `EMERGENCY_PROTECTION_TRIGGERED` audit events.
+### 2. `ReconciliationAuditor` & `ColdBootReconciler` Integration:
+- Implements the `ReconciliationObserver` protocol (`on_reconciliation_start(recon_id)` and `on_reconciliation_result(result)`).
+- `ColdBootReconciler` accepts an optional `reconciliation_listener` (either a callable or a `ReconciliationObserver`).
+- **Execution Flow:**
+  1. `ColdBootReconciler.reconcile()` emits `on_reconciliation_start(recon_id)` -> records `RECONCILIATION_STARTED`.
+  2. Phase 8 operational reconciliation logic executes to completion (querying broker, comparing state, verifying resting stops, calculating `ReconciliationResult`).
+  3. Gate is opened or closed strictly according to Phase 8 rules (`gate.open(result)` or `gate.close(...)`).
+  4. `reconciler.last_result` is set.
+  5. `_notify_result(result)` is invoked -> records `RECONCILIATION_MATCHED`, `RECONCILIATION_MISMATCH`, `RECONCILIATION_FAILED`, or `MANUAL_ESCALATION`.
+  6. If a protection hazard is detected, automatically appends `PROTECTION_UNCONFIRMED` and `EMERGENCY_PROTECTION_TRIGGERED` audit events in an unbroken causal chain.
+- **Strict Audit Failure Isolation:** If the audit listener fails (e.g. storage error):
+  - The reconciliation decision and result remain strictly as calculated by Phase 8.
+  - Gate open/closed status is never rolled back or modified.
+  - The audit exception is captured in `reconciler.last_audit_error` and re-raised so failure never silently disappears.
 
 ---
 

@@ -11,6 +11,8 @@ P7:  Sequence integrity (valid appends -> strictly contiguous 1..N sequence numb
 P8:  Append-only invariant (committed events cannot be altered or overwritten)
 P9:  Idempotent append (re-submitting identical event -> returns existing record)
 P10: Conflicting event identity (same event_id with conflicting payload -> rejected)
+P11: Deep immutability preservation (no external reference alters committed event payload)
+P12: FSM causal lineage monotonicity (causation_id(event[n]) == event_id(event[n-1]))
 """
 
 from datetime import UTC, datetime, timedelta
@@ -23,10 +25,14 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from alphaforge.core.exceptions import LedgerIntegrityError
+from alphaforge.execution.enums import OrderState
+from alphaforge.execution.state_machine import OrderStateMachine
+from alphaforge.ledger.adapters import OrderFSMTransitionAuditor
 from alphaforge.ledger.ledger import AuditLedger
 from alphaforge.ledger.models import (
     AuditEvent,
     AuditEventType,
+    FrozenDict,
 )
 from alphaforge.ledger.serialization import (
     canonical_json,
@@ -34,6 +40,7 @@ from alphaforge.ledger.serialization import (
     compute_logical_event_id,
 )
 from alphaforge.ledger.storage import InMemoryLedgerStorage
+from alphaforge.risk.enums import TradeSide
 
 # ---------------------------------------------------------------------------
 # Strategies
@@ -552,3 +559,158 @@ def test_p10_conflicting_event_identity_rejected(
             causation_id=caus_id,
             payload=pld2,
         )
+
+
+# ---------------------------------------------------------------------------
+# P11: Deep Immutability Preservation
+# ---------------------------------------------------------------------------
+@given(
+    ev_type=event_type_strategy,
+    ent_type=valid_identifier,
+    ent_id=valid_identifier,
+    corr_id=valid_identifier,
+    caus_id=valid_identifier,
+    pld=payload_strategy,
+)
+@settings(max_examples=30)
+def test_p11_deep_immutability_preservation(
+    ev_type: AuditEventType,
+    ent_type: str,
+    ent_id: str,
+    corr_id: str,
+    caus_id: str,
+    pld: dict[str, Any],
+) -> None:
+    """P11: Deep immutability: external mutations cannot alter committed events."""
+    storage = InMemoryLedgerStorage()
+    ledger = AuditLedger(storage)
+
+    # Wrap in nested structure to stress deep immutability
+    nested_input: dict[str, Any] = {
+        "scalar_map": dict(pld),
+        "nested_dict": {"inner_k": "inner_v", "deeper": {"deep_num": 42}},
+        "nested_list": [1, 2, [3, 4]],
+    }
+    expected_canonical = canonical_json(nested_input)
+
+    ev = ledger.append(
+        event_type=ev_type,
+        entity_type=ent_type,
+        entity_id=ent_id,
+        correlation_id=corr_id,
+        causation_id=caus_id,
+        payload=nested_input,
+    )
+
+    # Attempt external mutations on the original dictionaries and lists
+    nested_input["new_key"] = "leak"
+    nested_input["nested_dict"]["inner_k"] = "mutated"
+    nested_input["nested_dict"]["deeper"]["deep_num"] = 9999
+    nested_input["nested_list"].append(5)
+    nested_input["nested_list"][2].append(99)
+
+    # Verify committed event is FrozenDict and matches original canonical json
+    assert isinstance(ev.payload, FrozenDict)
+    assert canonical_json(ev.payload) == expected_canonical
+    assert "new_key" not in ev.payload
+    assert ev.payload["nested_dict"]["inner_k"] == "inner_v"
+    assert ev.payload["nested_dict"]["deeper"]["deep_num"] == 42
+    assert ev.payload["nested_list"] == (1, 2, (3, 4))
+
+    # Verify attempting to mutate event.payload directly raises TypeError
+    with pytest.raises(TypeError):
+        ev.payload["direct_tamper"] = "fail"
+
+    with pytest.raises(TypeError):
+        ev.payload["nested_dict"]["inner_k"] = "fail"
+
+
+# ---------------------------------------------------------------------------
+# P12: FSM Causal Lineage Monotonicity
+# ---------------------------------------------------------------------------
+_VALID_FSM_TRANSITIONS = [
+    # Path A: Normal full lifecycle
+    [
+        OrderState.VALIDATED,
+        OrderState.SUBMITTED,
+        OrderState.ACKNOWLEDGED,
+        OrderState.FILLED,
+        OrderState.PROTECTION_PENDING,
+        OrderState.PROTECTED,
+        OrderState.EXIT_PENDING,
+        OrderState.CLOSED,
+    ],
+    # Path B: Broker rejection after submission
+    [OrderState.VALIDATED, OrderState.SUBMITTED, OrderState.REJECTED],
+    # Path C: Cancellation after ack
+    [OrderState.VALIDATED, OrderState.SUBMITTED, OrderState.ACKNOWLEDGED, OrderState.CANCELLED],
+    # Path D: Partial fill then full fill
+    [
+        OrderState.VALIDATED,
+        OrderState.SUBMITTED,
+        OrderState.ACKNOWLEDGED,
+        OrderState.PARTIALLY_FILLED,
+        OrderState.FILLED,
+        OrderState.PROTECTION_PENDING,
+        OrderState.PROTECTED,
+        OrderState.EXIT_PENDING,
+        OrderState.CLOSED,
+    ],
+    # Path E: Unknown -> Reconciling -> Ack -> Cancelled
+    [
+        OrderState.VALIDATED,
+        OrderState.SUBMITTED,
+        OrderState.UNKNOWN,
+        OrderState.RECONCILING,
+        OrderState.ACKNOWLEDGED,
+        OrderState.CANCELLED,
+    ],
+]
+
+
+@given(
+    order_id=valid_identifier,
+    signal_id=valid_identifier,
+    path_idx=st.integers(min_value=0, max_value=len(_VALID_FSM_TRANSITIONS) - 1),
+)
+@settings(max_examples=30)
+def test_p12_fsm_causal_lineage_monotonicity(
+    order_id: str,
+    signal_id: str,
+    path_idx: int,
+) -> None:
+    """P12: For valid audited transition paths, causation_id(event[n]) == event_id(event[n-1])."""
+    storage = InMemoryLedgerStorage()
+    ledger = AuditLedger(storage)
+    auditor = OrderFSMTransitionAuditor(ledger)
+
+    clean_order_id = f"ORD_{order_id}"
+    clean_sig_id = f"SIG_{signal_id}"
+
+    fsm = OrderStateMachine(
+        order_id=clean_order_id,
+        symbol="NIFTY26MARFUT",
+        side=TradeSide.LONG,
+        quantity=50,
+        signal_id=clean_sig_id,
+        transition_listener=auditor.on_transition,
+    )
+
+    path = _VALID_FSM_TRANSITIONS[path_idx]
+    now = datetime.now(UTC)
+
+    for i, target_state in enumerate(path):
+        ts = now + timedelta(seconds=i + 1)
+        fill_qty = 25 if target_state == OrderState.PARTIALLY_FILLED else None
+        fsm.transition(target_state, reason=f"Step {i}", timestamp=ts, fill_qty=fill_qty)
+
+    events = ledger.get_events_by_entity("ORDER", clean_order_id)
+    assert len(events) == len(path)
+
+    # First transition has causation_id equal to signal_id (or deterministic origin)
+    assert events[0].causation_id == clean_sig_id
+
+    # For every subsequent transition: causation_id(event[n]) == event_id(event[n-1])
+    for n in range(1, len(events)):
+        assert events[n].causation_id == events[n - 1].event_id
+        assert events[n].correlation_id == clean_sig_id
