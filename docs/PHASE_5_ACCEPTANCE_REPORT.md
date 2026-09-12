@@ -16,37 +16,37 @@ Phase 5 implementation is **COMPLETE** and formally verified against:
 ### Gate Verdict:
 $$\mathbf{PHASE\ 5 = REMEDIATED\ (PENDING\ FREEZE)}$$
 
-All 28 core specification requirements, concurrency stress tests, property-based invariants, fail-closed edge cases, and 4 forensic remediation blockers have been implemented and verified. All 182 legacy tests across Phases 1, 2, 3, and 4 continue to pass with 100% green status, bringing the total suite to **240 passed tests**.
+All 28 core specification requirements, concurrency stress tests, property-based invariants, fail-closed edge cases, and all forensic remediation blockers have been implemented and verified. All 182 legacy tests across Phases 1, 2, 3, and 4 continue to pass with 100% green status, bringing the total suite to **251 passed tests**.
 
 ---
 
 ## 2. Forensic Remediation Verification
 
-### Blocker 1 — Elimination of Silent Multiplier Fallback
-- Removed default `Decimal("1")` from `RiskInput.contract_multiplier`. Multiplier must now be explicitly supplied for every trade proposal.
-- Removed default `Decimal("1")` from `calculate_notional()`.
-- Verified non-positive or non-finite multipliers strictly produce `RiskDecisionState.INVALID` with `RiskReasonCode.INVALID_CONTRACT`.
-- Added regression tests proving missing or invalid multipliers cannot produce `APPROVED`.
+### 2.1 Final Forensic Remediation — Reservation Authority & Double-Count Elimination
+- **Single Source of Truth (SSOT):**
+  - Formally established that `RiskEngine._reservations` is the authoritative SSOT for active risk reservations.
+  - `PortfolioRiskState` is an immutable snapshot DTO representing account state and base market positions.
+  - Two independent authoritative sources of reservation truth are strictly forbidden.
+- **Deterministic Deduplication by Stable Identity:**
+  - Reservations across `RiskEngine._reservations` and `portfolio_state.active_reservations` are reconciled and deduplicated by `reservation_id` (e.g. `RES-<signal_id>-<symbol>`) and `signal_id`.
+  - Conflicting attributes (mismatched prices, quantities, risk, notional, or symbols) for the same ID immediately fail closed (`RiskDecisionState.INVALID` with `RiskReasonCode.UNKNOWN_RISK_STATE`).
+- **Mathematical Double-Count Prevention:**
+  - $R_{\text{port\_res}} = \sum_{r \in \text{dedup}(\text{port.active})} r.\text{monetary\_risk}$
+  - $R_{\text{base}} = \max(0, \text{portfolio\_state.reserved\_risk} - R_{\text{port\_res}})$
+  - $R_{\text{effective}} = R_{\text{base}} + \sum_{r \in \text{canonical}} r.\text{monetary\_risk}$
+  - Eliminates double counting across:
+    1. Effective reserved risk
+    2. Effective reserved notional
+    3. Effective open trade count / active count
+    4. Correlated group risk
+- **Volatile In-Memory Restart Semantics:**
+  - Documented that all `RiskEngine` reservations are volatile in-memory objects. State persistence, crash recovery, and database reconciliation are strictly deferred to Phase 8.
 
-### Blocker 2 — Authoritative Account & Capital State Consistency
-- Enforced strict consistency checks in Gate 1:
-  - `trade_input.account_equity == portfolio_state.account_equity`
-  - `trade_input.available_capital == portfolio_state.available_capital`
-- Any mismatch (inflated or reduced values) fails closed immediately with `INVALID` (`INVALID_EQUITY` or `INSUFFICIENT_CAPITAL`).
-- Prohibited silent selection of larger values, averaging, or fallback.
-
-### Blocker 3 — Authoritative Correlated Risk Accounting
-- Formulated single authoritative calculation for correlated group risk:
-  - $R_{\text{unaccounted}} = \max\left(0, R_{\text{reserved}} - (R_{\text{group\_res}} + R_{\text{non\_group\_res}})\right)$
-  - $R_{\text{group\_before}} = R_{\text{group\_res}} + R_{\text{unaccounted}}$
-  - $R_{\text{group\_after}} = R_{\text{group\_before}} + R_{\text{new\_trade}}$
-- Guarantees existing exposure in `reserved_risk` cannot be ignored when `active_reservations` is empty or partial (no undercounting).
-- Guarantees active reservations matching `reserved_risk` produce $R_{\text{unaccounted}} = 0$ (no double counting).
-
-### Improvement 4 — Explicit Lot-Sizing Policy
-- Defined explicit lot-sizing policy governed by `RiskConfig.allow_lot_flooring: bool` (default `False`).
-- Policy 1 (`allow_lot_flooring = False`, default): Non-exact lot multiples reject with `INVALID_LOT_SIZE`.
-- Policy 2 (`allow_lot_flooring = True`): Explicitly floors to nearest whole lots, recomputes actual trade risk, and strictly verifies $R_{\text{actual}} \le R_{\text{budget}}$. Upward rounding is strictly prohibited.
+### 2.2 Earlier Remediation Items
+- **Elimination of Silent Multiplier Fallback:** Removed default `Decimal("1")` from `RiskInput.contract_multiplier` and `calculate_notional()`. Multiplier is mandatory and non-positive/non-finite values fail closed.
+- **Authoritative Account & Capital State Consistency:** Strict equality checks between `trade_input` and `portfolio_state` for equity and available capital.
+- **Correlated Risk Accounting:** Unitemized portfolio risk is conserved and attributed without ignoring base position exposure or double counting explicit reservations.
+- **Explicit Lot-Sizing Policy:** `allow_lot_flooring` parameter strictly governs whether non-exact lot multiples are rejected or floored with exact risk verification.
 
 ---
 
@@ -107,33 +107,33 @@ rootdir: D:\AlphaForge
 configfile: pyproject.toml
 testpaths: tests
 plugins: hypothesis-6.168.0
-collected 240 items
+collected 251 items
 
 tests\golden\test_golden_fixtures.py ..............                      [  5%]
 tests\integration\test_data_to_strategy_pipeline.py ..                   [  6%]
-tests\property\test_basis_properties.py ....                             [  8%]
-tests\property\test_contract_properties.py .....                         [ 10%]
-tests\property\test_data_governance_properties.py ..                     [ 11%]
-tests\property\test_risk_properties.py ...                               [ 12%]
-tests\property\test_strategy_properties.py ..                            [ 13%]
-tests\unit\basis\test_basis_calculator.py ............                   [ 18%]
-tests\unit\basis\test_basis_confirmation.py ...........                  [ 22%]
-tests\unit\basis\test_basis_engine.py .................                  [ 30%]
-tests\unit\contract\test_contract_lifecycle.py ..................        [ 37%]
-tests\unit\contract\test_contract_models.py ........                     [ 40%]
-tests\unit\contract\test_contract_repository.py ....                     [ 42%]
-tests\unit\contract\test_contract_validation.py ...........              [ 47%]
-tests\unit\data\test_candle_schema.py ....                               [ 48%]
-tests\unit\data\test_candle_store.py ......                              [ 51%]
-tests\unit\data\test_duplicate_and_conflict.py ...                       [ 52%]
-tests\unit\data\test_execution_eligibility.py ..........                 [ 56%]
-tests\unit\data\test_gap_detection.py ...                                [ 57%]
-tests\unit\data\test_normalization.py .....                              [ 60%]
-tests\unit\data\test_validation.py ..........                            [ 64%]
-tests\unit\risk\test_risk_calculator.py ...........                      [ 68%]
-tests\unit\risk\test_risk_concurrency.py ...                             [ 70%]
-tests\unit\risk\test_risk_engine.py .................................... [ 85%]
-.....                                                                    [ 87%]
+tests\property\test_basis_properties.py ....                             [  7%]
+tests\property\test_contract_properties.py .....                         [  9%]
+tests\property\test_data_governance_properties.py ..                     [ 10%]
+tests\property\test_risk_properties.py ...                               [ 11%]
+tests\property\test_strategy_properties.py ..                            [ 12%]
+tests\unit\basis\test_basis_calculator.py ............                   [ 17%]
+tests\unit\basis\test_basis_confirmation.py ...........                  [ 21%]
+tests\unit\basis\test_basis_engine.py .................                  [ 28%]
+tests\unit\contract\test_contract_lifecycle.py ..................        [ 35%]
+tests\unit\contract\test_contract_models.py ........                     [ 39%]
+tests\unit\contract\test_contract_repository.py ....                     [ 40%]
+tests\unit\contract\test_contract_validation.py ...........              [ 45%]
+tests\unit\data\test_candle_schema.py ....                               [ 46%]
+tests\unit\data\test_candle_store.py ......                              [ 49%]
+tests\unit\data\test_duplicate_and_conflict.py ...                       [ 50%]
+tests\unit\data\test_execution_eligibility.py ..........                 [ 54%]
+tests\unit\data\test_gap_detection.py ...                                [ 55%]
+tests\unit\data\test_normalization.py .....                              [ 57%]
+tests\unit\data\test_validation.py ..........                            [ 61%]
+tests\unit\risk\test_risk_calculator.py ...........                      [ 65%]
+tests\unit\risk\test_risk_concurrency.py ...                             [ 66%]
+tests\unit\risk\test_risk_engine.py .................................... [ 81%]
+................                                                         [ 87%]
 tests\unit\strategy\test_closed_candle_isolation.py ..                   [ 88%]
 tests\unit\strategy\test_determinism.py ..                               [ 89%]
 tests\unit\strategy\test_forensic_regressions.py ..........              [ 93%]
@@ -141,7 +141,7 @@ tests\unit\strategy\test_indicators.py .......                           [ 96%]
 tests\unit\strategy\test_rejection_paths.py ......                       [ 98%]
 tests\unit\strategy\test_rules.py ....                                   [100%]
 
-============================= 240 passed in 3.65s =============================
+============================= 251 passed in 3.80s =============================
 ```
 
 ### 5.2 Static Typing and Linting Evidence

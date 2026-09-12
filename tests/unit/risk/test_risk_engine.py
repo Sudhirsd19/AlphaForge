@@ -3,6 +3,7 @@ Comprehensive unit tests for AlphaForge Deterministic Risk Engine V1.
 Tests all 28 core specifications, edge cases, limits, and fail-closed invariants.
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -15,6 +16,7 @@ from alphaforge.risk.models import (
     CorrelatedGroupConfig,
     PortfolioRiskState,
     RiskConfig,
+    RiskDecision,
     RiskInput,
     RiskReservation,
 )
@@ -924,3 +926,543 @@ def test_remediation_improvement_4_lot_flooring_too_small_rejected() -> None:
     decision = evaluate_trade_risk(t_input, portfolio, config=config)
     assert decision.decision == RiskDecisionState.REJECTED
     assert decision.reason_code == RiskReasonCode.POSITION_SIZE_TOO_SMALL
+
+
+# ==============================================================================
+# PHASE 5 FINAL FORENSIC REMEDIATION REGRESSION TESTS (H.1 - H.11)
+# ==============================================================================
+
+
+def test_remediation_final_1_duplicate_signal_id() -> None:
+    """H.1: Submitting the same signal_id twice must be rejected with DUPLICATE_RISK_RESERVATION."""
+    equity = Decimal("4000000.00")
+    engine = RiskEngine()
+    trade_input = make_valid_risk_input(
+        signal_id="SIG-FINAL-H1-01",
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        stop_price=Decimal("23760.00"),
+        proposed_quantity=25,
+    )
+    portfolio = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        daily_starting_equity=equity,
+        current_equity=equity,
+    )
+
+    d1, r1 = engine.request_risk_reservation(trade_input, portfolio)
+    assert d1.decision == RiskDecisionState.APPROVED
+    assert r1 is not None
+
+    d2, r2 = engine.request_risk_reservation(trade_input, portfolio)
+    assert d2.decision == RiskDecisionState.REJECTED
+    assert d2.reason_code == RiskReasonCode.DUPLICATE_RISK_RESERVATION
+    assert r2 is None
+    assert len(engine.get_active_reservations()) == 1
+    assert engine.get_reservation("SIG-FINAL-H1-01") == r1
+
+
+def test_remediation_final_2_duplicate_reservation_id() -> None:
+    """H.2: Duplicate reservation_id cannot be created and must fail closed."""
+    equity = Decimal("4000000.00")
+    engine = RiskEngine()
+    trade_input_1 = make_valid_risk_input(
+        signal_id="SIG-FINAL-H2-01",
+        symbol="NIFTY",
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+    )
+    portfolio = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        daily_starting_equity=equity,
+        current_equity=equity,
+    )
+
+    d1, r1 = engine.request_risk_reservation(trade_input_1, portfolio)
+    assert d1.decision == RiskDecisionState.APPROVED
+    assert r1 is not None
+
+    # Verify query by reservation_id
+    assert engine.get_reservation(r1.reservation_id) == r1
+
+    # Attempting to submit another request mapping to the same reservation_id
+    d2, r2 = engine.request_risk_reservation(trade_input_1, portfolio)
+    assert d2.decision == RiskDecisionState.REJECTED
+    assert d2.reason_code == RiskReasonCode.DUPLICATE_RISK_RESERVATION
+    assert r2 is None
+
+
+def test_remediation_final_3_portfolio_state_already_containing_same_reservation() -> None:
+    """H.3: If portfolio_state already contains the reservation, new reservation is rejected."""
+    equity = Decimal("4000000.00")
+    engine = RiskEngine()
+
+    res = RiskReservation(
+        reservation_id="RES-SIG-PORT-EXIST-01-NIFTY",
+        signal_id="SIG-PORT-EXIST-01",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        entry_price=Decimal("24000.00"),
+        stop_price=Decimal("23880.00"),
+        quantity=25,
+        monetary_risk=Decimal("3000.00"),
+        notional=Decimal("600000.00"),
+        created_timestamp=datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC),
+    )
+
+    portfolio = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        reserved_risk=Decimal("3000.00"),
+        reserved_notional=Decimal("600000.00"),
+        active_reservations=(res,),
+    )
+
+    # Attempting to reserve the same signal that already exists in portfolio_state
+    trade_input = make_valid_risk_input(
+        signal_id="SIG-PORT-EXIST-01",
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+    )
+
+    d, r = engine.request_risk_reservation(trade_input, portfolio)
+    assert d.decision == RiskDecisionState.REJECTED
+    assert d.reason_code == RiskReasonCode.DUPLICATE_RISK_RESERVATION
+    assert r is None
+    assert len(engine.get_active_reservations()) == 0
+
+
+def test_remediation_final_4_internal_reservation_plus_same_portfolio_reservation() -> None:
+    """H.4: Internal reservation + same portfolio reservation must NOT double count."""
+    equity = Decimal("4000000.00")
+    cap = Decimal("2000000.00")
+    # max_portfolio_risk = 0.0080 = 32,000 budget, max_risk_per_trade = 0.0050 = 20,000
+    config = RiskConfig(
+        max_risk_per_trade=Decimal("0.0050"),
+        max_portfolio_risk=Decimal("0.0080"),
+        max_single_position_notional=Decimal("0.80"),
+    )
+    engine = RiskEngine(config=config)
+
+    # First trade: 15,000 risk
+    trade_1 = make_valid_risk_input(
+        signal_id="SIG-H4-01",
+        account_equity=equity,
+        available_capital=cap,
+        stop_price=Decimal("23400.00"),  # 600 pts * 25 = 15,000 risk
+        proposed_quantity=25,
+    )
+    portfolio_1 = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        daily_starting_equity=equity,
+        current_equity=equity,
+    )
+    d1, r1 = engine.request_risk_reservation(trade_1, portfolio_1)
+    assert d1.decision == RiskDecisionState.APPROVED
+    assert r1 is not None
+
+    # Caller passes portfolio_state which ALSO includes r1
+    portfolio_with_r1 = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        reserved_risk=Decimal("15000.00"),
+        reserved_notional=r1.notional,
+        daily_starting_equity=equity,
+        current_equity=equity,
+        active_reservations=(r1,),
+    )
+
+    # Second trade: 10,000 risk.
+    # Total combined: 15,000 + 10,000 = 25,000 <= 30,000 (APPROVED).
+    # If double-counted: 15,000 (engine) + 15,000 (portfolio) + 10,000 = 40,000 > 30,000 (REJECTED).
+    trade_2 = make_valid_risk_input(
+        signal_id="SIG-H4-02",
+        account_equity=equity,
+        available_capital=cap,
+        stop_price=Decimal("23600.00"),  # 400 pts * 25 = 10,000 risk
+        proposed_quantity=25,
+    )
+
+    d2, r2 = engine.request_risk_reservation(trade_2, portfolio_with_r1)
+    assert d2.decision == RiskDecisionState.APPROVED
+    assert r2 is not None
+    assert len(engine.get_active_reservations()) == 2
+
+
+def test_remediation_final_5_same_request_concurrently_multiple_threads() -> None:
+    """H.5: 20 threads submitting the same signal_id concurrently produce exactly 1 reservation."""
+    equity = Decimal("4000000.00")
+    engine = RiskEngine()
+    portfolio = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        daily_starting_equity=equity,
+        current_equity=equity,
+    )
+
+    num_threads = 20
+    results = []
+
+    def worker() -> tuple[RiskDecision, RiskReservation | None]:
+        t_input = make_valid_risk_input(
+            signal_id="SIG-H5-CONCUR-SAME",
+            account_equity=equity,
+            available_capital=Decimal("2000000.00"),
+        )
+        return engine.request_risk_reservation(t_input, portfolio)
+
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(worker) for _ in range(num_threads)]
+        for fut in as_completed(futures):
+            results.append(fut.result())
+
+    approved = [r for r in results if r[0].decision == RiskDecisionState.APPROVED]
+    duplicates = [
+        r
+        for r in results
+        if r[0].decision == RiskDecisionState.REJECTED
+        and r[0].reason_code == RiskReasonCode.DUPLICATE_RISK_RESERVATION
+    ]
+
+    assert len(approved) == 1
+    assert len(duplicates) == num_threads - 1
+    assert len(engine.get_active_reservations()) == 1
+
+
+def test_remediation_final_6_two_different_valid_reservations() -> None:
+    """H.6: Two different valid reservations are independently evaluated and tracked."""
+    equity = Decimal("4000000.00")
+    engine = RiskEngine()
+    portfolio = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        daily_starting_equity=equity,
+        current_equity=equity,
+    )
+
+    t1 = make_valid_risk_input(
+        signal_id="SIG-H6-01",
+        symbol="NIFTY",
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        stop_price=Decimal("23760.00"),  # 6,000 risk
+        proposed_quantity=25,
+    )
+    t2 = make_valid_risk_input(
+        signal_id="SIG-H6-02",
+        symbol="BANKNIFTY",
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        stop_price=Decimal("23800.00"),  # 5,000 risk
+        proposed_quantity=25,
+    )
+
+    d1, r1 = engine.request_risk_reservation(t1, portfolio)
+    d2, r2 = engine.request_risk_reservation(t2, portfolio)
+
+    assert d1.decision == RiskDecisionState.APPROVED
+    assert r1 is not None
+    assert d2.decision == RiskDecisionState.APPROVED
+    assert r2 is not None
+
+    active = engine.get_active_reservations()
+    assert len(active) == 2
+    assert engine.total_reserved_risk == r1.monetary_risk + r2.monetary_risk
+    assert engine.total_reserved_notional == r1.notional + r2.notional
+
+
+def test_remediation_final_7_correlated_group_duplicate_reservation() -> None:
+    """H.7: Correlated group does not double count when reservation is in both sources."""
+    equity = Decimal("8000000.00")
+    cap = Decimal("4000000.00")
+    group = CorrelatedGroupConfig(
+        group_id="INDEX_GROUP",
+        symbols=("NIFTY", "BANKNIFTY"),
+        max_group_risk=Decimal("0.0050"),  # 0.50% = 40,000 max group risk
+    )
+    config = RiskConfig(
+        max_single_position_notional=Decimal("0.80"),
+        correlated_groups=(group,),
+    )
+    engine = RiskEngine(config=config)
+
+    # 1. BANKNIFTY reservation with 30,000 risk
+    bn_input = make_valid_risk_input(
+        signal_id="SIG-BN-H7",
+        symbol="BANKNIFTY",
+        account_equity=equity,
+        available_capital=cap,
+        stop_price=Decimal("23700.00"),  # 300 pts * 100 = 30,000
+        proposed_quantity=100,
+    )
+    port_base = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        daily_starting_equity=equity,
+        current_equity=equity,
+    )
+    d_bn, r_bn = engine.request_risk_reservation(bn_input, port_base)
+    assert d_bn.decision == RiskDecisionState.APPROVED
+    assert r_bn is not None
+
+    # 2. Portfolio passed includes r_bn in active_reservations and reserved_risk
+    port_with_bn = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        reserved_risk=Decimal("30000.00"),
+        reserved_notional=r_bn.notional,
+        daily_starting_equity=equity,
+        current_equity=equity,
+        active_reservations=(r_bn,),
+    )
+
+    # 3. New NIFTY trade with 8,000 risk.
+    # Group risk after: 30,000 + 8,000 = 38,000 <= 40,000 (APPROVED).
+    # If double counted: 30,000 + 30,000 + 8,000 = 68,000 > 40,000 (REJECTED).
+    nifty_input = make_valid_risk_input(
+        signal_id="SIG-NIFTY-H7",
+        symbol="NIFTY",
+        account_equity=equity,
+        available_capital=cap,
+        stop_price=Decimal("23680.00"),  # 320 pts * 25 = 8,000 risk
+        proposed_quantity=25,
+    )
+
+    d_nifty, r_nifty = engine.request_risk_reservation(nifty_input, port_with_bn)
+    assert d_nifty.decision == RiskDecisionState.APPROVED
+    assert r_nifty is not None
+
+
+def test_remediation_final_8_open_trade_count_duplicate_reservation() -> None:
+    """H.8: Max open trades count is not inflated by duplicate reservation representations."""
+    equity = Decimal("4000000.00")
+    cap = Decimal("2000000.00")
+    config = RiskConfig(max_open_trades=2)
+    engine = RiskEngine(config=config)
+
+    # Trade 1 approved
+    t1 = make_valid_risk_input(
+        signal_id="SIG-H8-01",
+        account_equity=equity,
+        available_capital=cap,
+    )
+    port_base = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        daily_starting_equity=equity,
+        current_equity=equity,
+    )
+    d1, r1 = engine.request_risk_reservation(t1, port_base)
+    assert d1.decision == RiskDecisionState.APPROVED
+    assert r1 is not None
+
+    # Caller passes portfolio_state containing r1
+    port_with_r1 = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        reserved_risk=r1.monetary_risk,
+        reserved_notional=r1.notional,
+        open_trade_count=0,
+        daily_starting_equity=equity,
+        current_equity=equity,
+        active_reservations=(r1,),
+    )
+
+    # Trade 2 requested. With max_open_trades=2, active_count = 0 + 1 + 1 = 2 <= 2 (APPROVED).
+    # If r1 is counted twice: active_count = 0 + 2 + 1 = 3 > 2 (REJECTED).
+    t2 = make_valid_risk_input(
+        signal_id="SIG-H8-02",
+        account_equity=equity,
+        available_capital=cap,
+    )
+    d2, r2 = engine.request_risk_reservation(t2, port_with_r1)
+    assert d2.decision == RiskDecisionState.APPROVED
+    assert r2 is not None
+
+
+def test_remediation_final_9_reserved_risk_duplicate_reservation() -> None:
+    """H.9: Effective reserved_risk is not inflated when reservation exists in both sources."""
+    equity = Decimal("4000000.00")
+    cap = Decimal("2000000.00")
+    # max_portfolio_risk = 0.0080 = 32,000 budget, max_risk_per_trade = 0.0060 = 24,000
+    config = RiskConfig(
+        max_risk_per_trade=Decimal("0.0060"),
+        max_portfolio_risk=Decimal("0.0080"),
+        max_single_position_notional=Decimal("0.80"),
+    )
+    engine = RiskEngine(config=config)
+
+    t1 = make_valid_risk_input(
+        signal_id="SIG-H9-01",
+        account_equity=equity,
+        available_capital=cap,
+        stop_price=Decimal("23600.00"),  # 400 pts (1.67%) * 50 = 20,000 risk
+        proposed_quantity=50,
+    )
+    port_base = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        daily_starting_equity=equity,
+        current_equity=equity,
+    )
+    d1, r1 = engine.request_risk_reservation(t1, port_base)
+    assert d1.decision == RiskDecisionState.APPROVED
+    assert r1 is not None
+
+    port_with_r1 = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        reserved_risk=Decimal("20000.00"),
+        reserved_notional=r1.notional,
+        daily_starting_equity=equity,
+        current_equity=equity,
+        active_reservations=(r1,),
+    )
+
+    # Trade 2 with 8,000 risk: 20k + 8k = 28k <= 30k -> APPROVED
+    # If double counted: 20k + 20k + 8k = 48k > 30k -> REJECTED
+    t2 = make_valid_risk_input(
+        signal_id="SIG-H9-02",
+        account_equity=equity,
+        available_capital=cap,
+        stop_price=Decimal("23680.00"),  # 320 pts * 25 = 8,000 risk
+        proposed_quantity=25,
+    )
+    d2, r2 = engine.request_risk_reservation(t2, port_with_r1)
+    assert d2.decision == RiskDecisionState.APPROVED
+    assert r2 is not None
+
+
+def test_remediation_final_10_reserved_notional_duplicate_reservation() -> None:
+    """H.10: Effective reserved_notional is not inflated when reservation exists in both sources."""
+    equity = Decimal("1000000.00")
+    cap = Decimal("500000.00")
+    config = RiskConfig(
+        max_portfolio_notional=Decimal("0.60"),  # 600,000 budget
+        max_single_position_notional=Decimal("0.50"),  # 500,000 limit
+    )
+    engine = RiskEngine(config=config)
+
+    # Trade 1: Entry = 16,000, Qty = 25 -> Notional = 400,000
+    t1 = make_valid_risk_input(
+        signal_id="SIG-H10-01",
+        account_equity=equity,
+        available_capital=cap,
+        entry_price=Decimal("16000.00"),
+        stop_price=Decimal("15900.00"),  # 100 pts * 25 = 2,500 risk
+        proposed_quantity=25,
+    )
+    port_base = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        daily_starting_equity=equity,
+        current_equity=equity,
+    )
+    d1, r1 = engine.request_risk_reservation(t1, port_base)
+    assert d1.decision == RiskDecisionState.APPROVED
+    assert r1 is not None
+    assert r1.notional == Decimal("400000.00")
+
+    port_with_r1 = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        reserved_risk=r1.monetary_risk,
+        reserved_notional=Decimal("400000.00"),
+        daily_starting_equity=equity,
+        current_equity=equity,
+        active_reservations=(r1,),
+    )
+
+    # Trade 2: Entry = 6,000, Qty = 25 -> Notional = 150,000
+    # Combined notional: 400,000 + 150,000 = 550,000 <= 600,000 (APPROVED)
+    # If double counted: 400,000 + 400,000 + 150,000 = 950,000 > 600,000 (REJECTED)
+    t2 = make_valid_risk_input(
+        signal_id="SIG-H10-02",
+        account_equity=equity,
+        available_capital=cap,
+        entry_price=Decimal("6000.00"),
+        stop_price=Decimal("5900.00"),  # 100 pts * 25 = 2,500 risk
+        proposed_quantity=25,
+    )
+    d2, r2 = engine.request_risk_reservation(t2, port_with_r1)
+    assert d2.decision == RiskDecisionState.APPROVED
+    assert r2 is not None
+
+
+def test_remediation_final_11_inconsistent_reservation_state_fails_closed() -> None:
+    """H.11: Inconsistent reservation state fails closed with RiskDecisionState.INVALID."""
+    equity = Decimal("4000000.00")
+    engine = RiskEngine()
+
+    res_valid = RiskReservation(
+        reservation_id="RES-INCONSISTENT-01",
+        signal_id="SIG-INCONSISTENT-01",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        entry_price=Decimal("24000.00"),
+        stop_price=Decimal("23880.00"),
+        quantity=25,
+        monetary_risk=Decimal("3000.00"),
+        notional=Decimal("600000.00"),
+        created_timestamp=datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC),
+    )
+
+    # Subcase A: Conflicting monetary risk for same reservation_id
+    res_conflict_risk = RiskReservation(
+        reservation_id="RES-INCONSISTENT-01",
+        signal_id="SIG-INCONSISTENT-01",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        entry_price=Decimal("24000.00"),
+        stop_price=Decimal("23880.00"),
+        quantity=25,
+        monetary_risk=Decimal("9999.00"),  # CONFLICT
+        notional=Decimal("600000.00"),
+        created_timestamp=datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC),
+    )
+
+    port_inconsistent = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        active_reservations=(res_valid, res_conflict_risk),
+    )
+    t_input = make_valid_risk_input(
+        signal_id="SIG-NEW-TRADE",
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+    )
+
+    d_conflict, r_conflict = engine.request_risk_reservation(t_input, port_inconsistent)
+    assert d_conflict.decision == RiskDecisionState.INVALID
+    assert d_conflict.reason_code == RiskReasonCode.UNKNOWN_RISK_STATE
+    assert r_conflict is None
+
+    # Subcase B: Conflicting symbol for same signal_id
+    res_conflict_symbol = RiskReservation(
+        reservation_id="RES-INCONSISTENT-DIFFID",
+        signal_id="SIG-INCONSISTENT-01",  # Same signal ID as res_valid
+        symbol="BANKNIFTY",  # CONFLICTING symbol
+        side=TradeSide.LONG,
+        entry_price=Decimal("24000.00"),
+        stop_price=Decimal("23880.00"),
+        quantity=25,
+        monetary_risk=Decimal("3000.00"),
+        notional=Decimal("600000.00"),
+        created_timestamp=datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC),
+    )
+    port_inconsistent_sig = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        active_reservations=(res_valid, res_conflict_symbol),
+    )
+    d_sig_conflict, _ = engine.request_risk_reservation(t_input, port_inconsistent_sig)
+    assert d_sig_conflict.decision == RiskDecisionState.INVALID
+    assert d_sig_conflict.reason_code == RiskReasonCode.UNKNOWN_RISK_STATE
+
+    # Subcase C: Evaluation directly via evaluate_trade_risk also fails closed
+    d_direct = evaluate_trade_risk(t_input, port_inconsistent)
+    assert d_direct.decision == RiskDecisionState.INVALID
+    assert d_direct.reason_code == RiskReasonCode.UNKNOWN_RISK_STATE

@@ -26,6 +26,82 @@ from alphaforge.risk.models import (
 )
 
 
+def _reservations_match(a: RiskReservation, b: RiskReservation) -> bool:
+    """Return True if two RiskReservations represent identical data."""
+    return (
+        a.reservation_id == b.reservation_id
+        and a.signal_id == b.signal_id
+        and a.symbol == b.symbol
+        and a.side == b.side
+        and a.entry_price == b.entry_price
+        and a.stop_price == b.stop_price
+        and a.quantity == b.quantity
+        and a.monetary_risk == b.monetary_risk
+        and a.notional == b.notional
+    )
+
+
+def reconcile_and_deduplicate_reservations(
+    sources: tuple[RiskReservation, ...] | list[RiskReservation],
+) -> tuple[RiskReservation, ...]:
+    """
+    Reconcile and deduplicate risk reservations from authoritative and snapshot sources.
+
+    Invariants:
+    1. Every reservation must have valid identity (non-empty uppercase IDs).
+    2. Identical reservation_id or signal_id must have bit-for-bit identical attributes.
+    3. Conflicting attributes for the same ID raise RiskValidationError (fail closed).
+    4. Deduplication ensures each logical reservation is included exactly once.
+    """
+    res_by_id: dict[str, RiskReservation] = {}
+    res_by_sig: dict[str, str] = {}
+
+    for r in sources:
+        # Identity and numerical validation
+        if not r.reservation_id or not r.reservation_id.strip():
+            raise RiskValidationError("Reservation missing reservation_id")
+        if not r.signal_id or not r.signal_id.strip():
+            raise RiskValidationError(f"Reservation '{r.reservation_id}' missing signal_id")
+        if not r.symbol or not r.symbol.strip():
+            raise RiskValidationError(f"Reservation '{r.reservation_id}' missing symbol")
+        if not r.monetary_risk.is_finite() or r.monetary_risk <= Decimal("0"):
+            raise RiskValidationError(
+                f"Reservation '{r.reservation_id}' has invalid monetary_risk: {r.monetary_risk}"
+            )
+        if not r.notional.is_finite() or r.notional <= Decimal("0"):
+            raise RiskValidationError(
+                f"Reservation '{r.reservation_id}' has invalid notional: {r.notional}"
+            )
+        if r.quantity <= 0:
+            raise RiskValidationError(
+                f"Reservation '{r.reservation_id}' has non-positive quantity: {r.quantity}"
+            )
+
+        # Collision on reservation_id
+        if r.reservation_id in res_by_id:
+            existing = res_by_id[r.reservation_id]
+            if not _reservations_match(existing, r):
+                raise RiskValidationError(
+                    f"Conflicting reservation data for reservation_id '{r.reservation_id}'"
+                )
+            continue
+
+        # Collision on signal_id
+        if r.signal_id in res_by_sig:
+            existing_res_id = res_by_sig[r.signal_id]
+            existing = res_by_id[existing_res_id]
+            if not _reservations_match(existing, r):
+                raise RiskValidationError(
+                    f"Conflicting reservation data for signal_id '{r.signal_id}'"
+                )
+            continue
+
+        res_by_id[r.reservation_id] = r
+        res_by_sig[r.signal_id] = r.reservation_id
+
+    return tuple(res_by_id.values())
+
+
 def evaluate_trade_risk(
     trade_input: RiskInput,
     portfolio_state: PortfolioRiskState,
@@ -85,6 +161,35 @@ def evaluate_trade_risk(
             calculation_version=cfg.calculation_version,
             timestamp=eval_ts,
         )
+
+    # 0. Validate and Reconcile Active Reservations in Portfolio State
+    try:
+        deduped_reservations = reconcile_and_deduplicate_reservations(
+            portfolio_state.active_reservations
+        )
+    except RiskValidationError as err:
+        return _invalid(
+            RiskReasonCode.UNKNOWN_RISK_STATE,
+            f"Inconsistent active_reservations in portfolio_state: {err}",
+        )
+
+    # Idempotency check: Same signal_id cannot reserve twice
+    for r in deduped_reservations:
+        if r.signal_id == trade_input.signal_id:
+            return RiskDecision(
+                decision=RiskDecisionState.REJECTED,
+                reason_code=RiskReasonCode.DUPLICATE_RISK_RESERVATION,
+                reason=f"Risk reservation already exists for signal_id: '{trade_input.signal_id}'",
+                signal_id=trade_input.signal_id,
+                symbol=trade_input.symbol,
+                side=trade_input.side,
+                calculation_version=cfg.calculation_version,
+                timestamp=eval_ts,
+            )
+
+    # Validate active reservations consistency
+    port_res_risk = sum((r.monetary_risk for r in deduped_reservations), Decimal("0"))
+    port_res_notional = sum((r.notional for r in deduped_reservations), Decimal("0"))
 
     # 1. Equity and Capital Sanity Gates & Authoritative Consistency Checks
     equity = portfolio_state.account_equity
@@ -331,7 +436,7 @@ def evaluate_trade_risk(
         )
 
     # 7. Portfolio Risk Limit
-    current_reserved_risk = portfolio_state.reserved_risk
+    current_reserved_risk = max(portfolio_state.reserved_risk, port_res_risk)
     risk_before_pct = current_reserved_risk / equity
     risk_after = current_reserved_risk + trade_risk
     risk_after_pct = risk_after / equity
@@ -353,7 +458,7 @@ def evaluate_trade_risk(
         )
 
     # 8. Portfolio Notional Limit
-    current_reserved_notional = portfolio_state.reserved_notional
+    current_reserved_notional = max(portfolio_state.reserved_notional, port_res_notional)
     notional_after = current_reserved_notional + trade_notional
     notional_after_pct = notional_after / equity
 
@@ -374,7 +479,7 @@ def evaluate_trade_risk(
         )
 
     # 9. Max Open Trades Limit
-    active_count = portfolio_state.open_trade_count + len(portfolio_state.active_reservations) + 1
+    active_count = portfolio_state.open_trade_count + len(deduped_reservations) + 1
     if active_count > cfg.max_open_trades:
         return _reject(
             RiskReasonCode.MAX_OPEN_TRADES_EXCEEDED,
@@ -416,14 +521,10 @@ def evaluate_trade_risk(
     for group in cfg.correlated_groups:
         if trade_input.symbol in group.symbols:
             group_res_risk = sum(
-                res.monetary_risk
-                for res in portfolio_state.active_reservations
-                if res.symbol in group.symbols
+                res.monetary_risk for res in deduped_reservations if res.symbol in group.symbols
             )
             non_group_res_risk = sum(
-                res.monetary_risk
-                for res in portfolio_state.active_reservations
-                if res.symbol not in group.symbols
+                res.monetary_risk for res in deduped_reservations if res.symbol not in group.symbols
             )
             unaccounted_reserved_risk = max(
                 Decimal("0"),
@@ -476,6 +577,17 @@ class RiskEngine:
     Concurrency-safe Risk Engine with in-memory atomic risk reservation and idempotency.
     Guarantees atomic updates: concurrent approval attempts never breach portfolio risk,
     notional, or open trade constraints.
+
+    Single Source of Truth (SSOT):
+    In Phase 5 V1, RiskEngine._reservations is the authoritative Single Source of Truth
+    for active risk reservations. External snapshots passed via PortfolioRiskState are
+    reconciled and deduplicated by stable reservation_id and signal_id. Inconsistent
+    or conflicting reservation states fail closed immediately.
+
+    Restart & Persistence Semantics:
+    In Phase 5 V1, all reservations in RiskEngine are volatile and held strictly in memory.
+    State persistence, crash recovery, and restart reconciliation are explicitly out of scope
+    for Phase 5 and belong to Phase 8. On process termination, active reservations are lost.
     """
 
     def __init__(self, config: RiskConfig | None = None) -> None:
@@ -496,41 +608,159 @@ class RiskEngine:
     ) -> tuple[RiskDecision, RiskReservation | None]:
         """
         Atomically evaluate trade risk and, if approved, grant an immutable RiskReservation.
-        Idempotent: Re-evaluation of an already reserved signal_id fails closed with
-        DUPLICATE_RISK_RESERVATION.
+        Idempotent: Re-evaluation of an already reserved signal_id or reservation_id fails
+        closed with DUPLICATE_RISK_RESERVATION.
         """
         cfg = config or self._config
+        expected_res_id = f"RES-{trade_input.signal_id}-{trade_input.symbol}"
+        eval_ts = trade_input.evaluation_timestamp
+
         with self._lock:
-            # Idempotency check: Same signal_id cannot reserve twice
+            # 1. Authoritative internal idempotency check: Same signal_id cannot reserve twice
             if trade_input.signal_id in self._reservations:
+                existing_res = self._reservations[trade_input.signal_id]
                 decision = RiskDecision(
                     decision=RiskDecisionState.REJECTED,
                     reason_code=RiskReasonCode.DUPLICATE_RISK_RESERVATION,
                     reason=(
-                        f"Risk reservation already exists for signal_id: '{trade_input.signal_id}'"
+                        f"Risk reservation already exists for signal_id: '{trade_input.signal_id}' "
+                        f"(reservation_id: '{existing_res.reservation_id}')"
                     ),
                     signal_id=trade_input.signal_id,
                     symbol=trade_input.symbol,
                     side=trade_input.side,
                     calculation_version=cfg.calculation_version,
-                    timestamp=trade_input.evaluation_timestamp,
+                    timestamp=eval_ts,
                 )
                 return decision, None
 
-            # Overlay current active reservations into portfolio_state
-            active_res_tuple = tuple(self._reservations.values())
-            active_risk = sum((r.monetary_risk for r in active_res_tuple), Decimal("0"))
-            active_notional = sum((r.notional for r in active_res_tuple), Decimal("0"))
+            for res in self._reservations.values():
+                if res.reservation_id == expected_res_id:
+                    decision = RiskDecision(
+                        decision=RiskDecisionState.REJECTED,
+                        reason_code=RiskReasonCode.DUPLICATE_RISK_RESERVATION,
+                        reason=(
+                            f"Risk reservation already exists for "
+                            f"reservation_id: '{expected_res_id}'"
+                        ),
+                        signal_id=trade_input.signal_id,
+                        symbol=trade_input.symbol,
+                        side=trade_input.side,
+                        calculation_version=cfg.calculation_version,
+                        timestamp=eval_ts,
+                    )
+                    return decision, None
+
+            # 2. Reconcile reservations across authoritative engine state and portfolio snapshot
+            all_reservations = list(self._reservations.values()) + list(
+                portfolio_state.active_reservations
+            )
+            try:
+                canonical_reservations = reconcile_and_deduplicate_reservations(all_reservations)
+            except RiskValidationError as err:
+                decision = RiskDecision(
+                    decision=RiskDecisionState.INVALID,
+                    reason_code=RiskReasonCode.UNKNOWN_RISK_STATE,
+                    reason=f"Inconsistent reservation state during reconciliation: {err}",
+                    signal_id=trade_input.signal_id,
+                    symbol=trade_input.symbol,
+                    side=trade_input.side,
+                    calculation_version=cfg.calculation_version,
+                    timestamp=eval_ts,
+                )
+                return decision, None
+
+            # Check if trade_input identity already exists in canonical_reservations
+            for r in canonical_reservations:
+                if r.signal_id == trade_input.signal_id or r.reservation_id == expected_res_id:
+                    decision = RiskDecision(
+                        decision=RiskDecisionState.REJECTED,
+                        reason_code=RiskReasonCode.DUPLICATE_RISK_RESERVATION,
+                        reason=(
+                            f"Risk reservation already exists for signal '{trade_input.signal_id}' "
+                            f"(reservation_id: '{r.reservation_id}')"
+                        ),
+                        signal_id=trade_input.signal_id,
+                        symbol=trade_input.symbol,
+                        side=trade_input.side,
+                        calculation_version=cfg.calculation_version,
+                        timestamp=eval_ts,
+                    )
+                    return decision, None
+
+            # 3. Deterministic mathematical aggregation to prevent double counting
+            try:
+                port_deduped = reconcile_and_deduplicate_reservations(
+                    portfolio_state.active_reservations
+                )
+            except RiskValidationError as err:
+                decision = RiskDecision(
+                    decision=RiskDecisionState.INVALID,
+                    reason_code=RiskReasonCode.UNKNOWN_RISK_STATE,
+                    reason=f"Inconsistent active_reservations in portfolio_state: {err}",
+                    signal_id=trade_input.signal_id,
+                    symbol=trade_input.symbol,
+                    side=trade_input.side,
+                    calculation_version=cfg.calculation_version,
+                    timestamp=eval_ts,
+                )
+                return decision, None
+
+            port_res_risk = sum((r.monetary_risk for r in port_deduped), Decimal("0"))
+            port_res_notional = sum((r.notional for r in port_deduped), Decimal("0"))
+
+            if portfolio_state.reserved_risk < port_res_risk:
+                decision = RiskDecision(
+                    decision=RiskDecisionState.INVALID,
+                    reason_code=RiskReasonCode.UNKNOWN_RISK_STATE,
+                    reason=(
+                        f"portfolio_state.reserved_risk ({portfolio_state.reserved_risk}) "
+                        f"is less than sum of active reservations risk ({port_res_risk})"
+                    ),
+                    signal_id=trade_input.signal_id,
+                    symbol=trade_input.symbol,
+                    side=trade_input.side,
+                    calculation_version=cfg.calculation_version,
+                    timestamp=eval_ts,
+                )
+                return decision, None
+
+            if portfolio_state.reserved_notional < port_res_notional:
+                decision = RiskDecision(
+                    decision=RiskDecisionState.INVALID,
+                    reason_code=RiskReasonCode.UNKNOWN_RISK_STATE,
+                    reason=(
+                        f"portfolio_state.reserved_notional ({portfolio_state.reserved_notional}) "
+                        f"is less than sum of active reservations notional ({port_res_notional})"
+                    ),
+                    signal_id=trade_input.signal_id,
+                    symbol=trade_input.symbol,
+                    side=trade_input.side,
+                    calculation_version=cfg.calculation_version,
+                    timestamp=eval_ts,
+                )
+                return decision, None
+
+            base_reserved_risk = portfolio_state.reserved_risk - port_res_risk
+            base_reserved_notional = portfolio_state.reserved_notional - port_res_notional
+
+            canonical_res_risk = sum(
+                (r.monetary_risk for r in canonical_reservations), Decimal("0")
+            )
+            canonical_res_notional = sum((r.notional for r in canonical_reservations), Decimal("0"))
+
+            effective_reserved_risk = base_reserved_risk + canonical_res_risk
+            effective_reserved_notional = base_reserved_notional + canonical_res_notional
 
             effective_portfolio_state = PortfolioRiskState(
                 account_equity=portfolio_state.account_equity,
                 available_capital=portfolio_state.available_capital,
                 open_trade_count=portfolio_state.open_trade_count,
-                reserved_risk=portfolio_state.reserved_risk + active_risk,
-                reserved_notional=portfolio_state.reserved_notional + active_notional,
+                reserved_risk=effective_reserved_risk,
+                reserved_notional=effective_reserved_notional,
                 daily_starting_equity=portfolio_state.daily_starting_equity,
                 current_equity=portfolio_state.current_equity,
-                active_reservations=portfolio_state.active_reservations + active_res_tuple,
+                active_reservations=canonical_reservations,
             )
 
             decision = evaluate_trade_risk(trade_input, effective_portfolio_state, config=cfg)
@@ -544,7 +774,7 @@ class RiskEngine:
             assert decision.notional is not None
 
             reservation = RiskReservation(
-                reservation_id=f"RES-{trade_input.signal_id}-{trade_input.symbol}",
+                reservation_id=expected_res_id,
                 signal_id=trade_input.signal_id,
                 symbol=trade_input.symbol,
                 side=trade_input.side,
@@ -559,6 +789,19 @@ class RiskEngine:
 
             self._reservations[trade_input.signal_id] = reservation
             return decision, reservation
+
+    def get_reservation(self, identifier: str) -> RiskReservation | None:
+        """
+        Atomically retrieve an active reservation by signal_id or reservation_id.
+        Returns None if no matching reservation is found.
+        """
+        with self._lock:
+            if identifier in self._reservations:
+                return self._reservations[identifier]
+            for res in self._reservations.values():
+                if res.reservation_id == identifier:
+                    return res
+            return None
 
     def release_reservation(self, identifier: str) -> bool:
         """Atomically release an active risk reservation by signal_id or reservation_id."""

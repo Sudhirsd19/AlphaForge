@@ -197,13 +197,45 @@ The engine returns one of 23 explicit machine-readable `RiskReasonCode` enumerat
 
 ## 5. Reservation Model & Thread Safety
 
-### 5.1 Logical In-Memory Reservation
-When `RiskEngine.request_risk_reservation(trade_input, portfolio_state)` approves a trade:
-- A frozen, immutable `RiskReservation` instance is created and held in memory.
-- It locks the risk budget and notional exposure against subsequent trade evaluations.
-- No network requests, database writes, or broker transactions occur.
+### 5.1 Single Source of Truth (SSOT) Authority Model
+In Phase 5 V1, **`RiskEngine._reservations` is the authoritative Single Source of Truth (SSOT)** for active risk reservations.
+- `PortfolioRiskState` is an immutable snapshot DTO representing account state and base market positions.
+- When `portfolio_state.active_reservations` are passed into `request_risk_reservation()` or `evaluate_trade_risk()`, the engine performs deterministic reconciliation and deduplication.
+- Two independent authoritative sources of reservation truth are strictly forbidden.
 
-### 5.2 Idempotency & Concurrency Guarantees
-- **Atomic Operations:** All reservation checks, acquisitions, queries, and releases are protected by `threading.Lock()`.
-- **Idempotency Guarantee:** Attempting to reserve the same `signal_id` concurrently or sequentially is rejected immediately with `DUPLICATE_RISK_RESERVATION`.
-- **Release Flexibility:** Reservations can be atomically released by `signal_id` or `reservation_id`.
+### 5.2 Deduplication by Stable Identity
+Every reservation has a deterministic identity:
+- Stable `reservation_id` (e.g. `RES-<signal_id>-<symbol>`)
+- Stable `signal_id`
+
+During evaluation:
+1. All reservations from `RiskEngine._reservations` and `portfolio_state.active_reservations` are reconciled.
+2. Identical duplicate instances are collapsed so that each logical reservation is represented **exactly once**.
+3. Any conflicting attributes (e.g. mismatched prices, quantities, risk, notional, or symbols) for the same `reservation_id` or `signal_id` are treated as an **inconsistent state** and fail closed immediately (`RiskDecisionState.INVALID` with `RiskReasonCode.UNKNOWN_RISK_STATE`).
+
+### 5.3 Mathematical Double-Count Prevention
+To eliminate double counting when reservations exist in both `RiskEngine` and `portfolio_state`:
+- Let $R_{\text{port\_res}} = \sum_{r \in \text{dedup}(\text{port.active})} r.\text{monetary\_risk}$
+- Let $N_{\text{port\_res}} = \sum_{r \in \text{dedup}(\text{port.active})} r.\text{notional}$
+- Base unitemized market position risk:
+  $$R_{\text{base}} = \max(0, \text{portfolio\_state.reserved\_risk} - R_{\text{port\_res}})$$
+- Base unitemized market position notional:
+  $$N_{\text{base}} = \max(0, \text{portfolio\_state.reserved\_notional} - N_{\text{port\_res}})$$
+- Effective reserved risk and notional:
+  $$R_{\text{effective}} = R_{\text{base}} + \sum_{r \in \text{canonical}} r.\text{monetary\_risk}$$
+  $$N_{\text{effective}} = N_{\text{base}} + \sum_{r \in \text{canonical}} r.\text{notional}$$
+- Effective active trade count:
+  $$\text{active\_count} = \text{portfolio\_state.open\_trade\_count} + |\text{canonical}| + 1$$
+- Correlated exposure: Group risk sums each canonical reservation in the group exactly once.
+
+### 5.4 Idempotency & Concurrency Guarantees
+- **Atomic Operations:** All reservation evaluations, checks, acquisitions, queries, and releases are protected by `threading.Lock()`.
+- **Deterministic Idempotency:** Submitting the same `signal_id` or a trade that maps to an existing `reservation_id` is rejected immediately with `DUPLICATE_RISK_RESERVATION`.
+- **Query & Release Flexibility:** Reservations can be inspected via `get_reservation(identifier)` or atomically released by `release_reservation(identifier)`.
+- **Race Condition Immunity:** Concurrent threads submitting identical signals yield exactly one reservation; concurrent threads submitting different signals are bounded strictly by portfolio risk, notional, and trade count limits.
+
+### 5.5 Restart & Volatility Semantics
+In Phase 5 V1:
+- All reservations in `RiskEngine` are strictly volatile and held in-memory.
+- Crash recovery, disk persistence, and database reconciliation are intentionally **deferred to Phase 8**.
+- On process restart or crash, active in-memory reservations are lost unless re-established by an external authoritative recovery mechanism in Phase 8.
