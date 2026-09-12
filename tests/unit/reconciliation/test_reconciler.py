@@ -786,3 +786,380 @@ def test_reconciliation_valid_resting_stop() -> None:
     assert result.status == ReconciliationStatus.MATCHED
     assert result.new_entries_allowed is True
     assert gate.is_open is True
+
+
+def test_reconciliation_known_protection_id_missing_unrelated_stop_exists() -> None:
+    """
+    Finding 1 Test 1: Known protection ID missing + unrelated valid stop exists
+    -> protection remains unconfirmed.
+    """
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id="POS-1",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24500.00"),
+            status="OPEN",
+        )
+    )
+    # Broker has a valid-looking stop on NIFTY, 50, SELL, but unrelated client_order_id
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id="BRK-STOP-UNRELATED",
+            client_order_id="AF-S-UNRELATED",
+            symbol="NIFTY",
+            side=OrderSide.SELL,
+            quantity=50,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.ACKNOWLEDGED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    # Local position specifies a DIFFERENT protection_order_id
+    local_pos = LocalPositionRecord(
+        position_id="POS-1",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        quantity=50,
+        average_price=Decimal("24500.00"),
+        status="OPEN",
+        is_protected=True,
+        protection_order_id="AF-S-EXPECTED-LINKED-STOP",
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={"NIFTY": local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status != ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is False
+    assert gate.is_open is False
+    assert result.manual_escalation_required is True
+    pos_rec = next(p for p in result.position_details if p.symbol == "NIFTY")
+    assert pos_rec.is_protection_confirmed is False
+
+
+def test_reconciliation_known_protection_id_cancelled_another_ack_stop_exists() -> None:
+    """
+    Finding 1 Test 2: Known protection ID points to cancelled stop + another ACK stop
+    -> protection remains unconfirmed.
+    """
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id="POS-1",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24500.00"),
+            status="OPEN",
+        )
+    )
+    # Linked stop is CANCELLED at broker
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id="BRK-STOP-LINKED",
+            client_order_id="AF-S-LINKED",
+            symbol="NIFTY",
+            side=OrderSide.SELL,
+            quantity=50,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.CANCELLED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    # Unrelated stop is ACKNOWLEDGED
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id="BRK-STOP-OTHER",
+            client_order_id="AF-S-OTHER",
+            symbol="NIFTY",
+            side=OrderSide.SELL,
+            quantity=50,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.ACKNOWLEDGED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    local_pos = LocalPositionRecord(
+        position_id="POS-1",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        quantity=50,
+        average_price=Decimal("24500.00"),
+        status="OPEN",
+        is_protected=True,
+        protection_order_id="AF-S-LINKED",
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={"NIFTY": local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status != ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is False
+    assert gate.is_open is False
+    pos_rec = next(p for p in result.position_details if p.symbol == "NIFTY")
+    assert pos_rec.is_protection_confirmed is False
+
+
+def test_reconciliation_known_protection_id_wrong_symbol() -> None:
+    """Finding 1 Test 3: Known protection ID points to wrong-symbol stop -> unconfirmed."""
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id="POS-1",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24500.00"),
+            status="OPEN",
+        )
+    )
+    # Linked stop exists on BANKNIFTY instead of NIFTY
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id="BRK-STOP-LINKED",
+            client_order_id="AF-S-LINKED",
+            symbol="BANKNIFTY",
+            side=OrderSide.SELL,
+            quantity=50,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.ACKNOWLEDGED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    local_pos = LocalPositionRecord(
+        position_id="POS-1",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        quantity=50,
+        average_price=Decimal("24500.00"),
+        status="OPEN",
+        is_protected=True,
+        protection_order_id="AF-S-LINKED",
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={"NIFTY": local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status != ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is False
+    assert gate.is_open is False
+    pos_rec = next(p for p in result.position_details if p.symbol == "NIFTY")
+    assert pos_rec.is_protection_confirmed is False
+
+
+def test_reconciliation_known_protection_id_wrong_direction() -> None:
+    """Finding 1 Test 4: Known protection ID points to wrong-direction stop -> unconfirmed."""
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id="POS-1",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24500.00"),
+            status="OPEN",
+        )
+    )
+    # Linked stop exists with BUY side instead of SELL side
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id="BRK-STOP-LINKED",
+            client_order_id="AF-S-LINKED",
+            symbol="NIFTY",
+            side=OrderSide.BUY,
+            quantity=50,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.ACKNOWLEDGED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    local_pos = LocalPositionRecord(
+        position_id="POS-1",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        quantity=50,
+        average_price=Decimal("24500.00"),
+        status="OPEN",
+        is_protected=True,
+        protection_order_id="AF-S-LINKED",
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={"NIFTY": local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    assert result.status != ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is False
+    assert gate.is_open is False
+    pos_rec = next(p for p in result.position_details if p.symbol == "NIFTY")
+    assert pos_rec.is_protection_confirmed is False
+
+
+def test_protection_order_role_and_type_combinations() -> None:
+    """Finding 2 Tests 5-9: STOP role and STOP_LOSS type are both strictly mandatory."""
+    reconciler = ColdBootReconciler(
+        broker=PaperBroker(),
+        state_store=InMemoryStateStore(),
+        gate=ReconciliationGate(),
+    )
+    now = datetime.now(UTC)
+
+    # 5. STOP role + MARKET type -> invalid
+    ord_stop_market = BrokerOrder(
+        broker_order_id="BRK-SM",
+        client_order_id="AF-S-SM",
+        symbol="NIFTY",
+        side=OrderSide.SELL,
+        quantity=50,
+        role=OrderRole.STOP,
+        order_type=BrokerOrderType.MARKET,
+        status=BrokerOrderStatus.ACKNOWLEDGED,
+        created_at=now,
+        updated_at=now,
+    )
+    assert not reconciler._is_valid_resting_stop_for_position(
+        order=ord_stop_market,
+        pos_symbol="NIFTY",
+        pos_side=TradeSide.LONG,
+        pos_quantity=50,
+    )
+
+    # 6. STOP role + LIMIT type -> invalid
+    ord_stop_limit = BrokerOrder(
+        broker_order_id="BRK-SLIM",
+        client_order_id="AF-S-SLIM",
+        symbol="NIFTY",
+        side=OrderSide.SELL,
+        quantity=50,
+        role=OrderRole.STOP,
+        order_type=BrokerOrderType.LIMIT,
+        status=BrokerOrderStatus.ACKNOWLEDGED,
+        created_at=now,
+        updated_at=now,
+    )
+    assert not reconciler._is_valid_resting_stop_for_position(
+        order=ord_stop_limit,
+        pos_symbol="NIFTY",
+        pos_side=TradeSide.LONG,
+        pos_quantity=50,
+    )
+
+    # 7. ENTRY role + STOP_LOSS type -> invalid
+    ord_entry_sl = BrokerOrder(
+        broker_order_id="BRK-ESL",
+        client_order_id="AF-E-ESL",
+        symbol="NIFTY",
+        side=OrderSide.SELL,
+        quantity=50,
+        role=OrderRole.ENTRY,
+        order_type=BrokerOrderType.STOP_LOSS,
+        status=BrokerOrderStatus.ACKNOWLEDGED,
+        created_at=now,
+        updated_at=now,
+    )
+    assert not reconciler._is_valid_resting_stop_for_position(
+        order=ord_entry_sl,
+        pos_symbol="NIFTY",
+        pos_side=TradeSide.LONG,
+        pos_quantity=50,
+    )
+
+    # 8. EXIT role + STOP_LOSS type -> invalid
+    ord_exit_sl = BrokerOrder(
+        broker_order_id="BRK-XSL",
+        client_order_id="AF-X-XSL",
+        symbol="NIFTY",
+        side=OrderSide.SELL,
+        quantity=50,
+        role=OrderRole.EXIT,
+        order_type=BrokerOrderType.STOP_LOSS,
+        status=BrokerOrderStatus.ACKNOWLEDGED,
+        created_at=now,
+        updated_at=now,
+    )
+    assert not reconciler._is_valid_resting_stop_for_position(
+        order=ord_exit_sl,
+        pos_symbol="NIFTY",
+        pos_side=TradeSide.LONG,
+        pos_quantity=50,
+    )
+
+    # 9. STOP role + STOP_LOSS type + exact symbol/side/quantity/active status -> valid
+    ord_valid = BrokerOrder(
+        broker_order_id="BRK-VALID",
+        client_order_id="AF-S-VALID-SL",
+        symbol="NIFTY",
+        side=OrderSide.SELL,
+        quantity=50,
+        role=OrderRole.STOP,
+        order_type=BrokerOrderType.STOP_LOSS,
+        status=BrokerOrderStatus.ACKNOWLEDGED,
+        created_at=now,
+        updated_at=now,
+    )
+    assert reconciler._is_valid_resting_stop_for_position(
+        order=ord_valid,
+        pos_symbol="NIFTY",
+        pos_side=TradeSide.LONG,
+        pos_quantity=50,
+    )

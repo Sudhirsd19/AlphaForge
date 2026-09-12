@@ -91,8 +91,8 @@ class ColdBootReconciler:
         if order.status != BrokerOrderStatus.ACKNOWLEDGED:
             return False
 
-        # 3. Correct STOP role or type
-        if order.role != OrderRole.STOP and order.order_type != BrokerOrderType.STOP_LOSS:
+        # 3. Mandatory: BOTH role == OrderRole.STOP AND order_type == BrokerOrderType.STOP_LOSS
+        if order.role != OrderRole.STOP or order.order_type != BrokerOrderType.STOP_LOSS:
             return False
 
         # 4. Strict directional correctness: LONG exits via SELL, SHORT exits via BUY
@@ -122,13 +122,20 @@ class ColdBootReconciler:
     ) -> BrokerOrder | None:
         """
         Find an authoritative broker-side resting stop order protecting the active position.
-        Matches with explicit protection_order_id first if available; otherwise matches
-        by symbol, quantity, side, role, and active status.
+
+        Authoritative Matching Rules:
+        1. If protection_order_id is NOT None:
+           - ONLY accept a broker stop whose client_order_id == protection_order_id
+             or broker_order_id == protection_order_id.
+           - If no exact linked broker stop exists, return None.
+           - DO NOT perform generic fallback matching.
+        2. If protection_order_id IS None:
+           - Generic strict matching may be used.
         """
         if pos_quantity <= 0:
             return None
 
-        # 1. First pass: try with explicit protection_order_id if specified
+        # 1. If explicit protection_order_id is specified:
         if protection_order_id is not None:
             for ord in broker_open_orders:
                 if self._is_valid_resting_stop_for_position(
@@ -139,8 +146,10 @@ class ColdBootReconciler:
                     protection_order_id=protection_order_id,
                 ):
                     return ord
+            # MUST NOT perform generic fallback matching
+            return None
 
-        # 2. Second pass: match without requiring specific protection_order_id
+        # 2. If protection_order_id is None:
         for ord in broker_open_orders:
             if self._is_valid_resting_stop_for_position(
                 order=ord,
@@ -430,17 +439,6 @@ class ColdBootReconciler:
                         )
                         for pos in local_positions.values()
                     )
-                    if not is_known_stop:
-                        is_known_stop = any(
-                            self._is_valid_resting_stop_for_position(
-                                order=brk_ord,
-                                pos_symbol=b_pos.symbol,
-                                pos_side=b_pos.side,
-                                pos_quantity=b_pos.quantity,
-                                protection_order_id=None,
-                            )
-                            for b_pos in broker_positions
-                        )
 
                     if is_known_stop:
                         order_records.append(

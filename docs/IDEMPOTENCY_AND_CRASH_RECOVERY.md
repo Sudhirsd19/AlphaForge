@@ -161,9 +161,11 @@ Active positions are never assumed protected based on stale memory, cached state
    - **Symbol:** Order symbol must strictly match position symbol.
    - **Direction:** Stop direction must oppose the position (`LONG` position requires `SELL` stop; `SHORT` position requires `BUY` stop).
    - **Quantity:** Stop quantity must match the active position quantity exactly (partial protection is rejected).
-   - **Role & Type:** Order role must be `OrderRole.STOP` and order type must be `SL` or `SL-M`.
-   - **Active Status:** Order status must be active on the broker book (`ACKNOWLEDGED` or `PARTIALLY_FILLED`).
-   - **Protection ID Matching:** First attempts match by explicit `protection_order_id` if known locally; falls back to matching resting stop meeting all physical criteria.
+   - **Role & Type (Both Mandatory):** Order role must strictly be `OrderRole.STOP` AND order type must strictly be `BrokerOrderType.STOP_LOSS`. Any deviation (e.g. STOP + MARKET, STOP + LIMIT, ENTRY + STOP_LOSS, EXIT + STOP_LOSS) is invalid.
+   - **Active Status:** Order status must be active on the broker book (`ACKNOWLEDGED`).
+   - **Strict Protection Identity Matching:**
+     - When `protection_order_id` is NOT `None`: ONLY accept a broker stop whose `client_order_id == protection_order_id` or `broker_order_id == protection_order_id`. If the exact linked stop does not exist, return `None`. Generic fallback matching is strictly prohibited.
+     - When `protection_order_id` IS `None`: Generic strict matching across open orders may be used.
 3. **Fail-Closed Gate Enforcement:** If an authoritative resting stop cannot be verified on the broker for an active position:
    - `is_protection_confirmed` is set to `False`.
    - Reconciler flags `ReconciliationAction.TRIGGER_EMERGENCY_PROTECTION` with `ReconciliationReasonCode.PROTECTION_UNCONFIRMED`.

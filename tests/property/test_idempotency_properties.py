@@ -16,7 +16,13 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from alphaforge.broker.models import BrokerOrderRequest, BrokerPosition
+from alphaforge.broker.models import (
+    BrokerOrder,
+    BrokerOrderRequest,
+    BrokerOrderStatus,
+    BrokerOrderType,
+    BrokerPosition,
+)
 from alphaforge.broker.paper import PaperBroker
 from alphaforge.core.exceptions import (
     BrokerPositionConflictError,
@@ -272,3 +278,95 @@ def test_property_paper_broker_single_entry_invariant(q1: int, q2: int) -> None:
 
     # Position quantity strictly remains q1
     assert broker.get_positions()[0].quantity == q1
+
+
+@given(
+    quantity=st.integers(min_value=1, max_value=500),
+    side=st.sampled_from([TradeSide.LONG, TradeSide.SHORT]),
+    symbol=st.sampled_from(["NIFTY", "BANKNIFTY", "FINNIFTY"]),
+    known_id=st.text(
+        min_size=5, max_size=20, alphabet=st.characters(whitelist_categories=("Lu", "Nd"))
+    ),
+    diff_id=st.text(
+        min_size=5, max_size=20, alphabet=st.characters(whitelist_categories=("Lu", "Nd"))
+    ),
+)
+@settings(max_examples=35)
+def test_property_known_protection_id_unmatched_by_different_broker_order(
+    quantity: int,
+    side: TradeSide,
+    symbol: str,
+    known_id: str,
+    diff_id: str,
+) -> None:
+    """
+    Property: whenever protection_order_id is known,
+    no different broker order may satisfy protection.
+    """
+    # Ensure IDs are strictly different
+    if known_id.upper() == diff_id.upper():
+        diff_id = f"{known_id}-DIFF"
+
+    broker = PaperBroker()
+    store = InMemoryStateStore()
+    gate = ReconciliationGate()
+    reconciler = ColdBootReconciler(broker=broker, state_store=store, gate=gate)
+
+    now = datetime.now(UTC)
+
+    # Broker has position
+    broker.inject_external_position(
+        BrokerPosition(
+            position_id=f"POS-PROP-{symbol}",
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            average_price=Decimal("24000.00"),
+            status="OPEN",
+        )
+    )
+
+    # Broker has a resting stop with diff_id
+    # (matches symbol, quantity, opposing side, STOP, STOP_LOSS)
+    expected_stop_side = OrderSide.SELL if side == TradeSide.LONG else OrderSide.BUY
+    broker.inject_external_order(
+        BrokerOrder(
+            broker_order_id=f"BRK-{diff_id}",
+            client_order_id=diff_id,
+            symbol=symbol,
+            side=expected_stop_side,
+            quantity=quantity,
+            role=OrderRole.STOP,
+            order_type=BrokerOrderType.STOP_LOSS,
+            status=BrokerOrderStatus.ACKNOWLEDGED,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    # Local position explicitly expects known_id
+    local_pos = LocalPositionRecord(
+        position_id=f"POS-PROP-{symbol}",
+        symbol=symbol,
+        side=side,
+        quantity=quantity,
+        average_price=Decimal("24000.00"),
+        status="OPEN",
+        is_protected=True,
+        protection_order_id=known_id,
+    )
+    store.save_snapshot(
+        RecoverySnapshot(
+            schema_version=1,
+            positions={symbol: local_pos},
+            created_at=now,
+        )
+    )
+
+    result = reconciler.reconcile()
+    # Protection must NEVER be confirmed by different broker order
+    assert result.status != ReconciliationStatus.MATCHED
+    assert result.new_entries_allowed is False
+    assert gate.is_open is False
+    pos_rec = next(p for p in result.position_details if p.symbol == symbol)
+    assert pos_rec.is_protection_confirmed is False
