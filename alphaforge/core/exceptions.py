@@ -103,3 +103,57 @@ class OrderValidationError(ExecutionError):
     """Raised when order parameters, quantities, or metadata violate invariants."""
 
     pass
+
+
+class IdempotencyError(AlphaForgeError):
+    """Base exception for all idempotency and order identity errors."""
+
+    pass
+
+
+class IdempotencyCollisionError(IdempotencyError):
+    """Raised when the same client_order_id is presented with conflicting intent."""
+
+    pass
+
+
+class BrokerError(AlphaForgeError):
+    """Base exception for all broker abstraction and simulation errors."""
+
+    pass
+
+
+class BrokerOrderCollisionError(BrokerError):
+    """Raised when duplicate submission at broker has conflicting parameters."""
+
+    pass
+
+
+class BrokerUnavailableError(BrokerError):
+    """Raised when broker queries or submissions fail due to broker unavailability."""
+
+    pass
+
+
+class ReconciliationError(AlphaForgeError):
+    """Base exception for state reconciliation failures."""
+
+    pass
+
+
+class ReconciliationMismatchError(ReconciliationError):
+    """Raised when local and broker states have unresolvable conflicts."""
+
+    pass
+
+
+class RecoveryError(AlphaForgeError):
+    """Base exception for crash recovery and state restoration failures."""
+
+    pass
+
+
+class CorruptedStateError(RecoveryError):
+    """Raised when persisted recovery snapshot data is corrupted, malformed, or invalid."""
+
+    pass

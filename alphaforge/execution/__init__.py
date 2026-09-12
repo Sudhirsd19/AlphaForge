@@ -11,6 +11,13 @@ from alphaforge.execution.enums import (
     OrderState,
     WatchdogStatus,
 )
+from alphaforge.execution.idempotency import (
+    IdempotencyRegistry,
+    OrderIntent,
+    OrderRole,
+    generate_attempt_id,
+    generate_client_order_id,
+)
 from alphaforge.execution.models import (
     EmergencyExitCommand,
     Order,
@@ -33,8 +40,11 @@ __all__ = [
     "TERMINAL_STATES",
     "EmergencyExitCommand",
     "ExecutionReasonCode",
+    "IdempotencyRegistry",
     "Order",
     "OrderEvent",
+    "OrderIntent",
+    "OrderRole",
     "OrderSide",
     "OrderState",
     "OrderStateMachine",
@@ -44,4 +54,6 @@ __all__ = [
     "TransitionResult",
     "WatchdogDecision",
     "WatchdogStatus",
+    "generate_attempt_id",
+    "generate_client_order_id",
 ]
