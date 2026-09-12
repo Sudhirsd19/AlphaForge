@@ -79,3 +79,27 @@ class CostValidationError(CostError):
     """Raised when cost inputs, configurations, or calculation invariants are breached."""
 
     pass
+
+
+class ExecutionError(AlphaForgeError):
+    """Base exception for all execution and order lifecycle errors."""
+
+    pass
+
+
+class IllegalStateTransitionError(ExecutionError):
+    """Raised when an illegal order state transition is attempted."""
+
+    pass
+
+
+class UnprotectedPositionError(ExecutionError):
+    """Raised when an emergency unprotected position hazard is detected."""
+
+    pass
+
+
+class OrderValidationError(ExecutionError):
+    """Raised when order parameters, quantities, or metadata violate invariants."""
+
+    pass
