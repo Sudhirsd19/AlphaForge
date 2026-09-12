@@ -6,11 +6,14 @@ Tests contract matching, data quality, lifecycle gates, timestamp alignment, and
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 from alphaforge.basis.engine import evaluate_basis
 from alphaforge.basis.enums import BasisStatus
-from alphaforge.basis.models import BasisConfig
+from alphaforge.basis.models import BasisConfig, BasisObservation
 from alphaforge.contract.enums import ContractStatus
 from alphaforge.contract.lifecycle import get_current_active_contract
+from alphaforge.core.exceptions import BasisCalculationError
 from alphaforge.data.enums import DataQualityStatus, InstrumentType
 from alphaforge.data.models import MarketCandle
 from tests.unit.contract.test_contract_models import make_valid_contract
@@ -347,3 +350,139 @@ def test_test_aa_deterministic_contract_selection() -> None:
     obs = evaluate_basis(idx, fut, active_front, base_ts)
     assert obs.basis_status == BasisStatus.VALID
     assert obs.futures_contract_id == "NIFTY26JUNFUT"
+
+
+def test_invalid_prices_never_create_numeric_placeholders() -> None:
+    """Verify non-positive prices result in None and no fabricated prices (1 or 0)."""
+    eval_ts = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
+    contract = make_valid_contract()
+
+    # Zero index price simulated via model_construct
+    idx_zero = MarketCandle.model_construct(
+        symbol="NIFTY",
+        instrument_type=InstrumentType.INDEX,
+        contract_id="NIFTY-SPOT",
+        exchange_timestamp=eval_ts,
+        received_timestamp=eval_ts,
+        timeframe="3m",
+        open=Decimal("24000.00"),
+        high=Decimal("24010.00"),
+        low=Decimal("23990.00"),
+        close=Decimal("0"),
+        volume=1000,
+        quality_status=DataQualityStatus.VALID,
+        data_version=1,
+        source="TEST_FEED",
+        is_closed=True,
+    )
+    fut_valid = make_test_candle(
+        contract_id=contract.contract_id,
+        instrument_type=InstrumentType.FUTURES,
+        timestamp=eval_ts,
+        price=Decimal("24000.00"),
+    )
+    obs_idx_zero = evaluate_basis(idx_zero, fut_valid, contract, eval_ts)
+
+    assert obs_idx_zero.basis_status == BasisStatus.INVALID
+    assert obs_idx_zero.index_price is None
+    assert obs_idx_zero.basis is None
+    assert obs_idx_zero.basis_pct is None
+    assert obs_idx_zero.index_price != Decimal("1")
+    assert obs_idx_zero.basis != Decimal("0")
+    # Valid futures price is preserved for auditability
+    assert obs_idx_zero.futures_price == Decimal("24000.00")
+
+    # Negative futures price simulated via model_construct
+    idx_valid = make_test_candle(
+        contract_id="NIFTY-SPOT",
+        instrument_type=InstrumentType.INDEX,
+        timestamp=eval_ts,
+        price=Decimal("24000.00"),
+    )
+    fut_neg = MarketCandle.model_construct(
+        symbol="NIFTY",
+        instrument_type=InstrumentType.FUTURES,
+        contract_id=contract.contract_id,
+        exchange_timestamp=eval_ts,
+        received_timestamp=eval_ts,
+        timeframe="3m",
+        open=Decimal("24000.00"),
+        high=Decimal("24010.00"),
+        low=Decimal("23990.00"),
+        close=Decimal("-24000.00"),
+        volume=1000,
+        quality_status=DataQualityStatus.VALID,
+        data_version=1,
+        source="TEST_FEED",
+        is_closed=True,
+    )
+    obs_fut_neg = evaluate_basis(idx_valid, fut_neg, contract, eval_ts)
+
+    assert obs_fut_neg.basis_status == BasisStatus.INVALID
+    assert obs_fut_neg.futures_price is None
+    assert obs_fut_neg.basis is None
+    assert obs_fut_neg.basis_pct is None
+    assert obs_fut_neg.futures_price != Decimal("1")
+    assert obs_fut_neg.basis != Decimal("0")
+    assert obs_fut_neg.index_price == Decimal("24000.00")
+
+
+def test_defective_observations_never_report_zero_basis() -> None:
+    """Verify defective observations have basis=None and never fabricate basis=0."""
+    eval_ts = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
+    contract = make_valid_contract()
+    fut_valid = make_test_candle(
+        contract_id=contract.contract_id,
+        instrument_type=InstrumentType.FUTURES,
+        timestamp=eval_ts,
+    )
+
+    # 1. Stale candle
+    old_ts = eval_ts - timedelta(seconds=301)
+    idx_stale = make_test_candle(timestamp=old_ts)
+    obs_stale = evaluate_basis(idx_stale, fut_valid, contract, eval_ts)
+    assert obs_stale.basis_status == BasisStatus.STALE
+    assert obs_stale.basis is None
+    assert obs_stale.basis_pct is None
+    assert obs_stale.basis != Decimal("0")
+
+    # 2. Misaligned timestamp
+    idx_skew = make_test_candle(timestamp=eval_ts - timedelta(seconds=65))
+    obs_skew = evaluate_basis(idx_skew, fut_valid, contract, eval_ts)
+    assert obs_skew.basis_status == BasisStatus.MISALIGNED_TIMESTAMP
+    assert obs_skew.basis is None
+    assert obs_skew.basis_pct is None
+    assert obs_skew.basis != Decimal("0")
+
+    # 3. Gap candle
+    idx_gap = make_test_candle(timestamp=eval_ts, quality_status=DataQualityStatus.GAP)
+    obs_gap = evaluate_basis(idx_gap, fut_valid, contract, eval_ts)
+    assert obs_gap.basis_status == BasisStatus.DATA_GAP
+    assert obs_gap.basis is None
+    assert obs_gap.basis_pct is None
+    assert obs_gap.basis != Decimal("0")
+
+
+def test_model_validation_enforces_none_basis_on_invalid_observation() -> None:
+    """Verify BasisObservation model rejects numeric basis on non-VALID status."""
+    eval_ts = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
+
+    # Creating an invalid observation with basis != None must raise BasisCalculationError
+    with pytest.raises(BasisCalculationError, match="must have None for basis and basis_pct"):
+        BasisObservation(
+            underlying_symbol="NIFTY",
+            index_contract_id="NIFTY-SPOT",
+            futures_contract_id="NIFTY26JUNFUT",
+            index_price=Decimal("24000.00"),
+            futures_price=Decimal("24050.00"),
+            basis=Decimal("0"),
+            basis_pct=Decimal("0"),
+            index_timestamp=eval_ts,
+            futures_timestamp=eval_ts,
+            evaluation_timestamp=eval_ts,
+            timestamp_skew_seconds=Decimal("0.0"),
+            data_quality=DataQualityStatus.VALID,
+            contract_status=ContractStatus.ACTIVE,
+            basis_status=BasisStatus.INVALID,
+            calculation_version=1,
+        )

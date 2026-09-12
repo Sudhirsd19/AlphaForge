@@ -334,11 +334,13 @@ def evaluate_basis_confirmation(
             and obs.underlying_symbol == observation.underlying_symbol
             and obs.futures_contract_id == observation.futures_contract_id
             and obs.evaluation_timestamp < observation.evaluation_timestamp
+            and obs.basis_pct is not None
         ):
             history_pct.append(obs.basis_pct)
 
     # Append current observation to history
-    history_pct.append(observation.basis_pct)
+    if observation.basis_pct is not None:
+        history_pct.append(observation.basis_pct)
 
     stats = calculate_rolling_stats(
         history_pct,
@@ -355,16 +357,45 @@ def evaluate_basis_confirmation(
             reason="Insufficient history or zero variance for basis z-score confirmation",
         )
 
+    if stats.z_score_status == BasisZScoreStatus.LOWER:
+        return BasisConfirmationResult(
+            status=BasisConfirmationStatus.NOT_CONFIRMED,
+            observation=observation,
+            rolling_stats=stats,
+            reason=(
+                f"Extreme lower basis z-score ({stats.z_score}) below configured "
+                f"lower threshold ({cfg.z_score_lower_threshold})"
+            ),
+        )
+
+    if stats.z_score_status == BasisZScoreStatus.HIGHER:
+        return BasisConfirmationResult(
+            status=BasisConfirmationStatus.NOT_CONFIRMED,
+            observation=observation,
+            rolling_stats=stats,
+            reason=(
+                f"Extreme higher basis z-score ({stats.z_score}) above configured "
+                f"upper threshold ({cfg.z_score_upper_threshold})"
+            ),
+        )
+
+    if stats.z_score_status == BasisZScoreStatus.NORMAL:
+        return BasisConfirmationResult(
+            status=BasisConfirmationStatus.CONFIRMED,
+            observation=observation,
+            rolling_stats=stats,
+            reason=(
+                f"Basis confirmed with normal z-score ({stats.z_score}) within "
+                f"[{cfg.z_score_lower_threshold}, {cfg.z_score_upper_threshold}] "
+                f"over {stats.count} observations"
+            ),
+        )
+
     return BasisConfirmationResult(
-        status=BasisConfirmationStatus.CONFIRMED,
+        status=BasisConfirmationStatus.NOT_CONFIRMED,
         observation=observation,
         rolling_stats=stats,
-        reason=(
-            f"Basis confirmed with z-score {stats.z_score:.4f} "
-            f"({stats.z_score_status}) over {stats.count} observations"
-            if stats.z_score is not None
-            else "Basis confirmed"
-        ),
+        reason=f"Unconfirmed basis z-score status: {stats.z_score_status}",
     )
 
 
@@ -378,25 +409,17 @@ def _make_fallback_observation(
     config: BasisConfig,
 ) -> BasisObservation:
     """Helper to construct fail-closed BasisObservation when defects prevent calculation."""
-    # Compute basis values if prices are positive and finite, otherwise 0
+    # Never fabricate prices or use placeholder numbers (1, 0)
     safe_idx = (
         index_candle.close
         if (index_candle.close.is_finite() and index_candle.close > Decimal("0"))
-        else Decimal("1")
+        else None
     )
     safe_fut = (
         futures_candle.close
         if (futures_candle.close.is_finite() and futures_candle.close > Decimal("0"))
-        else Decimal("1")
+        else None
     )
-
-    # If prices were invalid, basis will default to 0
-    if index_candle.close > Decimal("0") and futures_candle.close > Decimal("0"):
-        basis = futures_candle.close - index_candle.close
-        basis_pct = basis / index_candle.close
-    else:
-        basis = Decimal("0")
-        basis_pct = Decimal("0")
 
     agg_quality = (
         index_candle.quality_status
@@ -410,8 +433,8 @@ def _make_fallback_observation(
         futures_contract_id=futures_candle.contract_id.strip().upper(),
         index_price=safe_idx,
         futures_price=safe_fut,
-        basis=basis,
-        basis_pct=basis_pct,
+        basis=None,
+        basis_pct=None,
         index_timestamp=index_candle.exchange_timestamp,
         futures_timestamp=futures_candle.exchange_timestamp,
         evaluation_timestamp=evaluation_timestamp,

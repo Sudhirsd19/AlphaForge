@@ -13,6 +13,7 @@ The basis engine operates as a strictly pure, deterministic, fail-closed pipelin
 - Computes absolute basis and normalized percentage basis using fixed-point `Decimal` arithmetic.
 - Derives rolling statistics (rolling mean, sample standard deviation with Bessel's correction, z-score).
 - Emits canonical, immutable `BasisObservation` and `BasisConfirmationResult` records.
+- Guarantees zero synthetic fallback values: invalid observations never contain fabricated prices (such as `1`) or placeholder basis numbers (such as `0`).
 
 ```mermaid
 flowchart TD
@@ -58,22 +59,22 @@ All domain models are defined in `alphaforge/basis/models.py` as immutable Pydan
 
 ### 3.1 `BasisConfig`
 Governs operational parameters with strict positive thresholds:
-- `max_timestamp_skew_seconds: Decimal = Decimal("60")` (Maximum permissible time difference between index and futures candles).
+- `max_timestamp_skew_seconds: Decimal = Decimal("60")` (Maximum permissible temporal skew between index and futures candles).
 - `max_stale_seconds: Decimal = Decimal("300")` (Maximum permissible age of either candle relative to evaluation time).
 - `rolling_window_size: int = 20` (Fixed observation history depth for rolling statistics).
-- `z_score_lower_threshold: Decimal = Decimal("-2.5")` (Lower boundary for extreme basis compression/backwardation).
-- `z_score_upper_threshold: Decimal = Decimal("2.5")` (Upper boundary for extreme basis expansion/contango).
+- `z_score_lower_threshold: Decimal = Decimal("-2.5")` (Authoritative lower boundary for NORMAL classification).
+- `z_score_upper_threshold: Decimal = Decimal("2.5")` (Authoritative upper boundary for NORMAL classification).
 - `calculation_version: int = 1` (Deterministic schema version tag).
 
 ### 3.2 `BasisObservation`
-The canonical observation schema containing 15 strictly typed fields:
+The canonical observation schema containing 15 strictly typed fields. When an observation is defective or invalid, numeric calculation fields are strictly `None` to prevent fabricated values from appearing numerically valid:
 1. `underlying_symbol: str` (e.g., `"NIFTY"`)
 2. `index_contract_id: str` (e.g., `"NIFTY-SPOT"`)
 3. `futures_contract_id: str` (e.g., `"NIFTY26JUNFUT"`)
-4. `index_price: Decimal`
-5. `futures_price: Decimal`
-6. `basis: Decimal` ($F - S$)
-7. `basis_pct: Decimal` ($(F - S) / S$)
+4. `index_price: Decimal | None` (Real candle price, or `None` if non-positive/non-finite; never `1`)
+5. `futures_price: Decimal | None` (Real candle price, or `None` if non-positive/non-finite; never `1`)
+6. `basis: Decimal | None` ($F - S$ when valid, strictly `None` when defective; never `0`)
+7. `basis_pct: Decimal | None` ($(F - S) / S$ when valid, strictly `None` when defective; never `0`)
 8. `index_timestamp: datetime` (UTC)
 9. `futures_timestamp: datetime` (UTC)
 10. `evaluation_timestamp: datetime` (UTC)
@@ -112,7 +113,7 @@ Prevents look-ahead bias. If `index_candle.timestamp > evaluation_timestamp` or 
 Ensures data freshness. If either `(evaluation_timestamp - index_candle.timestamp) > max_stale_seconds` or `(evaluation_timestamp - futures_candle.timestamp) > max_stale_seconds`, evaluation fails closed with `BasisStatus.STALE`.
 
 ### Step 3: Price Positivity & Finiteness Gate
-Both `index_candle.close` and `futures_candle.close` must be finite positive Decimals ($> 0$). Non-positive or non-finite prices immediately evaluate to `BasisStatus.INVALID`.
+Both `index_candle.close` and `futures_candle.close` must be finite positive Decimals ($> 0$). Non-positive or non-finite prices immediately evaluate to `BasisStatus.INVALID` with price fields set to `None`.
 
 ### Step 4: Data Quality Validation Gate
 Evaluates the Phase 2 `DataQualityStatus` of both candles:
@@ -137,20 +138,23 @@ The contract is evaluated against `evaluate_contract_lifecycle(contract, evaluat
 
 ### Step 7: Timestamp Alignment & Skew Gate
 Calculates absolute difference:
-$$\Delta t = |	ext{timestamp}_{	ext{futures}} - 	ext{timestamp}_{	ext{index}}|$$
-If $\Delta t > 	ext{max\_timestamp\_skew\_seconds}$, evaluation fails closed with `BasisStatus.MISALIGNED_TIMESTAMP`.
+$$\Delta t = |\text{timestamp}_{\text{futures}} - \text{timestamp}_{\text{index}}|$$
+If $\Delta t > \text{max\_timestamp\_skew\_seconds}$, evaluation fails closed with `BasisStatus.MISALIGNED_TIMESTAMP`.
 
 ### Step 8: Pure Calculation
 When all gates pass, `calculate_basis(...)` and `calculate_basis_pct(...)` compute the final values and return a `BasisObservation` with `basis_status = BasisStatus.VALID`.
 
 ---
 
-## 5. Basis Confirmation Gate
+## 5. Basis Confirmation Gate & Regime Rules
 
-The confirmation evaluator `evaluate_basis_confirmation(...)` assesses structural regime:
+The confirmation evaluator `evaluate_basis_confirmation(...)` assesses structural regime using the configured thresholds from `BasisConfig`:
 1. **Observation Health:** If `observation.basis_status != BasisStatus.VALID`, returns `BasisConfirmationStatus.INVALID`.
 2. **Sample Sufficiency:** If history count $< 20$, returns `BasisConfirmationStatus.NOT_CONFIRMED` with reason `"INSUFFICIENT_HISTORY"`.
 3. **Statistical Validity:** If standard deviation is zero or undefined, returns `BasisConfirmationStatus.NOT_CONFIRMED` with reason `"ZERO_OR_UNDEFINED_STANDARD_DEVIATION"`.
-4. **Z-Score Boundaries:**
-   - If `z_score < -2.5` or `z_score > 2.5` (extreme displacement / anomaly), returns `BasisConfirmationStatus.NOT_CONFIRMED`.
-   - If $-2.5 \le z\_score \le 2.5$ (`NORMAL`), returns `BasisConfirmationStatus.CONFIRMED`.
+4. **Z-Score Boundaries (Inclusive for NORMAL):**
+   - If $Z_t < \text{z\_score\_lower\_threshold}$ (`LOWER`), returns `BasisConfirmationStatus.NOT_CONFIRMED` with reason code explicitly indicating extreme lower basis z-score.
+   - If $Z_t > \text{z\_score\_upper\_threshold}$ (`HIGHER`), returns `BasisConfirmationStatus.NOT_CONFIRMED` with reason code explicitly indicating extreme higher basis z-score.
+   - If $\text{z\_score\_lower\_threshold} \le Z_t \le \text{z\_score\_upper\_threshold}$ (`NORMAL`), returns `BasisConfirmationStatus.CONFIRMED`.
+   - Threshold boundaries are strictly inclusive for `NORMAL` ($Z_t = \text{lower}$ and $Z_t = \text{upper}$ evaluate to `CONFIRMED`).
+   - Configured thresholds in `BasisConfig` are authoritative; no hard-coded thresholds exist in confirmation logic.

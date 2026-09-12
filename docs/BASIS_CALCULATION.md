@@ -18,13 +18,16 @@ Where:
 When $B_t > 0$, the futures contract trades at a premium (contango).
 When $B_t < 0$, the futures contract trades at a discount (backwardation).
 
+#### Fail-Closed Policy on Defective Observations
+If an observation is defective or invalid (`basis_status != BasisStatus.VALID`), $B_t$ is strictly `None`. It is never reported as `Decimal("0")` merely because calculation failed, ensuring invalid observations never appear numerically valid.
+
 ### 1.2 Normalized Basis Percentage
 Because raw index points vary over time and across underlying instruments, the normalized basis percentage $b_t$ scales the absolute basis by the spot index price:
 
 $$b_t = \frac{B_t}{S_t} = \frac{F_t - S_t}{S_t}$$
 
 #### Fail-Closed Zero-Division Policy
-If $S_t \le 0$ (non-positive index reference price), `calculate_basis_pct()` immediately raises `BasisCalculationError`. Division by zero or negative index pricing is strictly disallowed.
+If $S_t \le 0$ (non-positive index reference price), `calculate_basis_pct()` immediately raises `BasisCalculationError`. In the engine pipeline, non-positive or non-finite prices evaluate to `BasisStatus.INVALID` with price and basis fields set to `None`. No placeholder prices (such as `1`) are ever generated.
 
 ### 1.3 Timestamp Skew
 The timestamp misalignment between spot index and futures candles is measured in absolute seconds:
@@ -68,13 +71,22 @@ The standardized basis deviation (Z-score) measures how many standard deviations
 
 $$Z_t = \frac{b_t - \mu_t}{\sigma_t}$$
 
-### 3.1 Regime Classification Thresholds
+### 3.1 Regime Classification & Confirmation Mapping
 
-| Z-Score Range | `BasisZScoreStatus` | Regime Description | Strategy Interpretation |
-| :--- | :--- | :--- | :--- |
-| $Z_t < -2.5$ | `LOWER` | Extreme Basis Compression / Backwardation | Severe discount; potential breakdown or rollover anomaly |
-| $-2.5 \le Z_t \le +2.5$ | `NORMAL` | Stable Basis Corridor | Equilibrium pricing; valid for trend/breakout trade execution |
-| $Z_t > +2.5$ | `HIGHER` | Extreme Basis Expansion / Contango | Severe premium; potential exuberance or market dislocation |
+Thresholds defined in `BasisConfig` are authoritative:
+
+| Z-Score Range | `BasisZScoreStatus` | Confirmation Status | Regime Description | Strategy Interpretation |
+| :--- | :--- | :--- | :--- | :--- |
+| $Z_t < \text{lower\_threshold}$ | `LOWER` | `NOT_CONFIRMED` | Extreme Basis Compression / Backwardation | Severe discount; potential breakdown or rollover anomaly |
+| $\text{lower\_threshold} \le Z_t \le \text{upper\_threshold}$ | `NORMAL` | `CONFIRMED` | Stable Basis Corridor (Inclusive) | Equilibrium pricing; valid for trend/breakout trade execution |
+| $Z_t > \text{upper\_threshold}$ | `HIGHER` | `NOT_CONFIRMED` | Extreme Basis Expansion / Contango | Severe premium; potential exuberance or market dislocation |
+| Undefined / $N < 20$ / $\sigma = 0$ | `UNDEFINED` | `NOT_CONFIRMED` | Statistical Indeterminacy | Insufficient data or zero variance |
+
+#### Boundary Inclusivity
+The boundaries for `NORMAL` are strictly inclusive:
+- If $Z_t = \text{z\_score\_lower\_threshold}$, status is `NORMAL` $\rightarrow$ `CONFIRMED`.
+- If $Z_t = \text{z\_score\_upper\_threshold}$, status is `NORMAL` $\rightarrow$ `CONFIRMED`.
+- Custom configured thresholds (e.g. `[-1.0, 1.0]`) are authoritative.
 
 ### 3.2 Edge Cases and Fail-Closed Protections
 
@@ -84,8 +96,9 @@ $$Z_t = \frac{b_t - \mu_t}{\sigma_t}$$
      - `rolling_std = None`
      - `z_score = None`
      - `z_score_status = BasisZScoreStatus.UNDEFINED`
+     - `confirmation_status = BasisConfirmationStatus.NOT_CONFIRMED`
 2. **Zero Standard Deviation ($\sigma_t = 0$):**
    - If all 20 observations in the window are identical, sample standard deviation is 0.
-   - To prevent division by zero, `z_score` is set to `None` and `z_score_status` evaluates to `BasisZScoreStatus.UNDEFINED`.
+   - To prevent division by zero, `z_score` is set to `None`, `z_score_status` evaluates to `BasisZScoreStatus.UNDEFINED`, and confirmation status is `NOT_CONFIRMED`.
 3. **Non-Finite Arithmetic Protection:**
    - Any input containing `NaN`, `sNaN`, or `Infinity` is rejected before calculation begins.

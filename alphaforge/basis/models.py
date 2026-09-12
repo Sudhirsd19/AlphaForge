@@ -81,11 +81,24 @@ class BasisObservation(BaseModel):
     futures_contract_id: str = Field(
         description="Identifier for futures contract (e.g. NIFTY26JUNFUT)"
     )
-    index_price: Decimal = Field(description="Index / spot reference price in points (Decimal)")
-    futures_price: Decimal = Field(description="Futures contract price in points (Decimal)")
-    basis: Decimal = Field(description="Absolute basis in points (futures_price - index_price)")
-    basis_pct: Decimal = Field(
-        description="Normalized basis ratio: (futures_price - index_price) / index_price"
+    index_price: Decimal | None = Field(
+        default=None,
+        description="Index / spot reference price in points (Decimal), or None if invalid",
+    )
+    futures_price: Decimal | None = Field(
+        default=None,
+        description="Futures contract price in points (Decimal), or None if invalid",
+    )
+    basis: Decimal | None = Field(
+        default=None,
+        description="Absolute basis in points (futures_price - index_price), or None if invalid",
+    )
+    basis_pct: Decimal | None = Field(
+        default=None,
+        description=(
+            "Normalized basis ratio: (futures_price - index_price) / index_price, "
+            "or None if invalid"
+        ),
     )
     index_timestamp: datetime = Field(description="Index exchange observation UTC timestamp")
     futures_timestamp: datetime = Field(description="Futures exchange observation UTC timestamp")
@@ -124,7 +137,7 @@ class BasisObservation(BaseModel):
 
     @model_validator(mode="after")
     def validate_numerics(self) -> "BasisObservation":
-        """Validate numeric finiteness."""
+        """Validate numeric finiteness and fail-closed integrity."""
         for field_name in (
             "index_price",
             "futures_price",
@@ -132,9 +145,38 @@ class BasisObservation(BaseModel):
             "basis_pct",
             "timestamp_skew_seconds",
         ):
-            val: Decimal = getattr(self, field_name)
-            if not val.is_finite() or val.is_nan():
+            val: Decimal | None = getattr(self, field_name)
+            if val is not None and (not val.is_finite() or val.is_nan()):
                 raise BasisCalculationError(f"{field_name} must be finite Decimal: {val}")
+
+        if self.basis_status == BasisStatus.VALID:
+            if self.index_price is None or self.index_price <= Decimal("0"):
+                raise BasisCalculationError(
+                    f"VALID BasisObservation must have positive index_price: {self.index_price}"
+                )
+            if self.futures_price is None or self.futures_price <= Decimal("0"):
+                raise BasisCalculationError(
+                    f"VALID BasisObservation must have positive futures_price: {self.futures_price}"
+                )
+            if self.basis is None or self.basis_pct is None:
+                raise BasisCalculationError(
+                    "VALID BasisObservation must have calculated basis and basis_pct"
+                )
+        else:
+            if self.basis is not None or self.basis_pct is not None:
+                raise BasisCalculationError(
+                    f"Invalid BasisObservation ({self.basis_status}) "
+                    "must have None for basis and basis_pct"
+                )
+            if self.index_price is not None and self.index_price <= Decimal("0"):
+                raise BasisCalculationError(
+                    f"BasisObservation index_price must be positive if provided: {self.index_price}"
+                )
+            if self.futures_price is not None and self.futures_price <= Decimal("0"):
+                raise BasisCalculationError(
+                    f"BasisObservation futures_price must be positive: {self.futures_price}"
+                )
+
         return self
 
 
