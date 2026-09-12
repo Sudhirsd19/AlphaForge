@@ -49,3 +49,9 @@ class ContractValidationError(DataIntegrityError):
     """Raised when contract master metadata or lifecycle invariants are breached."""
 
     pass
+
+
+class BasisCalculationError(AlphaForgeError):
+    """Raised when index-futures basis calculation or validation invariants fail."""
+
+    pass
