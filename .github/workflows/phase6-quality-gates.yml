@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - phase6-implementation-check
+  pull_request:
+    branches:
+      - master
 
 jobs:
   quality:
