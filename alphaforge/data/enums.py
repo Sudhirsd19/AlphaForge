@@ -66,3 +66,35 @@ def most_severe_status(statuses: Iterable[DataQualityStatus]) -> DataQualityStat
     if not status_list:
         return DataQualityStatus.EMPTY
     return min(status_list, key=lambda s: QUALITY_PRECEDENCE_RANK[s])
+
+
+# Execution eligibility contracts:
+# Execution-blocking statuses: INVALID, CONFLICT, GAP, STALE, INCOMPLETE
+EXECUTION_BLOCKING_STATUSES: frozenset[DataQualityStatus] = frozenset(
+    {
+        DataQualityStatus.INVALID,
+        DataQualityStatus.CONFLICT,
+        DataQualityStatus.GAP,
+        DataQualityStatus.STALE,
+        DataQualityStatus.INCOMPLETE,
+    }
+)
+
+# Recoverable statuses: VALID, DUPLICATE (after deduplication), OUT_OF_ORDER (after sorting)
+RECOVERABLE_STATUSES: frozenset[DataQualityStatus] = frozenset(
+    {
+        DataQualityStatus.VALID,
+        DataQualityStatus.DUPLICATE,
+        DataQualityStatus.OUT_OF_ORDER,
+    }
+)
+
+
+def is_execution_eligible(status: DataQualityStatus) -> bool:
+    """
+    Determine if a data quality status permits downstream strategy execution.
+    VALID, DUPLICATE (after deterministic deduplication), and OUT_OF_ORDER
+    (after deterministic sorting) are eligible.
+    INVALID, CONFLICT, GAP, STALE, INCOMPLETE, and EMPTY are strictly blocked.
+    """
+    return status in RECOVERABLE_STATUSES

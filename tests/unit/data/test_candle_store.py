@@ -137,6 +137,7 @@ def test_candle_store_strategy_execution_input_bridge() -> None:
     store.add_candle(forming)
 
     strat_input = store.get_strategy_execution_input("NIFTY", "3m", count=5)
+    assert strat_input is not None
     assert len(strat_input) == 6  # 1 forming + 5 closed
     # Index [0] is forming
     assert strat_input[0].is_closed is False

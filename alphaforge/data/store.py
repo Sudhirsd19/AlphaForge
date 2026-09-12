@@ -9,8 +9,9 @@ from datetime import datetime
 
 from alphaforge.core.exceptions import DataIntegrityError
 from alphaforge.core.models import Candle
+from alphaforge.data.enums import EXECUTION_BLOCKING_STATUSES
 from alphaforge.data.models import MarketCandle
-from alphaforge.data.timeframe import expected_next_timestamp
+from alphaforge.data.normalization import NormalizationResult
 
 
 class CandleStore:
@@ -76,6 +77,14 @@ class CandleStore:
         for c in candles:
             self.add_candle(c)
 
+    def add_normalization_result(self, result: NormalizationResult) -> bool:
+        """
+        Ingest a NormalizationResult into the store.
+        Returns True if execution is allowed, False if blocked by an execution defect.
+        """
+        self.add_candles(result.valid_candles)
+        return result.execution_allowed
+
     def get_candles(
         self,
         symbol: str,
@@ -123,50 +132,54 @@ class CandleStore:
         timeframe: str,
         count: int,
         forming_candle: MarketCandle | None = None,
-    ) -> list[Candle]:
+    ) -> list[Candle] | None:
         """
         Build the canonical execution candle sequence for Phase 1 DeterministicStrategyEngine.
 
         Contract:
-          - index [0]: forming candle (is_closed=False, quarantined by strategy)
+          - index [0]: real forming candle only (is_closed=False, quarantined by strategy)
           - index [1]: latest fully closed candle (trigger candle)
           - index [2..N]: prior fully closed candles in reverse chronological order
+
+        Fail-Closed Safety Rules:
+          - If no real forming candle exists, returns None (NEVER fabricate synthetic candles).
+          - If any candle in the execution sequence has an execution-blocking quality status
+            (INVALID, CONFLICT, GAP, STALE, INCOMPLETE), returns None.
+          - If insufficient closed candles exist, returns None.
         """
         key = (symbol.upper(), timeframe)
         closed_series = self._closed_store.get(key, [])
-        if not closed_series:
-            return []
+        if not closed_series or len(closed_series) < count:
+            return None
+
+        # Fail-closed check: real forming candle requirement
+        # Zero synthetic/placeholder/forward-filled candles are ever fabricated
+        forming = forming_candle or self._forming_store.get(key)
+        if forming is None:
+            return None
+
+        # Fail-closed check: forming candle defect
+        if forming.quality_status in EXECUTION_BLOCKING_STATUSES:
+            return None
 
         # Latest 'count' closed candles in reverse chronological order
         recent_closed = closed_series[-count:]
-        reversed_closed = [c.to_strategy_candle() for c in reversed(recent_closed)]
 
-        # Determine forming candle for index [0]
-        forming = forming_candle or self._forming_store.get(key)
-        if forming is not None:
-            forming_strategy_candle = Candle(
-                timestamp=forming.exchange_timestamp,
-                open=forming.open,
-                high=forming.high,
-                low=forming.low,
-                close=forming.close,
-                volume=forming.volume,
-                open_interest=forming.open_interest,
-                is_closed=False,
-            )
-        else:
-            # Construct a safe placeholder forming candle with is_closed=False
-            last_closed = recent_closed[-1]
-            next_ts = expected_next_timestamp(last_closed.exchange_timestamp, timeframe)
-            forming_strategy_candle = Candle(
-                timestamp=next_ts,
-                open=last_closed.close,
-                high=last_closed.close,
-                low=last_closed.close,
-                close=last_closed.close,
-                volume=0,
-                is_closed=False,
-            )
+        # Fail-closed check: closed candle defect in execution window
+        if any(c.quality_status in EXECUTION_BLOCKING_STATUSES for c in recent_closed):
+            return None
+
+        forming_strategy_candle = Candle(
+            timestamp=forming.exchange_timestamp,
+            open=forming.open,
+            high=forming.high,
+            low=forming.low,
+            close=forming.close,
+            volume=forming.volume,
+            open_interest=forming.open_interest,
+            is_closed=False,
+        )
+        reversed_closed = [c.to_strategy_candle() for c in reversed(recent_closed)]
 
         return [forming_strategy_candle, *reversed_closed]
 
@@ -180,6 +193,7 @@ class CandleStore:
         """
         Build the confirmation candle sequence for Phase 1 DeterministicStrategyEngine.
         Returns closed candles on or before max_timestamp in chronological order.
+        Returns empty list if any eligible candle has an execution-blocking defect.
         """
         key = (symbol.upper(), timeframe)
         closed_series = self._closed_store.get(key, [])
@@ -189,5 +203,9 @@ class CandleStore:
         eligible = [c for c in closed_series if c.exchange_timestamp <= max_timestamp]
         if count is not None and len(eligible) > count:
             eligible = eligible[-count:]
+
+        # Fail-closed check: do not provide confirmation sequence if contaminated by defect
+        if any(c.quality_status in EXECUTION_BLOCKING_STATUSES for c in eligible):
+            return []
 
         return [c.to_strategy_candle() for c in eligible]

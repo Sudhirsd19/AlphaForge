@@ -10,13 +10,19 @@ AlphaForge enforces deterministic data governance across all market data ingesti
 
 1. **Deterministic Ingestion:** Given the identical sequence of raw market records, the pipeline produces the bit-exact identical sequence of canonical `MarketCandle` objects and data quality classifications.
 2. **Zero Data Imputation:** Missing candle intervals are detected, flagged as `DataQualityStatus.GAP`, and handled fail-closed. The system **never forward-fills, linear-interpolates, or invents synthetic market data**.
-3. **Deterministic Conflict Quarantine:** If two or more records share the identical composite key `(symbol, timeframe, exchange_timestamp)` but contain divergent OHLCV values, the system **never** silently overwrites or arbitrates based on arrival order. All conflicting records are quarantined with status `CONFLICT` and excluded from strategy consumption.
-4. **Idempotent Deduplication:** Exact duplicate records (identical composite key and identical OHLCV) are safely and idempotently collapsed into a single canonical record.
-5. **Closed-Candle Isolation Boundary:** In-flight forming candles (index `[0]`) are strictly isolated from closed historical candles (indices `[1..N]`). The Strategy Engine evaluates signals exclusively on closed candles.
-6. **Temporal Causality & No Lookahead:**
+3. **No Synthetic Candles Policy:** The system will **never fabricate a market candle**, **never forward-fill OHLC prices**, and **never create zero-volume placeholder candles** to satisfy any interface.
+4. **Deterministic Conflict Quarantine:** If two or more records share the identical composite key `(symbol, timeframe, exchange_timestamp)` but contain divergent OHLCV values, the system **never** silently overwrites or arbitrates based on arrival order. All conflicting records are quarantined with status `CONFLICT` and excluded from strategy consumption.
+5. **Idempotent Deduplication (Duplicate Exception):** Exact duplicate records (identical composite key and identical OHLCV) are safely and idempotently collapsed into a single canonical record. Exact `DUPLICATE` status is explicitly **NOT an execution blocker** after deterministic deduplication (`execution_allowed = True`).
+6. **Execution Eligibility Gate:** Batches tagged with execution-blocking statuses (`INVALID`, `CONFLICT`, `GAP`, `STALE`, `INCOMPLETE`, `EMPTY`) strictly set `execution_allowed = False`. The downstream strategy bridge (`CandleStore.get_strategy_execution_input`) returns `None` fail-closed, prohibiting any execution attempt.
+7. **Closed-Candle Isolation Boundary & Real Forming Candle Requirement:**
+   - In-flight forming candles (index `[0]`) are strictly isolated from closed historical candles (indices `[1..N]`).
+   - Slot `[0]` requires a **real, observed forming candle** (`is_closed=False`).
+   - If no real forming candle is present, the bridge returns `None` (unavailable state). It will **never use fabricated data to satisfy the [0] slot**.
+   - The Strategy Engine evaluates signals exclusively on closed candles (`[1..N]`), discarding `[0]`.
+8. **Temporal Causality & No Lookahead:**
    - Ingestion arrival timestamp (`received_timestamp`) must never precede exchange timestamp (`exchange_timestamp`).
    - Candle timestamps must never be strictly in the future relative to the evaluation context timestamp (`evaluation_timestamp`).
-7. **Fixed-Point Precision:** All price representations use Python `Decimal` with positive boundaries ($P > 0$). Floating-point arithmetic is strictly prohibited in price storage and verification.
+9. **Fixed-Point Precision:** All price representations use Python `Decimal` with positive boundaries ($P > 0$). Floating-point arithmetic is strictly prohibited in price storage and verification.
 
 ---
 
@@ -39,9 +45,13 @@ flowchart TD
     Arbiter -->|Clean Unique Sequence| Gap["Gap Detection (has_candle_gap)"]
     Gap -->|Missing Interval Delta| Tag_Gap["Tag Batch as GAP (Fail-Closed)"]
     Gap -->|Continuous Interval| Fresh["Freshness Check (max_stale_seconds)"]
-    Fresh --> Store["Canonical Candle Store (store.py)"]
-    Store --> Bridge["to_strategy_candle() Bridge"]
-    Bridge --> Strat["Phase 1 Strategy Engine (engine.py)"]
+    Fresh --> Gate{"Execution Eligibility Gate"}
+    Gate -->|INVALID / CONFLICT / GAP / STALE / INCOMPLETE| Block["execution_allowed = False (Block Strategy)"]
+    Gate -->|VALID / DUPLICATE / OUT_OF_ORDER| Pass["execution_allowed = True (Eligible)"]
+    Pass --> Store["Canonical Candle Store (store.py)"]
+    Store --> Bridge{"Strategy Bridge Guard"}
+    Bridge -->|No Real Forming Candle / Defect| RetNone["Return None (Fail-Closed)"]
+    Bridge -->|Real Forming + Clean Closed| Feed["Feed Phase 1 Strategy Engine (engine.py)"]
 ```
 
 ---
@@ -71,10 +81,11 @@ Timestamps violating boundary alignment are rejected with `DataIntegrityError`.
 
 ---
 
-## 5. Storage & Lifecycle Isolation
+## 5. Storage & Strategy Bridge Lifecycle
 
 Phase 2 implements an in-memory, deterministic `CandleStore` interface:
 - **Index:** `(symbol, timeframe)`.
 - **Closed Candle Series:** Stored chronologically in an immutable list.
 - **Forming Candle State:** Maintained separately in a forming store (`is_closed=False`).
 - **Bridge to Strategy Engine:** `get_strategy_execution_input()` produces the exact reverse-chronological sequence required by Phase 1 (`[0]` forming, `[1]` trigger closed bar, `[2..N]` older closed bars), ensuring zero contamination of signal evaluation.
+- **Fail-Closed Strategy Guard:** If no real forming candle exists, or if any candle in the requested sequence contains an execution-blocking status, `get_strategy_execution_input()` returns `None`.

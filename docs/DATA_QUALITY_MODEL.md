@@ -43,13 +43,58 @@ If a batch has no defects, its classification is `VALID`.
 
 ---
 
-## 3. Downstream Strategy Integration
+## 3. Execution Eligibility Contract
 
-The Strategy Engine in Phase 1 accepts `StrategySignal` decisions:
-- Batches classified with status $\ne \text{VALID}$ trigger appropriate rejection decisions:
-  - `INVALID` $\to$ `REJECT_DATA_INVALID`
-  - `STALE` $\to$ `REJECT_DATA_STALE`
-  - `INCOMPLETE` $\to$ `REJECT_INSUFFICIENT_HISTORY`
-  - `GAP` $\to$ `REJECT_DATA_INVALID` (or fail-closed rejection)
+AlphaForge enforces an explicit, fail-closed execution eligibility contract via `NormalizationResult.execution_allowed`:
 
-This ensures complete alignment across the data governance layer and execution safety.
+```python
+EXECUTION_BLOCKING_STATUSES: frozenset[DataQualityStatus] = frozenset(
+    {
+        DataQualityStatus.INVALID,
+        DataQualityStatus.CONFLICT,
+        DataQualityStatus.GAP,
+        DataQualityStatus.STALE,
+        DataQualityStatus.INCOMPLETE,
+    }
+)
+
+RECOVERABLE_STATUSES: frozenset[DataQualityStatus] = frozenset(
+    {
+        DataQualityStatus.VALID,
+        DataQualityStatus.DUPLICATE,
+        DataQualityStatus.OUT_OF_ORDER,
+    }
+)
+
+
+def is_execution_eligible(status: DataQualityStatus) -> bool:
+    return status in RECOVERABLE_STATUSES
+```
+
+### Execution-Blocking Statuses:
+- **`INVALID`:** Fatal mathematical or boundary breach $\implies$ `execution_allowed = False`.
+- **`CONFLICT`:** Divergent values for identical timestamp $\implies$ `execution_allowed = False`.
+- **`GAP`:** Missing candle interval $\implies$ `execution_allowed = False`.
+- **`STALE`:** Data age exceeds maximum staleness $\implies$ `execution_allowed = False`.
+- **`INCOMPLETE`:** History count below minimum indicator warm-up $\implies$ `execution_allowed = False`.
+- **`EMPTY`:** Zero input candles available $\implies$ `execution_allowed = False`.
+
+### Recoverable Statuses (Duplicate & Out-Of-Order Exception):
+- **`DUPLICATE`:** Exact bit-for-bit duplicate records are idempotently deduplicated. Once deduplicated, the remaining series is clean and **execution-eligible** (`execution_allowed = True`). Duplicate status is explicitly **NOT** an execution blocker after deterministic deduplication.
+- **`OUT_OF_ORDER`:** Records received out of sequence are chronologically sorted via deterministic secondary sorting. Once sorted, the continuous series is **execution-eligible** (`execution_allowed = True`).
+- **`VALID`:** Uncompromised continuous series $\implies$ `execution_allowed = True`.
+
+---
+
+## 4. No Synthetic Candle Policy & Real Forming Candle Requirement
+
+AlphaForge strictly prohibits candle fabrication:
+1. **No Synthetic Candles:** The system will **never fabricate a market candle**, **never forward-fill OHLC prices**, and **never create zero-volume placeholder candles**.
+2. **Real Forming Candle Requirement:** The Phase 1 strategy execution input contract requires slot `[0]` to contain a real forming candle (`is_closed=False`):
+   - If a real forming candle exists in store or is explicitly supplied $\implies$ placed at index `[0]`.
+   - If no real forming candle exists $\implies$ `CandleStore.get_strategy_execution_input()` returns an explicit unavailable state (`None`).
+   - Slot `[0]` is **never satisfied using fabricated data**.
+3. **Execution Gate:** Downstream strategy execution is immediately blocked (`None` returned) if:
+   - No real forming candle is present.
+   - Any candle in the execution window possesses an execution-blocking status.
+   - Insufficient closed history is available.

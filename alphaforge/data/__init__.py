@@ -3,10 +3,13 @@ AlphaForge Market Data Layer.
 """
 
 from alphaforge.data.enums import (
+    EXECUTION_BLOCKING_STATUSES,
     QUALITY_PRECEDENCE_RANK,
+    RECOVERABLE_STATUSES,
     DataQualityStatus,
     InstrumentType,
     Timeframe,
+    is_execution_eligible,
     most_severe_status,
 )
 from alphaforge.data.models import MarketCandle, RawMarketRecord
@@ -34,7 +37,9 @@ from alphaforge.data.validation import (
 )
 
 __all__ = [
+    "EXECUTION_BLOCKING_STATUSES",
     "QUALITY_PRECEDENCE_RANK",
+    "RECOVERABLE_STATUSES",
     "CandleStore",
     "DataQualityStatus",
     "InstrumentType",
@@ -48,6 +53,7 @@ __all__ = [
     "expected_next_timestamp",
     "get_timeframe_delta",
     "has_candle_gap",
+    "is_execution_eligible",
     "is_valid_candle_boundary",
     "most_severe_status",
     "parse_raw_record",

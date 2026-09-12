@@ -37,6 +37,7 @@ The strategy configuration $\Theta_{cfg}$ is hashed into a unique fingerprint:
 import hashlib
 import json
 
+
 def compute_config_hash(config_dict: dict) -> str:
     canonical_json = json.dumps(config_dict, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
@@ -58,7 +59,7 @@ def compute_signal_id(
     symbol: str,
     direction: str,
     signal_timestamp_iso: str,
-    config_hash: str
+    config_hash: str,
 ) -> str:
     payload = f"{strategy_id}:{strategy_version}:{symbol}:{direction}:{signal_timestamp_iso}:{config_hash}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]

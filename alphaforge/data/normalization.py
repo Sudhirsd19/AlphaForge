@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from alphaforge.core.exceptions import DataIntegrityError
 from alphaforge.data.enums import (
     DataQualityStatus,
+    is_execution_eligible,
     most_severe_status,
 )
 from alphaforge.data.models import MarketCandle, RawMarketRecord
@@ -55,6 +56,9 @@ class NormalizationResult(BaseModel):
     )
     quality_status: DataQualityStatus = Field(
         description="Overall batch quality classification according to precedence hierarchy"
+    )
+    execution_allowed: bool = Field(
+        description="Explicit fail-closed boolean: True if batch is eligible for strategy execution"
     )
     was_out_of_order: bool = Field(
         default=False, description="True if raw records were received out of chronological order"
@@ -98,6 +102,7 @@ class MarketDataNormalizer:
                 duplicates_count=0,
                 detected_gaps=[],
                 quality_status=DataQualityStatus.EMPTY,
+                execution_allowed=False,
                 was_out_of_order=False,
             )
 
@@ -130,12 +135,14 @@ class MarketDataNormalizer:
                     observed_statuses.append(DataQualityStatus.INVALID)
 
         if not parsed_candidates and quarantined:
+            status = most_severe_status(observed_statuses)
             return NormalizationResult(
                 valid_candles=[],
                 quarantined_records=quarantined,
                 duplicates_count=0,
                 detected_gaps=[],
-                quality_status=most_severe_status(observed_statuses),
+                quality_status=status,
+                execution_allowed=is_execution_eligible(status),
                 was_out_of_order=False,
             )
 
@@ -253,5 +260,6 @@ class MarketDataNormalizer:
             duplicates_count=duplicates_count,
             detected_gaps=detected_gaps,
             quality_status=final_status,
+            execution_allowed=is_execution_eligible(final_status),
             was_out_of_order=was_out_of_order,
         )

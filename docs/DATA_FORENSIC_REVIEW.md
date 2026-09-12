@@ -25,21 +25,21 @@ Every candle and tick ingested into AlphaForge must strictly adhere to the immut
 class MarketCandle(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    symbol: str                    # e.g., "NIFTY"
-    instrument_type: str           # "INDEX" | "FUTURES" | "EQUITY"
-    contract_id: str               # e.g., "NIFTY26SEP25000FUT" or "INDEX_SPOT"
-    exchange_timestamp: datetime   # Timestamp assigned by the exchange matching engine
-    received_timestamp: datetime   # Timestamp when packet reached AlphaForge gateway
-    timeframe: str                 # e.g., "1m", "3m", "5m", "15m", "1d"
-    open: Decimal                  # Strict fixed-point Decimal representation
+    symbol: str  # e.g., "NIFTY"
+    instrument_type: str  # "INDEX" | "FUTURES" | "EQUITY"
+    contract_id: str  # e.g., "NIFTY26SEP25000FUT" or "INDEX_SPOT"
+    exchange_timestamp: datetime  # Timestamp assigned by the exchange matching engine
+    received_timestamp: datetime  # Timestamp when packet reached AlphaForge gateway
+    timeframe: str  # e.g., "1m", "3m", "5m", "15m", "1d"
+    open: Decimal  # Strict fixed-point Decimal representation
     high: Decimal
     low: Decimal
     close: Decimal
-    volume: int                    # Traded volume in contracts/shares
-    open_interest: int | None      # Open interest (mandatory for futures, None for index)
-    source: str                    # e.g., "ZERODHA_WS", "ANGEL_REST", "PARQUET_HISTORICAL"
-    quality_status: str            # "VALIDATED" | "SUSPECT" | "CORRUPTED"
-    data_version: int              # Schema revision tracking
+    volume: int  # Traded volume in contracts/shares
+    open_interest: int | None  # Open interest (mandatory for futures, None for index)
+    source: str  # e.g., "ZERODHA_WS", "ANGEL_REST", "PARQUET_HISTORICAL"
+    quality_status: str  # "VALIDATED" | "SUSPECT" | "CORRUPTED"
+    data_version: int  # Schema revision tracking
 ```
 
 ---

@@ -102,9 +102,9 @@ Blind retries without reconciliation are strictly prohibited.
 To prevent double execution after timeouts or duplicate webhook callbacks, every action carries deterministic cryptographic identities:
 
 ```python
-client_order_id = sha256(
-    f"{strategy_id}:{strategy_version}:{signal_id}:{attempt_id}"
-).hexdigest()[:24]
+client_order_id = sha256(f"{strategy_id}:{strategy_version}:{signal_id}:{attempt_id}").hexdigest()[
+    :24
+]
 ```
 
 When network communication fails:

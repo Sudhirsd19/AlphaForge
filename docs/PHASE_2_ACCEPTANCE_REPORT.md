@@ -5,7 +5,7 @@
 
 ## 1. Executive Summary
 
-Phase 2 implementation is **COMPLETE** and formally verified against:
+Phase 2 implementation is **COMPLETE**, remediated, and formally verified against:
 - Master Specification Sections 9, 10, 16, 21, and 22.
 - `docs/REQUIREMENT_FREEZE.md`
 - `docs/FORMAL_REQUIREMENT_MATRIX.md`
@@ -28,11 +28,13 @@ $$\mathbf{PHASE\ 2 = APPROVED}$$
 | **Timezone & Boundary Alignment** | `alphaforge.data.timeframe` (UTC validation, second=0, microsecond=0, 1m/3m/5m/15m alignment) | `test_validation.py` | **PASS** |
 | **Deterministic Ordering** | `MarketDataNormalizer` sorts by `(ts, symbol, o, h, l, c, v)` with permutation invariance | `test_normalization.py`, `test_data_governance_properties.py` | **PASS** |
 | **Idempotent Deduplication** | Identical duplicate records collapsed into single record with `DUPLICATE` status | `test_duplicate_and_conflict.py`, `test_data_governance_properties.py` | **PASS** |
+| **Execution Eligibility Gate** | `NormalizationResult.execution_allowed` strictly blocks `INVALID`, `CONFLICT`, `GAP`, `STALE`, `INCOMPLETE`; permits `VALID`, `DUPLICATE`, `OUT_OF_ORDER` | `test_execution_eligibility.py` | **PASS** |
 | **Conflict Quarantine Policy** | Divergent OHLCV at same timestamp quarantined (`CONFLICT`), zero silent overwrites | `test_duplicate_and_conflict.py` | **PASS** |
 | **Zero Data Imputation (Gap Policy)** | Missing intervals tagged `GAP`; zero forward-fill, linear-interpolation, or hallucination | `test_gap_detection.py` | **PASS** |
+| **Zero Synthetic Forming Candles** | Pure elimination of placeholder candles; `get_strategy_execution_input()` returns `None` if real forming candle is missing | `test_execution_eligibility.py` | **PASS** |
 | **Precedence Hierarchy** | $\text{INVALID} > \text{CONFLICT} > \text{OUT\_OF\_ORDER} > \text{DUPLICATE} > \text{GAP} > \text{STALE} > \text{INCOMPLETE} > \text{EMPTY} > \text{VALID}$ | `test_normalization.py`, `test_duplicate_and_conflict.py` | **PASS** |
 | **Closed-Candle Isolation** | `CandleStore` isolates in-flight forming bar (`is_closed=False`) from closed historical series | `test_candle_store.py` | **PASS** |
-| **Phase 1 Strategy Bridge** | `CandleStore.get_strategy_execution_input()` produces canonical `[0]` forming + `[1..N]` closed sequence | `test_candle_store.py`, `test_data_to_strategy_pipeline.py` | **PASS** |
+| **Phase 1 Strategy Bridge** | `CandleStore.get_strategy_execution_input()` produces canonical `[0]` forming + `[1..N]` closed sequence, or `None` fail-closed | `test_candle_store.py`, `test_data_to_strategy_pipeline.py` | **PASS** |
 | **End-to-End Pipeline Integration** | Raw un-normalized feed $\to$ Normalizer $\to$ Store $\to$ `DeterministicStrategyEngine.evaluate()` | `test_data_to_strategy_pipeline.py` | **PASS** |
 | **Zero Regression on Phase 1** | All 47 Phase 1 tests pass without modification | `test_golden_fixtures.py`, `test_forensic_regressions.py`, etc. | **PASS** |
 
@@ -41,7 +43,7 @@ $$\mathbf{PHASE\ 2 = APPROVED}$$
 ## 3. Test Suite & Verification Evidence
 
 ### Automated Test Execution
-- Total Tests: **82 passed** in 1.59s
+- Total Tests: **92 passed** in 1.85s
   - Phase 1 Golden Fixtures: 14/14 PASS
   - Phase 1 Unit & Forensic Regressions: 33/33 PASS
   - Phase 2 Schema & Validation: 14/14 PASS
@@ -49,11 +51,12 @@ $$\mathbf{PHASE\ 2 = APPROVED}$$
   - Phase 2 Candle Store: 6/6 PASS
   - Phase 2 Property-Based Tests (Hypothesis): 2/2 PASS (55 examples)
   - Phase 2 End-to-End Integration: 2/2 PASS
+  - Phase 2 Execution Eligibility & Remediation Regressions: 10/10 PASS
 
 ### Static Typing & Lint Compliance
 - `ruff check alphaforge tests`: **All checks passed (0 errors)**
-- `ruff format --check alphaforge tests`: **34 files already formatted (100% compliant)**
-- `mypy --python-version 3.12 --explicit-package-bases alphaforge tests`: **Success: no issues found in 34 source files**
+- `ruff format --check alphaforge tests`: **35 files already formatted (100% compliant)**
+- `mypy --python-version 3.12 --explicit-package-bases alphaforge tests`: **Success: no issues found in 35 source files**
 
 ---
 
@@ -68,7 +71,7 @@ $$\mathbf{PHASE\ 2 = APPROVED}$$
 
 ## 5. Formal Sign-Off
 
-Phase 2 (Data Governance and Market Data Layer) is fully complete, deterministic, and production-hardened.
+Phase 2 (Data Governance and Market Data Layer) is fully remediated, hardened with fail-closed execution eligibility, and verified.
 Awaiting explicit authorization to proceed to Phase 3:
 
 ```text

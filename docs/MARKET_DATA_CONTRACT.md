@@ -66,3 +66,16 @@ Candle(
 ```
 
 This guarantees 100% zero-conversion loss and perfect compatibility with the Phase 1 `DeterministicStrategyEngine`.
+
+---
+
+## 4. Execution Bridge Contract (`CandleStore.get_strategy_execution_input`)
+
+The downstream strategy-data bridge enforces a strict, fail-closed contract:
+1. **Real Forming Candle Required:** Slot `[0]` must contain an actual, observed forming candle (`is_closed=False`).
+2. **Zero Synthetic Candles:** No synthetic, forward-filled, or zero-volume placeholder candles are ever constructed. If no real forming candle is present, `get_strategy_execution_input()` returns `None`.
+3. **Execution Eligibility Guard:** If any candle in the execution series has an execution-blocking status (`INVALID`, `CONFLICT`, `GAP`, `STALE`, `INCOMPLETE`), `get_strategy_execution_input()` returns `None`.
+4. **Sequence Guarantee:** When eligible, returns:
+   - `[0]`: Real forming candle (`is_closed=False`, quarantined by strategy engine).
+   - `[1]`: Latest fully closed candle (trigger candle).
+   - `[2..N]`: Older fully closed candles in reverse chronological order.

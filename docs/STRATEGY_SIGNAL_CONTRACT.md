@@ -20,10 +20,12 @@ from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field
 
+
 class SignalDirection(str, Enum):
     LONG = "LONG"
     SHORT = "SHORT"
     FLAT = "FLAT"
+
 
 class StrategyDecision(str, Enum):
     ACCEPT = "ACCEPT"
@@ -31,6 +33,7 @@ class StrategyDecision(str, Enum):
     INVALID_DATA = "INVALID_DATA"
     EXPIRED = "EXPIRED"
     DUPLICATE = "DUPLICATE"
+
 
 class RejectionCode(str, Enum):
     REJECT_NONE = "REJECT_NONE"
@@ -51,6 +54,7 @@ class RejectionCode(str, Enum):
     REJECT_EXPIRED = "REJECT_EXPIRED"
     REJECT_DUPLICATE = "REJECT_DUPLICATE"
 
+
 class FuturesConfirmationStatus(str, Enum):
     CONFIRMED = "CONFIRMED"
     NOT_CONFIRMED = "NOT_CONFIRMED"
@@ -58,32 +62,34 @@ class FuturesConfirmationStatus(str, Enum):
     STALE = "STALE"
     UNAVAILABLE = "UNAVAILABLE"
 
+
 class TrendState(str, Enum):
     BULLISH = "BULLISH"
     BEARISH = "BEARISH"
     NEUTRAL = "NEUTRAL"
 
+
 class StrategySignal(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    signal_id: str                      # Deterministic SHA-256 hash string
-    strategy_id: str                    # e.g., "AF_ORB_MOMENTUM_V1"
-    strategy_version: str               # e.g., "1.0.0"
-    symbol: str                         # e.g., "NIFTY"
-    direction: SignalDirection          # LONG | SHORT | FLAT
-    signal_timestamp: datetime          # Exact close timestamp of candle [1]
-    evaluation_timestamp: datetime      # Context timestamp of engine evaluation
-    entry_reference: Decimal            # Entry trigger price (Close of [1])
-    stop_reference: Decimal             # Structural stop price
-    target_reference: Decimal           # Fixed 1:2 profit target price
-    risk_distance: Decimal              # abs(entry_reference - stop_reference)
-    trend_state: TrendState             # BULLISH | BEARISH | NEUTRAL
+    signal_id: str  # Deterministic SHA-256 hash string
+    strategy_id: str  # e.g., "AF_ORB_MOMENTUM_V1"
+    strategy_version: str  # e.g., "1.0.0"
+    symbol: str  # e.g., "NIFTY"
+    direction: SignalDirection  # LONG | SHORT | FLAT
+    signal_timestamp: datetime  # Exact close timestamp of candle [1]
+    evaluation_timestamp: datetime  # Context timestamp of engine evaluation
+    entry_reference: Decimal  # Entry trigger price (Close of [1])
+    stop_reference: Decimal  # Structural stop price
+    target_reference: Decimal  # Fixed 1:2 profit target price
+    risk_distance: Decimal  # abs(entry_reference - stop_reference)
+    trend_state: TrendState  # BULLISH | BEARISH | NEUTRAL
     basis_status: FuturesConfirmationStatus  # CONFIRMED | NOT_CONFIRMED | etc.
-    volume_status: str                  # "CONFIRMED" | "BELOW_THRESHOLD"
-    decision: StrategyDecision          # ACCEPT | REJECT | INVALID_DATA | EXPIRED | DUPLICATE
-    rejection_code: RejectionCode       # Formal rejection code
-    config_hash: str                    # Hex digest of canonical config
-    data_version: int                   # Schema version
+    volume_status: str  # "CONFIRMED" | "BELOW_THRESHOLD"
+    decision: StrategyDecision  # ACCEPT | REJECT | INVALID_DATA | EXPIRED | DUPLICATE
+    rejection_code: RejectionCode  # Formal rejection code
+    config_hash: str  # Hex digest of canonical config
+    data_version: int  # Schema version
 ```
 
 ---

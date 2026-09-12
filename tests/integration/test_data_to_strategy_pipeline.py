@@ -119,6 +119,7 @@ def test_end_to_end_raw_to_strategy_valid_long() -> None:
     # Count of closed candles is total - 1 (since index [0] is forming)
     closed_count = len(fixture["exec_candles"]) - 1
     raw_exec_bridge = store.get_strategy_execution_input("NIFTY", "3m", count=closed_count)
+    assert raw_exec_bridge is not None
     raw_conf_bridge = store.get_strategy_confirmation_input(
         "NIFTY", "15m", max_timestamp=latest_3m.exchange_timestamp
     )
@@ -172,15 +173,20 @@ def test_end_to_end_stale_data_rejection() -> None:
     normalizer = MarketDataNormalizer(max_stale_seconds=195)
     res_3m = normalizer.normalize_batch(raw_exec_inputs, evaluation_timestamp=eval_ts)
 
-    # Data is 30 mins old (> 195s), so normalizer flags STALE
+    # Data is 30 mins old (> 195s), so normalizer flags STALE and execution is blocked
     assert res_3m.quality_status == DataQualityStatus.STALE
+    assert res_3m.execution_allowed is False
 
     store = CandleStore()
-    store.add_candles(res_3m.valid_candles)
+    store.add_normalization_result(res_3m)
 
     closed_count = len(fixture["exec_candles"]) - 1
+    # Store fail-closed gate: execution input is blocked (returns None)
     exec_candles = store.get_strategy_execution_input("NIFTY", "3m", count=closed_count)
+    assert exec_candles is None
 
+    # Verify Phase 1 engine defense-in-depth: if stale candles are directly passed,
+    # the engine still rejects with REJECT_DATA_STALE
     raw_conf_inputs = [
         {
             "symbol": "NIFTY",
@@ -210,8 +216,10 @@ def test_end_to_end_stale_data_rejection() -> None:
     )
 
     engine = DeterministicStrategyEngine()
+    # Pass directly formatted raw candles to engine
+    direct_exec = [c.to_strategy_candle() for c in res_3m.valid_candles]
     signal = engine.evaluate(
-        raw_exec_candles=exec_candles,
+        raw_exec_candles=direct_exec,
         raw_conf_candles=conf_candles,
         futures_status=FuturesConfirmationStatus.CONFIRMED,
         evaluation_timestamp=eval_ts,
