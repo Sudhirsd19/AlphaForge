@@ -79,5 +79,6 @@ no_implicit_reexport = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-asyncio_mode = "auto"
+pythonpath = ["."]
 addopts = "-ra -q --strict-markers"
+
