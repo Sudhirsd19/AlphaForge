@@ -6,6 +6,7 @@ and complete transition event audit lineage.
 """
 
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -170,6 +171,7 @@ class OrderStateMachine:
         signal_id: str | None = None,
         position_id: str | None = None,
         created_at: datetime | None = None,
+        transition_listener: Callable[[TransitionEvent], None] | None = None,
     ) -> None:
         clean_id = order_id.strip().upper()
         if not clean_id:
@@ -190,6 +192,7 @@ class OrderStateMachine:
         self._quantity: int = quantity
         self._signal_id: str | None = signal_id.strip().upper() if signal_id else None
         self._position_id: str | None = position_id.strip().upper() if position_id else None
+        self._transition_listener: Callable[[TransitionEvent], None] | None = transition_listener
 
         self._current_state: OrderState = initial_state
         self._filled_quantity: int = 0
@@ -417,6 +420,10 @@ class OrderStateMachine:
             self._current_state = target_state
             self._updated_at = now
             self._history.append(t_event)
+
+            # 7b. Non-invasive observer notification
+            if self._transition_listener is not None:
+                self._transition_listener(t_event)
 
             # 8. Return success result
             return TransitionResult(

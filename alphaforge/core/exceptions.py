@@ -163,3 +163,39 @@ class CorruptedStateError(RecoveryError):
     """Raised when persisted recovery snapshot data is corrupted, malformed, or invalid."""
 
     pass
+
+
+class LedgerError(AlphaForgeError):
+    """Base exception for all audit ledger operations and integrity failures."""
+
+    pass
+
+
+class LedgerIntegrityError(LedgerError):
+    """Raised when ledger events or records violate cryptographic or identity integrity."""
+
+    pass
+
+
+class LedgerCorruptionError(LedgerIntegrityError):
+    """Raised when persisted ledger records are corrupt, truncated, or unparseable."""
+
+    pass
+
+
+class LedgerSequenceError(LedgerIntegrityError):
+    """Raised when ledger events violate strict monotonic sequence numbering."""
+
+    pass
+
+
+class LedgerAppendOnlyViolationError(LedgerIntegrityError):
+    """Raised when an attempt is made to mutate, delete, or reorder immutable ledger records."""
+
+    pass
+
+
+class LedgerStorageError(LedgerError):
+    """Raised when underlying ledger persistence operations encounter I/O or storage errors."""
+
+    pass
