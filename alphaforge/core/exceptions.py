@@ -67,3 +67,15 @@ class RiskValidationError(RiskError):
     """Raised when risk inputs, configurations, or state invariants are breached."""
 
     pass
+
+
+class CostError(AlphaForgeError):
+    """Base exception for all cost and slippage model errors."""
+
+    pass
+
+
+class CostValidationError(CostError):
+    """Raised when cost inputs, configurations, or calculation invariants are breached."""
+
+    pass
