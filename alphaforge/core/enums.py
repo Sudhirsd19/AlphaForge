@@ -3,18 +3,20 @@ AlphaForge Core Enumerations.
 All enumeration members are strings for deterministic serialization and audit logging.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 
-class SignalDirection(str, Enum):
+class SignalDirection(StrEnum):
     """Direction of trade setup."""
+
     LONG = "LONG"
     SHORT = "SHORT"
     FLAT = "FLAT"
 
 
-class StrategyDecision(str, Enum):
+class StrategyDecision(StrEnum):
     """Deterministic outcome of strategy evaluation."""
+
     ACCEPT = "ACCEPT"
     REJECT = "REJECT"
     INVALID_DATA = "INVALID_DATA"
@@ -22,8 +24,9 @@ class StrategyDecision(str, Enum):
     DUPLICATE = "DUPLICATE"
 
 
-class RejectionCode(str, Enum):
+class RejectionCode(StrEnum):
     """Formal deterministic rejection reason codes."""
+
     REJECT_NONE = "REJECT_NONE"
     REJECT_CLOSED_CANDLE_VIOLATION = "REJECT_CLOSED_CANDLE_VIOLATION"
     REJECT_DATA_STALE = "REJECT_DATA_STALE"
@@ -43,8 +46,9 @@ class RejectionCode(str, Enum):
     REJECT_DUPLICATE = "REJECT_DUPLICATE"
 
 
-class FuturesConfirmationStatus(str, Enum):
+class FuturesConfirmationStatus(StrEnum):
     """Status contract of index-futures confirmation."""
+
     CONFIRMED = "CONFIRMED"
     NOT_CONFIRMED = "NOT_CONFIRMED"
     INVALID = "INVALID"
@@ -52,8 +56,9 @@ class FuturesConfirmationStatus(str, Enum):
     UNAVAILABLE = "UNAVAILABLE"
 
 
-class TrendState(str, Enum):
+class TrendState(StrEnum):
     """Higher-timeframe trend regime."""
+
     BULLISH = "BULLISH"
     BEARISH = "BEARISH"
     NEUTRAL = "NEUTRAL"

@@ -3,13 +3,13 @@ Property-based tests for AlphaForge Strategy Engine using Hypothesis.
 Verifies invariants across randomized inputs.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
-from alphaforge.core.enums import FuturesConfirmationStatus, SignalDirection, StrategyDecision
-from alphaforge.core.models import Candle
+from alphaforge.core.enums import FuturesConfirmationStatus
 from alphaforge.strategy.config import StrategyConfig
 from alphaforge.strategy.engine import DeterministicStrategyEngine
 from tests.helpers import create_candle, generate_candle_series
@@ -20,19 +20,25 @@ from tests.helpers import create_candle, generate_candle_series
     st.integers(min_value=1, max_value=1000),
     st.integers(min_value=1, max_value=1000000),
 )
-def test_property_forming_candle_has_zero_influence(price_int: int, offset: int, volume: int) -> None:
+def test_property_forming_candle_has_zero_influence(
+    price_int: int, offset: int, volume: int
+) -> None:
     """
     Hypothesis property test:
     Randomly fuzzing the forming candle [0] must NEVER alter the StrategySignal decision.
     """
-    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
     exec_candles = generate_candle_series(base_time, count=30, trend_type="bullish")
-    conf_candles = generate_candle_series(base_time, count=30, interval_minutes=15, trend_type="bullish")
+    conf_candles = generate_candle_series(
+        base_time, count=30, interval_minutes=15, trend_type="bullish"
+    )
 
     engine = DeterministicStrategyEngine()
     eval_time = exec_candles[1].timestamp
 
-    baseline = engine.evaluate(exec_candles, conf_candles, FuturesConfirmationStatus.CONFIRMED, eval_time)
+    baseline = engine.evaluate(
+        exec_candles, conf_candles, FuturesConfirmationStatus.CONFIRMED, eval_time
+    )
 
     # Construct randomized forming candle
     f_open = Decimal(price_int)
@@ -51,7 +57,9 @@ def test_property_forming_candle_has_zero_influence(price_int: int, offset: int,
     )
 
     fuzzed_series = [random_forming] + exec_candles[1:]
-    fuzzed_signal = engine.evaluate(fuzzed_series, conf_candles, FuturesConfirmationStatus.CONFIRMED, eval_time)
+    fuzzed_signal = engine.evaluate(
+        fuzzed_series, conf_candles, FuturesConfirmationStatus.CONFIRMED, eval_time
+    )
 
     assert baseline.signal_id == fuzzed_signal.signal_id
     assert baseline.decision == fuzzed_signal.decision

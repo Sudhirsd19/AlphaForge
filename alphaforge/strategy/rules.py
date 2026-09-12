@@ -1,8 +1,10 @@
 """
 AlphaForge Mathematical Strategy Rule Evaluators.
-Contains isolated, pure evaluation functions implementing the rules defined in STRATEGY_RULE_CATALOG.md.
+Contains isolated, pure evaluation functions implementing the rules defined
+in STRATEGY_RULE_CATALOG.md.
 """
 
+from collections.abc import Sequence
 from decimal import Decimal
 
 from alphaforge.core.enums import SignalDirection, TrendState
@@ -12,8 +14,6 @@ from alphaforge.strategy.indicators import (
     calculate_candle_geometry,
     calculate_ema,
     calculate_rsi,
-    calculate_sma,
-    calculate_swing_levels,
 )
 
 
@@ -98,7 +98,9 @@ def evaluate_candle_geometry(
 
 
 def evaluate_volume_spike(
-    closed_exec_candles: list[Candle], lookback: int = 20, min_relative_volume: Decimal = Decimal("1.20")
+    closed_exec_candles: list[Candle],
+    lookback: int = 20,
+    min_relative_volume: Decimal = Decimal("1.20"),
 ) -> tuple[bool, Decimal]:
     """
     Evaluate whether the trigger candle volume is >= min_relative_volume * 20-period moving average.
@@ -178,7 +180,7 @@ def evaluate_volatility(
 
 def calculate_stops_and_targets(
     trigger_candle: Candle,
-    prior_candle: Candle,
+    swing_candles: Candle | Sequence[Candle],
     current_atr: Decimal,
     direction: SignalDirection,
     atr_multiplier: Decimal = Decimal("1.0"),
@@ -186,18 +188,29 @@ def calculate_stops_and_targets(
 ) -> tuple[Decimal, Decimal, Decimal, Decimal]:
     """
     Calculate deterministic entry, stop-loss, target, and risk distance.
+    Evaluates structural swing over the provided swing candles.
     Returns (entry, stop, target, risk_distance).
     """
     entry = trigger_candle.close
     atr_buffer = current_atr * atr_multiplier
 
+    if isinstance(swing_candles, Candle):
+        candles_to_check = [trigger_candle, swing_candles]
+    else:
+        candles_to_check = list(swing_candles)
+        if trigger_candle not in candles_to_check:
+            candles_to_check.append(trigger_candle)
+
+    if not candles_to_check:
+        return entry, Decimal("0"), Decimal("0"), Decimal("0")
+
     if direction == SignalDirection.LONG:
-        structural_low = min(trigger_candle.low, prior_candle.low)
+        structural_low = min(c.low for c in candles_to_check)
         stop = structural_low - atr_buffer
         risk_distance = entry - stop
         target = entry + (risk_distance * target_multiplier)
     elif direction == SignalDirection.SHORT:
-        structural_high = max(trigger_candle.high, prior_candle.high)
+        structural_high = max(c.high for c in candles_to_check)
         stop = structural_high + atr_buffer
         risk_distance = stop - entry
         target = entry - (risk_distance * target_multiplier)

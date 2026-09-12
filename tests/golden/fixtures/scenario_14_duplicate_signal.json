@@ -1,0 +1,529 @@
+{
+  "scenario_id": "scenario_14_duplicate_signal",
+  "description": "Re-evaluating the identical bar setup emits DUPLICATE",
+  "config": null,
+  "futures_status": "CONFIRMED",
+  "evaluation_timestamp": "2026-09-12T09:57:00+00:00",
+  "exec_candles": [
+    {
+      "timestamp": "2026-09-12T10:00:00+00:00",
+      "open": "24045.00",
+      "high": "24050.00",
+      "low": "24040.00",
+      "close": "24046.00",
+      "volume": 200,
+      "open_interest": null,
+      "is_closed": false
+    },
+    {
+      "timestamp": "2026-09-12T09:57:00+00:00",
+      "open": "24032.00",
+      "high": "24047.00",
+      "low": "24029.00",
+      "close": "24045.00",
+      "volume": 1500,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:54:00+00:00",
+      "open": "24010.00",
+      "high": "24028.00",
+      "low": "24008.00",
+      "close": "24016.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:51:00+00:00",
+      "open": "24012.00",
+      "high": "24030.00",
+      "low": "24010.00",
+      "close": "24018.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:48:00+00:00",
+      "open": "24007.00",
+      "high": "24025.00",
+      "low": "24005.00",
+      "close": "24013.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:45:00+00:00",
+      "open": "24010.00",
+      "high": "24028.00",
+      "low": "24008.00",
+      "close": "24016.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:42:00+00:00",
+      "open": "24006.00",
+      "high": "24024.00",
+      "low": "24004.00",
+      "close": "24012.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:39:00+00:00",
+      "open": "24009.00",
+      "high": "24027.00",
+      "low": "24007.00",
+      "close": "24015.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:36:00+00:00",
+      "open": "24004.00",
+      "high": "24022.00",
+      "low": "24002.00",
+      "close": "24010.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:33:00+00:00",
+      "open": "24006.00",
+      "high": "24024.00",
+      "low": "24004.00",
+      "close": "24012.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:30:00+00:00",
+      "open": "24002.00",
+      "high": "24020.00",
+      "low": "24000.00",
+      "close": "24008.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:27:00+00:00",
+      "open": "24006.00",
+      "high": "24024.00",
+      "low": "24004.00",
+      "close": "24012.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:24:00+00:00",
+      "open": "24001.00",
+      "high": "24019.00",
+      "low": "23999.00",
+      "close": "24007.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:21:00+00:00",
+      "open": "24004.00",
+      "high": "24022.00",
+      "low": "24002.00",
+      "close": "24010.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:18:00+00:00",
+      "open": "24000.00",
+      "high": "24018.00",
+      "low": "23998.00",
+      "close": "24006.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:15:00+00:00",
+      "open": "24003.00",
+      "high": "24021.00",
+      "low": "24001.00",
+      "close": "24009.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:12:00+00:00",
+      "open": "23998.00",
+      "high": "24016.00",
+      "low": "23996.00",
+      "close": "24004.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:09:00+00:00",
+      "open": "24000.00",
+      "high": "24018.00",
+      "low": "23998.00",
+      "close": "24006.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:06:00+00:00",
+      "open": "23996.00",
+      "high": "24014.00",
+      "low": "23994.00",
+      "close": "24002.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:03:00+00:00",
+      "open": "24000.00",
+      "high": "24018.00",
+      "low": "23998.00",
+      "close": "24006.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:00:00+00:00",
+      "open": "23995.00",
+      "high": "24013.00",
+      "low": "23993.00",
+      "close": "24001.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T08:57:00+00:00",
+      "open": "23998.00",
+      "high": "24016.00",
+      "low": "23996.00",
+      "close": "24004.00",
+      "volume": 1000,
+      "open_interest": null,
+      "is_closed": true
+    }
+  ],
+  "conf_candles": [
+    {
+      "timestamp": "2026-09-12T02:45:00+00:00",
+      "open": "24015.00",
+      "high": "24030.00",
+      "low": "24010.00",
+      "close": "24025.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T03:00:00+00:00",
+      "open": "24035.00",
+      "high": "24050.00",
+      "low": "24030.00",
+      "close": "24045.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T03:15:00+00:00",
+      "open": "24055.00",
+      "high": "24070.00",
+      "low": "24050.00",
+      "close": "24065.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T03:30:00+00:00",
+      "open": "24075.00",
+      "high": "24090.00",
+      "low": "24070.00",
+      "close": "24085.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T03:45:00+00:00",
+      "open": "24095.00",
+      "high": "24110.00",
+      "low": "24090.00",
+      "close": "24105.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T04:00:00+00:00",
+      "open": "24115.00",
+      "high": "24130.00",
+      "low": "24110.00",
+      "close": "24125.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T04:15:00+00:00",
+      "open": "24135.00",
+      "high": "24150.00",
+      "low": "24130.00",
+      "close": "24145.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T04:30:00+00:00",
+      "open": "24155.00",
+      "high": "24170.00",
+      "low": "24150.00",
+      "close": "24165.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T04:45:00+00:00",
+      "open": "24175.00",
+      "high": "24190.00",
+      "low": "24170.00",
+      "close": "24185.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T05:00:00+00:00",
+      "open": "24195.00",
+      "high": "24210.00",
+      "low": "24190.00",
+      "close": "24205.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T05:15:00+00:00",
+      "open": "24215.00",
+      "high": "24230.00",
+      "low": "24210.00",
+      "close": "24225.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T05:30:00+00:00",
+      "open": "24235.00",
+      "high": "24250.00",
+      "low": "24230.00",
+      "close": "24245.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T05:45:00+00:00",
+      "open": "24255.00",
+      "high": "24270.00",
+      "low": "24250.00",
+      "close": "24265.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T06:00:00+00:00",
+      "open": "24275.00",
+      "high": "24290.00",
+      "low": "24270.00",
+      "close": "24285.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T06:15:00+00:00",
+      "open": "24295.00",
+      "high": "24310.00",
+      "low": "24290.00",
+      "close": "24305.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T06:30:00+00:00",
+      "open": "24315.00",
+      "high": "24330.00",
+      "low": "24310.00",
+      "close": "24325.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T06:45:00+00:00",
+      "open": "24335.00",
+      "high": "24350.00",
+      "low": "24330.00",
+      "close": "24345.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T07:00:00+00:00",
+      "open": "24355.00",
+      "high": "24370.00",
+      "low": "24350.00",
+      "close": "24365.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T07:15:00+00:00",
+      "open": "24375.00",
+      "high": "24390.00",
+      "low": "24370.00",
+      "close": "24385.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T07:30:00+00:00",
+      "open": "24395.00",
+      "high": "24410.00",
+      "low": "24390.00",
+      "close": "24405.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T07:45:00+00:00",
+      "open": "24415.00",
+      "high": "24430.00",
+      "low": "24410.00",
+      "close": "24425.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T08:00:00+00:00",
+      "open": "24435.00",
+      "high": "24450.00",
+      "low": "24430.00",
+      "close": "24445.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T08:15:00+00:00",
+      "open": "24455.00",
+      "high": "24470.00",
+      "low": "24450.00",
+      "close": "24465.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T08:30:00+00:00",
+      "open": "24475.00",
+      "high": "24490.00",
+      "low": "24470.00",
+      "close": "24485.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T08:45:00+00:00",
+      "open": "24495.00",
+      "high": "24510.00",
+      "low": "24490.00",
+      "close": "24505.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:00:00+00:00",
+      "open": "24515.00",
+      "high": "24530.00",
+      "low": "24510.00",
+      "close": "24525.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:15:00+00:00",
+      "open": "24535.00",
+      "high": "24550.00",
+      "low": "24530.00",
+      "close": "24545.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:30:00+00:00",
+      "open": "24555.00",
+      "high": "24570.00",
+      "low": "24550.00",
+      "close": "24565.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    },
+    {
+      "timestamp": "2026-09-12T09:45:00+00:00",
+      "open": "24575.00",
+      "high": "24590.00",
+      "low": "24570.00",
+      "close": "24585.00",
+      "volume": 5000,
+      "open_interest": null,
+      "is_closed": true
+    }
+  ],
+  "expected_first": {
+    "decision": "ACCEPT",
+    "rejection_code": "REJECT_NONE"
+  },
+  "expected_second": {
+    "decision": "DUPLICATE",
+    "rejection_code": "REJECT_DUPLICATE"
+  }
+}

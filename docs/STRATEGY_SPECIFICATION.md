@@ -124,11 +124,12 @@ The strategy consumes the external futures confirmation gate:
   $$P_{entry} = Close(S_{exec}[1])$$
 
 ### 5.2 Stop-Loss Reference Price
-The initial protective stop-loss is placed beyond structural support/resistance with an Average True Range ($ATR_{14}$) buffer:
+The initial protective stop-loss is placed beyond structural support/resistance over `swing_stop_lookback` closed bars (default $K=2$) with an Average True Range ($ATR_{14}$) buffer:
 - **For LONG:**
-  $$P_{stop} = \min(Low(S_{exec}[1]), Low(S_{exec}[2])) - 1.0 \times ATR_{14}(S_{exec}[1])$$
+  $$P_{stop} = \min_{k \in [1..K]}(Low(S_{exec}[k])) - 1.0 \times ATR_{14}(S_{exec}[1])$$
 - **For SHORT:**
-  $$P_{stop} = \max(High(S_{exec}[1]), High(S_{exec}[2])) + 1.0 \times ATR_{14}(S_{exec}[1])$$
+  $$P_{stop} = \max_{k \in [1..K]}(High(S_{exec}[k])) + 1.0 \times ATR_{14}(S_{exec}[1])$$
+*(For default $K=2$, this evaluates to $\min(Low[1], Low[2]) - 1.0 \times ATR$ and $\max(High[1], High[2]) + 1.0 \times ATR$ respectively).*
 
 ### 5.3 Risk Distance & Validity
 $$\text{RiskDistance} = |P_{entry} - P_{stop}|$$

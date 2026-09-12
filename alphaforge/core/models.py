@@ -5,7 +5,6 @@ All models enforce strict immutability (frozen=True) and fixed-point Decimal ari
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -24,6 +23,7 @@ class Candle(BaseModel):
     Immutable representation of an OHLCV market candle.
     Enforces strict mathematical boundary invariants.
     """
+
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     timestamp: datetime
@@ -44,17 +44,21 @@ class Candle(BaseModel):
                 f"low={self.low}, close={self.close}"
             )
         if self.high < max(self.open, self.close, self.low):
+            max_p = max(self.open, self.close, self.low)
             raise DataIntegrityError(
-                f"High price {self.high} must be >= max(open={self.open}, close={self.close}, low={self.low})"
+                f"High price {self.high} must be >= max(open, close, low)={max_p}"
             )
         if self.low > min(self.open, self.close, self.high):
+            min_p = min(self.open, self.close, self.high)
             raise DataIntegrityError(
-                f"Low price {self.low} must be <= min(open={self.open}, close={self.close}, high={self.high})"
+                f"Low price {self.low} must be <= min(open, close, high)={min_p}"
             )
         if self.volume < 0:
             raise DataIntegrityError(f"Volume must be non-negative: volume={self.volume}")
         if self.open_interest is not None and self.open_interest < 0:
-            raise DataIntegrityError(f"Open interest must be non-negative: open_interest={self.open_interest}")
+            raise DataIntegrityError(
+                f"Open interest must be non-negative: open_interest={self.open_interest}"
+            )
         return self
 
 
@@ -63,6 +67,7 @@ class StrategySignal(BaseModel):
     Immutable signal artifact emitted by the Strategy Engine.
     Conforms strictly to Master Specification Section 15.
     """
+
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     signal_id: str = Field(description="Deterministic SHA-256 hash identifier")
@@ -79,7 +84,9 @@ class StrategySignal(BaseModel):
     trend_state: TrendState = Field(description="Higher-timeframe trend regime")
     basis_status: FuturesConfirmationStatus = Field(description="Status of futures confirmation")
     volume_status: str = Field(description="Volume confirmation status")
-    decision: StrategyDecision = Field(description="ACCEPT | REJECT | INVALID_DATA | EXPIRED | DUPLICATE")
+    decision: StrategyDecision = Field(
+        description="ACCEPT | REJECT | INVALID_DATA | EXPIRED | DUPLICATE"
+    )
     rejection_code: RejectionCode = Field(description="Formal machine-readable rejection code")
     config_hash: str = Field(description="SHA-256 hash of canonical strategy configuration")
     data_version: int = Field(default=1, description="Schema revision number")

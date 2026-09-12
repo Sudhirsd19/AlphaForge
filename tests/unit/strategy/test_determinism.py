@@ -3,10 +3,9 @@ Unit tests for deterministic strategy behavior.
 Verifies that identical inputs produce bit-exact identical decisions and hashes.
 """
 
-from datetime import datetime, timezone
-from decimal import Decimal
+from datetime import UTC, datetime
 
-from alphaforge.core.enums import FuturesConfirmationStatus, StrategyDecision
+from alphaforge.core.enums import FuturesConfirmationStatus
 from alphaforge.strategy.config import StrategyConfig
 from alphaforge.strategy.engine import DeterministicStrategyEngine
 from tests.helpers import generate_candle_series
@@ -14,9 +13,11 @@ from tests.helpers import generate_candle_series
 
 def test_strategy_is_deterministic_across_repeated_evaluations() -> None:
     """Evaluate identical inputs 100 times; all 100 outputs must be bit-exact identical."""
-    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
     exec_candles = generate_candle_series(base_time, count=30, trend_type="bullish")
-    conf_candles = generate_candle_series(base_time, count=30, interval_minutes=15, trend_type="bullish")
+    conf_candles = generate_candle_series(
+        base_time, count=30, interval_minutes=15, trend_type="bullish"
+    )
 
     engine = DeterministicStrategyEngine()
     eval_time = exec_candles[1].timestamp

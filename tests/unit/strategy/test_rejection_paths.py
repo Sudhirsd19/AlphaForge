@@ -2,7 +2,7 @@
 Unit tests covering all formal rejection paths and reason codes.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from alphaforge.core.enums import (
@@ -11,14 +11,13 @@ from alphaforge.core.enums import (
     SignalDirection,
     StrategyDecision,
 )
-from alphaforge.strategy.config import StrategyConfig
 from alphaforge.strategy.engine import DeterministicStrategyEngine
-from tests.helpers import create_candle, generate_candle_series
+from tests.helpers import generate_candle_series
 
 
 def test_rejection_insufficient_history() -> None:
     """Fewer candles than lookback threshold returns REJECT_INSUFFICIENT_HISTORY."""
-    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
     exec_candles = generate_candle_series(base_time, count=10)  # Needs >= 22
     conf_candles = generate_candle_series(base_time, count=30, interval_minutes=15)
 
@@ -36,7 +35,7 @@ def test_rejection_insufficient_history() -> None:
 
 def test_rejection_stale_data() -> None:
     """Evaluation timestamp older or significantly past trigger bar returns REJECT_DATA_STALE."""
-    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
     exec_candles = generate_candle_series(base_time, count=30)
     conf_candles = generate_candle_series(base_time, count=30, interval_minutes=15)
 
@@ -57,7 +56,7 @@ def test_rejection_stale_data() -> None:
 
 def test_rejection_missing_timeframe() -> None:
     """Insufficient closed higher-timeframe candles returns REJECT_MISSING_TIMEFRAME."""
-    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
     exec_candles = generate_candle_series(base_time, count=30)
     conf_candles = generate_candle_series(base_time, count=5, interval_minutes=15)  # Needs 21
 
@@ -75,10 +74,12 @@ def test_rejection_missing_timeframe() -> None:
 
 def test_rejection_trend_neutral() -> None:
     """Choppy / flat higher timeframe trend returns REJECT_TREND."""
-    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
     exec_candles = generate_candle_series(base_time, count=30, trend_type="bullish")
     # Higher timeframe is flat/neutral
-    conf_candles = generate_candle_series(base_time, count=30, interval_minutes=15, trend_type="flat")
+    conf_candles = generate_candle_series(
+        base_time, count=30, interval_minutes=15, trend_type="flat"
+    )
 
     engine = DeterministicStrategyEngine()
     signal = engine.evaluate(
@@ -94,9 +95,11 @@ def test_rejection_trend_neutral() -> None:
 
 def test_rejection_futures_confirmation() -> None:
     """Futures confirmation status other than CONFIRMED returns REJECT_FUTURES_CONFIRMATION."""
-    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
     exec_candles = generate_candle_series(base_time, count=30, trend_type="bullish")
-    conf_candles = generate_candle_series(base_time, count=30, interval_minutes=15, trend_type="bullish")
+    conf_candles = generate_candle_series(
+        base_time, count=30, interval_minutes=15, trend_type="bullish"
+    )
 
     engine = DeterministicStrategyEngine()
 
@@ -120,16 +123,20 @@ def test_rejection_futures_confirmation() -> None:
 
 def test_rejection_duplicate_signal() -> None:
     """Evaluating identical setup twice on the same engine instance returns DUPLICATE."""
-    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
     exec_candles = generate_candle_series(base_time, count=30, trend_type="bullish")
-    conf_candles = generate_candle_series(base_time, count=30, interval_minutes=15, trend_type="bullish")
+    conf_candles = generate_candle_series(
+        base_time, count=30, interval_minutes=15, trend_type="bullish"
+    )
 
     engine = DeterministicStrategyEngine()
     eval_time = exec_candles[1].timestamp
 
     # If first evaluation creates an ACCEPT, second must be DUPLICATE
     # Or test duplicate tracking explicitly
-    signal1 = engine.evaluate(exec_candles, conf_candles, FuturesConfirmationStatus.CONFIRMED, eval_time)
+    signal1 = engine.evaluate(
+        exec_candles, conf_candles, FuturesConfirmationStatus.CONFIRMED, eval_time
+    )
     signal_id = engine.compute_signal_id(SignalDirection.LONG, eval_time)
     engine._emitted_signal_ids.add(signal_id)
 

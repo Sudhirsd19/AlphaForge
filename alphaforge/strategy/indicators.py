@@ -4,7 +4,7 @@ All indicators are pure, side-effect-free functions operating on immutable lists
 Guarantees identical, deterministic mathematical output across all operating systems.
 """
 
-from decimal import Decimal, ROUND_HALF_EVEN
+from decimal import ROUND_HALF_EVEN, Decimal
 
 PRECISION = Decimal("0.0001")
 
@@ -12,7 +12,8 @@ PRECISION = Decimal("0.0001")
 def calculate_sma(values: list[Decimal], period: int) -> list[Decimal]:
     """
     Calculate Simple Moving Average over a sequence of Decimal values.
-    Returns list of same length as values; values before index (period - 1) are filled with Decimal(0).
+    Returns list of same length as values; values before index (period - 1)
+    are filled with Decimal(0).
     """
     if len(values) < period:
         return [Decimal("0")] * len(values)
@@ -166,7 +167,11 @@ def calculate_candle_geometry(
 
     body = abs(close_p - open_p)
     body_ratio = (body / candle_range).quantize(PRECISION, rounding=ROUND_HALF_EVEN)
-    close_loc_long = ((close_p - low_p) / candle_range).quantize(PRECISION, rounding=ROUND_HALF_EVEN)
-    close_loc_short = ((high_p - close_p) / candle_range).quantize(PRECISION, rounding=ROUND_HALF_EVEN)
+    close_loc_long = ((close_p - low_p) / candle_range).quantize(
+        PRECISION, rounding=ROUND_HALF_EVEN
+    )
+    close_loc_short = ((high_p - close_p) / candle_range).quantize(
+        PRECISION, rounding=ROUND_HALF_EVEN
+    )
 
     return body_ratio, close_loc_long, close_loc_short

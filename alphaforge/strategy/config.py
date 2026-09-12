@@ -14,6 +14,7 @@ class StrategyConfig(BaseModel):
     """
     Immutable hyperparameter configuration for the deterministic strategy.
     """
+
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     strategy_id: str = "AF_ORB_MOMENTUM_V1"
@@ -51,9 +52,12 @@ class StrategyConfig(BaseModel):
     atr_max_pct: Decimal = Decimal("0.0150")  # 1.50% of price
 
     # Stop & Target Bounds
+    swing_stop_lookback: int = Field(
+        default=2, gt=0, description="Structural swing lookback in closed bars"
+    )
     min_risk_distance_pct: Decimal = Decimal("0.0010")  # 0.10% of price
     max_risk_distance_pct: Decimal = Decimal("0.0300")  # 3.00% of price
-    target_risk_multiple: Decimal = Decimal("2.0")      # 1:2 R:R
+    target_risk_multiple: Decimal = Decimal("2.0")  # 1:2 R:R
 
     # Stale Data Threshold (Seconds)
     max_stale_seconds: int = 195  # 3m (180s) + 15s grace
@@ -66,8 +70,7 @@ class StrategyConfig(BaseModel):
         raw_dict = self.model_dump()
         # Convert Decimal values to standardized strings for exact JSON hashing
         serializable_dict = {
-            k: str(v) if isinstance(v, Decimal) else v
-            for k, v in raw_dict.items()
+            k: str(v) if isinstance(v, Decimal) else v for k, v in raw_dict.items()
         }
         canonical_json = json.dumps(serializable_dict, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()

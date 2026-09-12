@@ -15,7 +15,6 @@ from alphaforge.core.enums import (
     StrategyDecision,
     TrendState,
 )
-from alphaforge.core.exceptions import ClosedCandleViolationError
 from alphaforge.core.models import Candle, StrategySignal
 from alphaforge.strategy.config import StrategyConfig
 from alphaforge.strategy.rules import (
@@ -61,6 +60,7 @@ class DeterministicStrategyEngine:
             self.config.volume_lookback + 2,
             self.config.rsi_period + 2,
             self.config.atr_period + 2,
+            self.config.swing_stop_lookback + 1,
         )
         if len(raw_exec_candles) < min_required:
             return self._build_rejection(
@@ -82,13 +82,16 @@ class DeterministicStrategyEngine:
         # Any access to index [0] is strictly forbidden.
         closed_exec = raw_exec_candles[1:]
         trigger_candle = closed_exec[0]  # Latest fully closed candle [1]
-        prior_candle = closed_exec[1]    # Previous fully closed candle [2]
 
         signal_timestamp = trigger_candle.timestamp
 
         # 3. Data Freshness Guard
         stale_threshold = timedelta(seconds=self.config.max_stale_seconds)
-        if evaluation_timestamp < signal_timestamp or (evaluation_timestamp - signal_timestamp) > stale_threshold:
+        is_stale = (
+            evaluation_timestamp < signal_timestamp
+            or (evaluation_timestamp - signal_timestamp) > stale_threshold
+        )
+        if is_stale:
             return self._build_rejection(
                 direction=SignalDirection.FLAT,
                 signal_ts=signal_timestamp,
@@ -110,7 +113,21 @@ class DeterministicStrategyEngine:
         # If forming candle was present in raw_conf_candles, strip if not closed
         eligible_conf_closed = [c for c in eligible_conf if c.is_closed]
 
-        if len(eligible_conf_closed) < self.config.trend_ema_slow:
+        # Explicitly sort confirmation candles chronologically to prevent inverted EMA evaluation.
+        # Use secondary tuple (timestamp, open, high, low, close, volume) for deterministic order.
+        sorted_conf_closed = sorted(
+            eligible_conf_closed,
+            key=lambda c: (c.timestamp, c.open, c.high, c.low, c.close, c.volume),
+        )
+        # Deduplicate identical timestamps deterministically
+        deduped_conf_closed: list[Candle] = []
+        seen_timestamps: set[datetime] = set()
+        for c in sorted_conf_closed:
+            if c.timestamp not in seen_timestamps:
+                deduped_conf_closed.append(c)
+                seen_timestamps.add(c.timestamp)
+
+        if len(deduped_conf_closed) < self.config.trend_ema_slow:
             return self._build_rejection(
                 direction=SignalDirection.FLAT,
                 signal_ts=signal_timestamp,
@@ -127,7 +144,7 @@ class DeterministicStrategyEngine:
             )
 
         trend_state, _, _ = evaluate_trend_regime(
-            eligible_conf_closed, self.config.trend_ema_fast, self.config.trend_ema_slow
+            deduped_conf_closed, self.config.trend_ema_fast, self.config.trend_ema_slow
         )
 
         if trend_state == TrendState.NEUTRAL:
@@ -146,7 +163,9 @@ class DeterministicStrategyEngine:
                 rejection_code=RejectionCode.REJECT_TREND,
             )
 
-        direction = SignalDirection.LONG if trend_state == TrendState.BULLISH else SignalDirection.SHORT
+        direction = (
+            SignalDirection.LONG if trend_state == TrendState.BULLISH else SignalDirection.SHORT
+        )
 
         # 5. Chronological Closed Series for Technical Calculations
         # closed_exec[0] is [1], closed_exec[-1] is oldest.
@@ -190,7 +209,10 @@ class DeterministicStrategyEngine:
 
         # 7. Confirmation Candle Geometry
         is_geom_valid, _, _ = evaluate_candle_geometry(
-            trigger_candle, direction, self.config.min_body_ratio, self.config.min_close_location_ratio
+            trigger_candle,
+            direction,
+            self.config.min_body_ratio,
+            self.config.min_close_location_ratio,
         )
         if not is_geom_valid:
             return self._build_rejection(
@@ -230,12 +252,22 @@ class DeterministicStrategyEngine:
             )
 
         # 9. Momentum Filter (RSI)
+        rsi_min = (
+            self.config.rsi_long_min
+            if direction == SignalDirection.LONG
+            else self.config.rsi_short_min
+        )
+        rsi_max = (
+            self.config.rsi_long_max
+            if direction == SignalDirection.LONG
+            else self.config.rsi_short_max
+        )
         is_mom_valid, _ = evaluate_momentum(
             chrono_closed,
             direction,
             self.config.rsi_period,
-            self.config.rsi_long_min if direction == SignalDirection.LONG else self.config.rsi_short_min,
-            self.config.rsi_long_max if direction == SignalDirection.LONG else self.config.rsi_short_max,
+            rsi_min,
+            rsi_max,
         )
         if not is_mom_valid:
             return self._build_rejection(
@@ -291,9 +323,10 @@ class DeterministicStrategyEngine:
             )
 
         # 12. Stop-Loss & Target Calculations
+        swing_candles = closed_exec[: self.config.swing_stop_lookback]
         entry, stop, target, risk_distance = calculate_stops_and_targets(
             trigger_candle,
-            prior_candle,
+            swing_candles,
             current_atr,
             direction,
             self.config.atr_stop_multiplier,
@@ -319,7 +352,12 @@ class DeterministicStrategyEngine:
                 rejection_code=RejectionCode.REJECT_INVALID_STOP,
             )
 
-        if target <= Decimal("0") or (direction == SignalDirection.LONG and target <= entry) or (direction == SignalDirection.SHORT and target >= entry):
+        is_invalid_target = (
+            target <= Decimal("0")
+            or (direction == SignalDirection.LONG and target <= entry)
+            or (direction == SignalDirection.SHORT and target >= entry)
+        )
+        if is_invalid_target:
             return self._build_rejection(
                 direction=direction,
                 signal_ts=signal_timestamp,

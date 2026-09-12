@@ -1,0 +1,17 @@
+{
+  "scenario_id": "scenario_10_invalid_data",
+  "description": "Invalid OHLC invariant raises DataIntegrityError",
+  "invalid_candle": {
+    "timestamp": "2026-09-12T10:00:00+00:00",
+    "open": "24000.00",
+    "high": "23900.00",
+    "low": "23800.00",
+    "close": "23950.00",
+    "volume": 1000,
+    "open_interest": null,
+    "is_closed": true
+  },
+  "expected": {
+    "raises_exception": "DataIntegrityError"
+  }
+}

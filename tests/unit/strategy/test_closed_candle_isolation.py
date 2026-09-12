@@ -3,11 +3,10 @@ Unit tests for closed-candle isolation (Master Constitution Rule 8).
 Verifies that mutating the forming candle [0] has ZERO effect on strategy evaluation.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from alphaforge.core.enums import FuturesConfirmationStatus
-from alphaforge.core.models import Candle
 from alphaforge.strategy.engine import DeterministicStrategyEngine
 from tests.helpers import create_candle, generate_candle_series
 
@@ -17,9 +16,11 @@ def test_forming_candle_zero_mutation_isolation() -> None:
     Test Rule 8: Mutating forming candle [0] across 50 extreme variations
     produces 100% bit-exact identical signal output.
     """
-    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
     exec_candles = generate_candle_series(base_time, count=30, trend_type="bullish")
-    conf_candles = generate_candle_series(base_time, count=30, interval_minutes=15, trend_type="bullish")
+    conf_candles = generate_candle_series(
+        base_time, count=30, interval_minutes=15, trend_type="bullish"
+    )
 
     engine = DeterministicStrategyEngine()
     eval_time = exec_candles[1].timestamp
@@ -33,7 +34,13 @@ def test_forming_candle_zero_mutation_isolation() -> None:
 
     # Mutate candle [0] with extreme fluctuations
     mutations = [
-        (Decimal("20000.00"), Decimal("30000.00"), Decimal("10000.00"), Decimal("25000.00"), 999999),
+        (
+            Decimal("20000.00"),
+            Decimal("30000.00"),
+            Decimal("10000.00"),
+            Decimal("25000.00"),
+            999999,
+        ),
         (Decimal("24000.00"), Decimal("24001.00"), Decimal("23999.00"), Decimal("24000.50"), 1),
         (Decimal("24500.00"), Decimal("26000.00"), Decimal("24000.00"), Decimal("25900.00"), 50000),
         (Decimal("23000.00"), Decimal("23100.00"), Decimal("21000.00"), Decimal("21500.00"), 0),
@@ -71,9 +78,11 @@ def test_closed_candle_one_mutation_alters_decision() -> None:
     Test that modifying candle [1] (the latest fully closed candle)
     DOES affect the evaluation, proving that the engine is reading [1].
     """
-    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 9, 12, 10, 0, 0, tzinfo=UTC)
     exec_candles = generate_candle_series(base_time, count=30, trend_type="bullish")
-    conf_candles = generate_candle_series(base_time, count=30, interval_minutes=15, trend_type="bullish")
+    conf_candles = generate_candle_series(
+        base_time, count=30, interval_minutes=15, trend_type="bullish"
+    )
 
     engine = DeterministicStrategyEngine()
     eval_time = exec_candles[1].timestamp

@@ -145,11 +145,59 @@ Below is the complete inventory of technical choices currently categorized as **
 
 ---
 
+### DEC-11: V1 Deterministic Strategy Baseline Parameters
+- **Requirement Source:** User Directive (Authoritative Strategy Parameter Sign-Off, 2026-09-12).
+- **Status:** **APPROVED BY USER (2026-09-12)**
+- **Scope & Baseline Values:**
+  1. *Trend Filter (Higher Timeframe):*
+     - Confirmation timeframe: `15m`
+     - Fast EMA: `9`
+     - Slow EMA: `21`
+     - Bullish condition: $EMA_9 > EMA_{21} \land Close > EMA_{21}$
+     - Bearish condition: $EMA_9 < EMA_{21} \land Close < EMA_{21}$
+  2. *Breakout (Execution Timeframe):*
+     - Execution timeframe: `3m`
+     - Lookback: `20` closed bars
+     - Long breakout: $Close(C_1) > \max(High[2..21])$
+     - Short breakout: $Close(C_1) < \min(Low[2..21])$
+  3. *Candle Geometry (Execution Timeframe):*
+     - Minimum body ratio: $\frac{\text{Body}}{\text{Range}} \ge 0.50$
+     - Minimum close-location ratio: $\ge 0.70$ (Top 30% for Long, Bottom 30% for Short)
+     - Closed candles only (forming candle quarantined).
+  4. *Volume Confirmation (Execution Timeframe):*
+     - Lookback: `20` closed bars
+     - Condition: $Volume(C_1) \ge 1.20 \times \text{SMA}(Volume, 20)_{[2..21]}$
+  5. *Momentum Filter (Execution Timeframe):*
+     - RSI period: `14`
+     - Long momentum: $50.0 < RSI \le 75.0$
+     - Short momentum: $25.0 \le RSI < 50.0$
+  6. *Volatility Filter (Execution Timeframe):*
+     - ATR period: `14`
+     - Volatility range: $0.05\% \le \frac{ATR_{14}}{Price} \le 1.50\%$
+  7. *Stop-Loss Reference (Execution Timeframe):*
+     - Structural swing lookback: `swing_stop_lookback = 2` bars
+     - ATR multiplier: `1.0`
+     - Long Stop: $P_{stop} = \min(Low[1], Low[2]) - 1.0 \times ATR_{14}$
+     - Short Stop: $P_{stop} = \max(High[1], High[2]) + 1.0 \times ATR_{14}$
+  8. *Target Reference (Execution Timeframe):*
+     - Fixed Risk:Reward = `1:2`
+     - Long Target: $P_{target} = P_{entry} + 2.0 \times \text{RiskDistance}$
+     - Short Target: $P_{target} = P_{entry} - 2.0 \times \text{RiskDistance}$
+  9. *Risk Distance Guardrails:*
+     - Bounds: $0.10\% \le \frac{\text{RiskDistance}}{P_{entry}} \le 3.00\%$
+  10. *Data Freshness Guard:*
+      - Max stale duration: `195 seconds` (180s 3m execution candle + 15s grace).
+- **Important Quantitative Disclaimer:**
+  These parameters are approved as the **V1 strategy baseline only**. They are NOT claimed to be profitable, optimal, statistically superior, production validated, backtest validated, or market-regime robust. Quantitative validation belongs strictly to Phase 10. No AI/ML, sentiment, or parameter curve-fitting is permitted.
+- **Approval Required:** Formally approved by User on 2026-09-12.
+
+---
+
 ## 3. Summary of Open Decisions & Next Steps
 
 | Decision ID | Area | Default Proposal | Status | Impact on Phase 1 |
 | :--- | :--- | :--- | :--- | :--- |
-| **DEC-01** | Language & Runtime | Python 3.11+ (strict typing) | Proposed | Requires approval before Phase 1 coding begins. |
+| **DEC-01** | Language & Runtime | Python 3.11+ (strict typing) | Approved | Active runtime for Phase 1. |
 | **DEC-02** | Live DB & Ledger | SQLite (WAL mode) | Proposed | Deferred to Phase 7-9 (does not block Phase 1). |
 | **DEC-03** | Research Store | DuckDB + Parquet | Proposed | Deferred to Phase 2/10 (does not block Phase 1). |
 | **DEC-04** | Broker Adapter | Zerodha Kite + Simulated Paper | Proposed | Deferred to Phase 8/16 (does not block Phase 1). |
@@ -159,3 +207,5 @@ Below is the complete inventory of technical choices currently categorized as **
 | **DEC-08** | Message Transport | In-Process `asyncio.Queue` | Proposed | Baseline architectural pattern. |
 | **DEC-09** | Alerting Channel | Telegram Bot + Terminal Sound | Proposed | Deferred to Phase 14. |
 | **DEC-10** | Secrets Manager | Pydantic Settings + Env | Proposed | Deferred to Phase 13. |
+| **DEC-11** | V1 Strategy Parameters | 21 Baseline Rules & Values | **Approved** | Formally signed-off; active baseline. |
+

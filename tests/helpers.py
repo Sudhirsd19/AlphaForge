@@ -2,7 +2,7 @@
 Test helpers for generating deterministic synthetic candle sequences.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from alphaforge.core.models import Candle

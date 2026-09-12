@@ -212,12 +212,12 @@ Every strategy rule is codified under the rigorous institutional schema:
 ### RULE-AF-010: Structural Stop-Loss Calculation & Boundary Gate
 - **Rule ID:** `RULE-AF-010`
 - **Purpose:** Deterministically establish initial protective stop price and verify minimum/maximum distance bounds.
-- **Inputs:** $C_1, C_2$, $ATR_{14}$, Direction.
+- **Inputs:** $C_1 \dots C_K$ ($K = \text{swing\_stop\_lookback}$, default $K=2$), $ATR_{14}$, Direction.
 - **Timeframe:** $TF_{exec}$.
-- **Lookback:** 2 closed candles + ATR.
+- **Lookback:** $K = \text{swing\_stop\_lookback}$ closed candles (default: 2) + ATR.
 - **Formula:**
-  - $\text{Long Stop: } P_{stop} = \min(Low(C_1), Low(C_2)) - 1.0 \times ATR_{14}$
-  - $\text{Short Stop: } P_{stop} = \max(High(C_1), High(C_2)) + 1.0 \times ATR_{14}$
+  - $\text{Long Stop: } P_{stop} = \min_{i \in [1..K]}(Low(C_i)) - 1.0 \times ATR_{14}$
+  - $\text{Short Stop: } P_{stop} = \max_{i \in [1..K]}(High(C_i)) + 1.0 \times ATR_{14}$
   - $\text{RiskDistance} = |Close(C_1) - P_{stop}|$
 - **Threshold:** $0.10\% \times Close(C_1) \le \text{RiskDistance} \le 3.0\% \times Close(C_1)$ AND $P_{stop} > 0$.
 - **Evaluation Timing:** At signal generation.
@@ -225,7 +225,7 @@ Every strategy rule is codified under the rigorous institutional schema:
 - **Invalidation:** $\text{RiskDistance}$ violates boundary thresholds.
 - **Fallback:** Reject trade.
 - **Output:** Decimal $P_{stop}$, Decimal $\text{RiskDistance}$.
-- **Logging Fields:** `stop_price`, `risk_distance`, `risk_distance_pct`.
+- **Logging Fields:** `stop_price`, `risk_distance`, `risk_distance_pct`, `swing_stop_lookback`.
 - **Rejection Code:** `REJECT_INVALID_STOP`.
 
 ---
