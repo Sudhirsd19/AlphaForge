@@ -199,3 +199,28 @@ class LedgerStorageError(LedgerError):
     """Raised when underlying ledger persistence operations encounter I/O or storage errors."""
 
     pass
+
+
+# Phase 10 Backtest & Quant Validation Exceptions
+class BacktestError(AlphaForgeError):
+    """Base exception for all backtest and quant validation errors."""
+
+    pass
+
+
+class BacktestValidationError(BacktestError):
+    """Raised when backtest configuration or invariants fail validation."""
+
+    pass
+
+
+class LookAheadBiasError(BacktestError):
+    """Raised when future data is accessed or leaked into historical decision timestamp."""
+
+    pass
+
+
+class ImpossibleFillError(BacktestError):
+    """Raised when an order fill is physically or temporally impossible."""
+
+    pass
