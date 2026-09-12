@@ -43,3 +43,9 @@ class NonDeterministicError(AlphaForgeError):
     """Raised when a non-deterministic execution anomaly is detected."""
 
     pass
+
+
+class ContractValidationError(DataIntegrityError):
+    """Raised when contract master metadata or lifecycle invariants are breached."""
+
+    pass
