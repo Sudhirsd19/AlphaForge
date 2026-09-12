@@ -20,16 +20,21 @@ def evaluate_contract_lifecycle(
     """
     Pure mathematical evaluation of contract lifecycle state at evaluation_timestamp.
 
-    Boundary Semantics:
-      - evaluation_timestamp < listing_datetime: NOT_YET_LISTED
-      - listing_datetime <= evaluation_timestamp < trading_start_datetime: NOT_YET_LISTED
-      - trading_start_datetime <= evaluation_timestamp < trading_end_datetime:
-          * if contract.is_suspended: SUSPENDED
-          * if evaluation_timestamp >= expiry_datetime: EXPIRED
-          * if (expiry_datetime - evaluation_timestamp) <= expiring_window: EXPIRING
-          * else: ACTIVE
-      - evaluation_timestamp >= trading_end_datetime OR
-        evaluation_timestamp >= expiry_datetime: EXPIRED
+    Precedence and Fail-Closed Governance:
+      1. Declared contract status INVALID/UNKNOWN/SUSPENDED is fail-closed and takes
+         precedence over timestamp-derived lifecycle evaluation.
+      2. If contract.status == ContractStatus.INVALID: returns INVALID.
+      3. If contract.status == ContractStatus.UNKNOWN: returns UNKNOWN.
+      4. If contract.status == ContractStatus.SUSPENDED or contract.is_suspended: returns SUSPENDED.
+      5. If contract.status == ContractStatus.EXPIRED: returns EXPIRED.
+      6. Otherwise evaluate deterministic timestamp lifecycle rules:
+         - evaluation_timestamp < listing_datetime: NOT_YET_LISTED
+         - listing_datetime <= evaluation_timestamp < trading_start_datetime: NOT_YET_LISTED
+         - trading_start_datetime <= evaluation_timestamp < trading_end_datetime:
+             * if (expiry_datetime - evaluation_timestamp) <= expiring_window: EXPIRING
+             * else: ACTIVE
+         - evaluation_timestamp >= trading_end_datetime OR
+           evaluation_timestamp >= expiry_datetime: EXPIRED
 
     Boundary Rules:
       - listing_datetime: Inclusive for listing
@@ -44,24 +49,33 @@ def evaluate_contract_lifecycle(
             f"evaluation_timestamp must be explicitly timezone-aware UTC: {evaluation_timestamp}"
         )
 
-    # 1. Prior to listing
+    # 1. Declared status fail-closed precedence
+    if contract.status == ContractStatus.INVALID:
+        return ContractStatus.INVALID
+
+    if contract.status == ContractStatus.UNKNOWN:
+        return ContractStatus.UNKNOWN
+
+    if contract.status == ContractStatus.SUSPENDED or contract.is_suspended:
+        return ContractStatus.SUSPENDED
+
+    if contract.status == ContractStatus.EXPIRED:
+        return ContractStatus.EXPIRED
+
+    # 2. Prior to listing
     if evaluation_timestamp < contract.listing_datetime:
         return ContractStatus.NOT_YET_LISTED
 
-    # 2. Listed but prior to trading start
+    # 3. Listed but prior to trading start
     if evaluation_timestamp < contract.trading_start_datetime:
         return ContractStatus.NOT_YET_LISTED
 
-    # 3. Post trading end or post expiry
+    # 4. Post trading end or post expiry
     if (
         evaluation_timestamp >= contract.trading_end_datetime
         or evaluation_timestamp >= contract.expiry_datetime
     ):
         return ContractStatus.EXPIRED
-
-    # 4. Within trading window
-    if contract.is_suspended:
-        return ContractStatus.SUSPENDED
 
     # 5. Check if within expiring window prior to expiry
     time_to_expiry = contract.expiry_datetime - evaluation_timestamp

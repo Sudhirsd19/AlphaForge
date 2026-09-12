@@ -311,3 +311,100 @@ def test_test_x_rollover_candidate_detection() -> None:
 
     # Case 4: Only 1 contract in universe -> no rollover candidate
     assert get_rollover_candidate([c_near], expiring_ts) is None
+
+
+def test_invalid_declared_status_never_becomes_active_or_expiring() -> None:
+    """Tests 1 & 2 & 9: Declared status INVALID must never evaluate to ACTIVE or EXPIRING."""
+    expiry = datetime(2026, 6, 25, 15, 30, 0, tzinfo=UTC)
+    c_invalid = make_valid_contract(
+        status=ContractStatus.INVALID,
+        listing_datetime=datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
+        trading_start_datetime=datetime(2026, 1, 1, 9, 15, 0, tzinfo=UTC),
+        trading_end_datetime=expiry,
+        expiry_datetime=expiry,
+    )
+    # Active window timestamp
+    active_ts = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
+    assert evaluate_contract_lifecycle(c_invalid, active_ts) == ContractStatus.INVALID
+    assert is_active(c_invalid, active_ts) is False
+    assert is_expiring(c_invalid, active_ts) is False
+    assert is_tradeable(c_invalid, active_ts) is False
+
+    # Expiring window timestamp (1 hour before expiry)
+    expiring_ts = expiry - timedelta(hours=1)
+    assert evaluate_contract_lifecycle(c_invalid, expiring_ts) == ContractStatus.INVALID
+    assert is_active(c_invalid, expiring_ts) is False
+    assert is_expiring(c_invalid, expiring_ts) is False
+    assert is_tradeable(c_invalid, expiring_ts, allow_expiring=True) is False
+
+
+def test_unknown_declared_status_never_becomes_active_or_expiring() -> None:
+    """Tests 3 & 4 & 10: Declared status UNKNOWN must never evaluate to ACTIVE or EXPIRING."""
+    expiry = datetime(2026, 6, 25, 15, 30, 0, tzinfo=UTC)
+    c_unknown = make_valid_contract(
+        status=ContractStatus.UNKNOWN,
+        listing_datetime=datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
+        trading_start_datetime=datetime(2026, 1, 1, 9, 15, 0, tzinfo=UTC),
+        trading_end_datetime=expiry,
+        expiry_datetime=expiry,
+    )
+    # Active window timestamp
+    active_ts = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
+    assert evaluate_contract_lifecycle(c_unknown, active_ts) == ContractStatus.UNKNOWN
+    assert is_active(c_unknown, active_ts) is False
+    assert is_expiring(c_unknown, active_ts) is False
+    assert is_tradeable(c_unknown, active_ts) is False
+
+    # Expiring window timestamp (1 hour before expiry)
+    expiring_ts = expiry - timedelta(hours=1)
+    assert evaluate_contract_lifecycle(c_unknown, expiring_ts) == ContractStatus.UNKNOWN
+    assert is_active(c_unknown, expiring_ts) is False
+    assert is_expiring(c_unknown, expiring_ts) is False
+    assert is_tradeable(c_unknown, expiring_ts, allow_expiring=True) is False
+
+
+def test_suspended_declared_status_remains_nontradeable() -> None:
+    """Test 5: Declared status SUSPENDED remains non-tradeable regardless of timestamps."""
+    expiry = datetime(2026, 6, 25, 15, 30, 0, tzinfo=UTC)
+    c_suspended = make_valid_contract(
+        status=ContractStatus.SUSPENDED,
+        listing_datetime=datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
+        trading_start_datetime=datetime(2026, 1, 1, 9, 15, 0, tzinfo=UTC),
+        trading_end_datetime=expiry,
+        expiry_datetime=expiry,
+    )
+    active_ts = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
+    assert evaluate_contract_lifecycle(c_suspended, active_ts) == ContractStatus.SUSPENDED
+    assert is_active(c_suspended, active_ts) is False
+    assert is_tradeable(c_suspended, active_ts) is False
+
+
+def test_expired_declared_status_remains_expired() -> None:
+    """Test 8: Declared status EXPIRED remains EXPIRED even if evaluated prior to expiry."""
+    expiry = datetime(2026, 6, 25, 15, 30, 0, tzinfo=UTC)
+    c_expired = make_valid_contract(
+        status=ContractStatus.EXPIRED,
+        listing_datetime=datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
+        trading_start_datetime=datetime(2026, 1, 1, 9, 15, 0, tzinfo=UTC),
+        trading_end_datetime=expiry,
+        expiry_datetime=expiry,
+    )
+    # Active window timestamp
+    active_ts = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
+    assert evaluate_contract_lifecycle(c_expired, active_ts) == ContractStatus.EXPIRED
+    assert is_active(c_expired, active_ts) is False
+    assert is_expired(c_expired, active_ts) is True
+    assert is_tradeable(c_expired, active_ts) is False
+
+
+def test_declared_status_fail_closed_determinism() -> None:
+    """Test 11: Repeated evaluations of declared invalid/unknown are strictly deterministic."""
+    c_inv = make_valid_contract(status=ContractStatus.INVALID)
+    c_unk = make_valid_contract(status=ContractStatus.UNKNOWN)
+    active_ts = datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC)
+
+    inv_results = [evaluate_contract_lifecycle(c_inv, active_ts) for _ in range(50)]
+    assert all(r == ContractStatus.INVALID for r in inv_results)
+
+    unk_results = [evaluate_contract_lifecycle(c_unk, active_ts) for _ in range(50)]
+    assert all(r == ContractStatus.UNKNOWN for r in unk_results)

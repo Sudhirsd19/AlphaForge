@@ -48,7 +48,23 @@ The lifecycle state is represented by `alphaforge.contract.enums.ContractStatus`
 
 ---
 
-## 2. Temporal Boundary Semantics
+## 2. Declared Status Precedence & Fail-Closed Evaluation
+
+**Core Safety Invariant:**
+> Declared contract status `INVALID`/`UNKNOWN`/`SUSPENDED` is fail-closed and takes precedence over timestamp-derived lifecycle evaluation.
+
+### Interaction Between Declared Status and Timestamp Lifecycle:
+1. **`INVALID`:** If declared `contract.status == ContractStatus.INVALID`, the contract evaluates strictly as `ContractStatus.INVALID`.
+2. **`UNKNOWN`:** If declared `contract.status == ContractStatus.UNKNOWN`, the contract evaluates strictly as `ContractStatus.UNKNOWN`.
+3. **`SUSPENDED`:** If declared `contract.status == ContractStatus.SUSPENDED` or `contract.is_suspended` is `True`, the contract evaluates strictly as `ContractStatus.SUSPENDED`.
+4. **`EXPIRED`:** If declared `contract.status == ContractStatus.EXPIRED`, the contract evaluates strictly as `ContractStatus.EXPIRED`.
+5. **Timestamp Lifecycle (Normal States):** If declared status is `NOT_YET_LISTED` or `ACTIVE`, timestamp rules deterministically dictate the current state (`NOT_YET_LISTED`, `ACTIVE`, `EXPIRING`, or `EXPIRED`).
+
+Under no circumstances can a contract with declared `INVALID`, `UNKNOWN`, or `SUSPENDED` status evaluate as `ACTIVE` or `EXPIRING`, regardless of how valid or active its timestamps may appear.
+
+---
+
+## 3. Temporal Boundary Semantics
 
 The lifecycle engine calculates state purely and deterministically from the contract metadata and an explicit evaluation timestamp $t$:
 

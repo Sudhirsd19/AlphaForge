@@ -50,6 +50,12 @@ $$\text{listing\_datetime} \le \text{trading\_start\_datetime} < \text{trading\_
 
 Any violation (such as trading start before listing, trading end before start, or trading end after expiry) raises `ContractValidationError`.
 
+### 2.4 Declared Status Fail-Closed Precedence
+Declared contract status `INVALID`/`UNKNOWN`/`SUSPENDED` is fail-closed and takes precedence over timestamp-derived lifecycle evaluation:
+- An explicitly invalid or unknown contract never evaluates as `ACTIVE` or `EXPIRING`.
+- Declared `SUSPENDED` status or `is_suspended=True` halts trading evaluation, returning `SUSPENDED`.
+- Normal declared states (`NOT_YET_LISTED`, `ACTIVE`) advance through deterministic timestamp lifecycle evaluation.
+
 ---
 
 ## 3. Metadata Provider & Repository Boundary

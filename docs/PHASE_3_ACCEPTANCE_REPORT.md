@@ -49,13 +49,14 @@ $$\mathbf{PHASE\ 3 = APPROVED}$$
 | **X** | Rollover Candidate Detection | Detects `(front_month, next_month)` when front is `EXPIRING` and next is `ACTIVE` | `test_test_x_rollover_candidate_detection` | **PASS** |
 | **Y** | Phase 1 Regression Suite | 100% pass on all 37 Phase 1 golden and unit tests | `test_golden_fixtures.py`, `test_forensic_regressions.py`, etc. | **PASS** |
 | **Z** | Phase 2 Regression Suite | 100% pass on all 55 Phase 2 data governance and store tests | `test_candle_schema.py`, `test_candle_store.py`, `test_execution_eligibility.py`, etc. | **PASS** |
+| **SR**| Safety Remediation | Declared `INVALID`/`UNKNOWN`/`SUSPENDED` fail-closed status precedence over timestamps | `test_invalid_declared_status_never_becomes_active_or_expiring`, `test_unknown_declared_status_never_becomes_active_or_expiring`, etc. | **PASS** |
 
 ---
 
 ## 3. Test Suite & Verification Evidence
 
 ### Automated Test Execution
-- Total Tests: **133 passed** in 2.33s
+- Total Tests: **138 passed** in 2.29s
   - Phase 1 Golden Fixtures: 14/14 PASS
   - Phase 1 Unit & Forensic Regressions: 23/23 PASS
   - Phase 2 Schema & Validation: 14/14 PASS
@@ -66,13 +67,13 @@ $$\mathbf{PHASE\ 3 = APPROVED}$$
   - Phase 2 Execution Eligibility & Remediation Regressions: 20/20 PASS
   - Phase 3 Contract Master Models: 8/8 PASS
   - Phase 3 Contract Validation: 11/11 PASS
-  - Phase 3 Contract Lifecycle: 13/13 PASS
+  - Phase 3 Contract Lifecycle (including Safety Remediation): 18/18 PASS
   - Phase 3 Contract Repository: 4/4 PASS
   - Phase 3 Contract Properties (Hypothesis): 5/5 PASS
 
 ### Static Typing & Lint Compliance
 - `ruff check alphaforge tests`: **All checks passed (0 errors)**
-- `ruff format --check alphaforge tests`: **75 files already formatted (100% compliant)**
+- `ruff format --check alphaforge tests`: **76 files already formatted (100% compliant)**
 - `mypy --strict --python-version 3.12 --explicit-package-bases alphaforge tests`: **Success: no issues found in 46 source files**
 
 ---
