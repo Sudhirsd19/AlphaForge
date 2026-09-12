@@ -1,0 +1,38 @@
+# ALPHAFORGE — MASTER IMPLEMENTATION GAP MATRIX
+
+**Project Name:** AlphaForge  
+**Author:** Principal Software Architect & Code Auditor  
+**Date:** 2026-09-12  
+**Baseline Workspace:** `d:\AlphaForge` (Clean-Slate Greenfield)  
+**Baseline Specification:** AlphaForge Master Constitution (Sections 1 to 24)
+
+---
+
+## 1. Master Gap Analysis Matrix
+
+| # | Requirement | Current Status | Evidence | Gap | Severity | Required Change | Verification Test |
+| :- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | **Deterministic Strategy Execution** | Not Implemented | Empty workspace `d:\AlphaForge`. No strategy modules exist. | 100% | P1 | Implement pure functional strategy engine with fixed parameters and zero side-effects. | Unit test with static candle fixture; verify identical signal output. |
+| 2 | **Closed-Candle Rule [1] vs [0]** | Not Implemented | No candle slicing or data buffer logic exists. | 100% | P0 | Isolate forming candle `[0]` in ingestion layer; provide only `[1]` and older to strategy. | Property test mutating `[0]` while verifying signal output does not change. |
+| 3 | **Multi-Timeframe Confirmation** | Not Implemented | No multi-timeframe candle aggregators or alignment logic. | 100% | P1 | Build synchronized multi-timeframe resampler (e.g. 3m + 15m) with timestamp alignment. | Integration test verifying signal generated only when HTF confirms. |
+| 4 | **Index & Futures Dual Confirmation**| Not Implemented | No dual data pipeline for underlying cash index and futures. | 100% | P1 | Implement dual stream synchronizer enforcing simultaneous directional confirmation. | Test case injecting divergent Index vs Futures movement; assert `REJECT_FUTURES_NONCONFIRMATION`. |
+| 5 | **Deterministic Single Entry/Exit** | Not Implemented | No trade execution logic exists. | 100% | P1 | Implement single entry, single stop-loss, and single target order generation. | Unit test verifying exactly 1 entry, 1 stop, 1 target per trade. |
+| 6 | **Prohibition of Excluded Features (AI/ML/Averaging)** | Not Implemented | Clean state. No prohibited features exist. | 0% (Compliant) | P0 (Guard) | Codify explicit architectural rules preventing ML/AI/averaging down modules. | Code linting and architectural invariant assertions. |
+| 7 | **Data Ingestion Schema & Monotonicity** | Not Implemented | No data contracts or validation schemas exist. | 100% | P0 | Define `MarketCandle` Pydantic model enforcing strict OHLC, volume, and timestamp ordering. | Unit tests fuzzing invalid OHLC and non-monotonic timestamps; assert validation errors. |
+| 8 | **Fail-Closed Missing Data & Gaps** | Not Implemented | No gap detector or backfill orchestrator exists. | 100% | P0 | Implement sequence gap detector that halts strategy and emits `DATA_GAP_DETECTED`. | Inject skipped candle in sequence; assert trading locks and backfill triggers. |
+| 9 | **Contract Lifecycle & Expiry Rules** | Not Implemented | No instrument master or expiry calendar exists. | 100% | P1 | Build `ContractMaster` tracking front-month expiry, rollover blackouts, and lot sizes. | Unit test verifying rollover transition and rejection of expired contracts. |
+| 10 | **Index-Futures Basis Engine** | Not Implemented | No basis tracking or z-score computation exists. | 100% | P1 | Implement `BasisEngine` calculating points, %, z-score, and timestamp desync checks. | Test injecting abnormal basis deviation; assert `REJECT_BASIS_ABNORMAL`. |
+| 11 | **Independent Risk Engine** | Not Implemented | No risk engine or sizing calculator exists. | 100% | P0 | Create decoupled `RiskEngine` with veto authority over all strategy signals. | Unit test asserting Strategy cannot execute without explicit Risk Engine signature. |
+| 12 | **Daily Loss Limit Hard Stop** | Not Implemented | No daily PnL accumulator or circuit breaker exists. | 100% | P0 | Implement daily loss tracker resetting at exchange session boundary; lock out on breach. | Test simulating cumulative loss $> L_{max}$; verify all subsequent orders rejected. |
+| 13 | **Lot-Size Aware Position Sizing** | Not Implemented | No mathematical lot sizing logic exists. | 100% | P0 | Implement discrete lot calculation; reject with `REJECT_RISK_BELOW_MINIMUM_LOT` if $< 1$. | Test with small capital/wide stop; verify rejection when calculated lots $< 1$. |
+| 14 | **Prohibition of Averaging Down** | Not Implemented | No trade sequence memory or martingale guards. | 100% | P0 | Implement invariant checking: `Qty(t) <= Qty(t-1)` following loss; block averaging down. | Test injecting adverse excursion; verify rejection of any scale-in order. |
+| 15 | **Order State Machine (17 States)** | Not Implemented | No order FSM or transition validation exists. | 100% | P0 | Implement formal 17-state FSM with explicit allowed transition matrix and audit logs. | Unit tests attempting illegal transitions (e.g. `CREATED` -> `FILLED`); assert FSM exception. |
+| 16 | **Emergency Unprotected Position Protocol** | Not Implemented | No SL confirmation timer or emergency exit workflow exists. | 100% | P0 | Implement watchdog: if position is `FILLED` without active SL $>5s$, trigger market exit. | Test simulating dropped SL response; verify immediate emergency exit and P0 alert. |
+| 17 | **Deterministic Idempotency** | Not Implemented | No `client_order_id` generation or deduplication exists. | 100% | P0 | Implement deterministic hashing for order keys; enforce broker deduplication. | Re-submit identical order payload; assert duplicate rejected without dispatch. |
+| 18 | **Startup Crash Recovery (9 Steps)** | Not Implemented | No persistence store or startup reconciler exists. | 100% | P0 | Build 9-step bootstrapper: load local state, query broker, reconcile, verify stops. | Test process crash with open orders; verify clean recovery and reconciliation on reboot. |
+| 19 | **Cryptographic Audit Ledger** | Not Implemented | No tamper-evident event log or hash chaining exists. | 100% | P1 | Implement SQLite WAL ledger with SHA-256 chaining (`previous_hash` + `event_hash`). | Verify event chain integrity; test tampering detection if record is modified. |
+| 20 | **Realistic Cost & Slippage Engine** | Not Implemented | No transaction fee calculator or slippage models exist. | 100% | P1 | Implement exchange STT, brokerage, stamp duty, exchange turnover fee, and slippage models. | Backtest comparison against raw PnL; verify friction deductions match exchange rates. |
+| 21 | **Quantitative Validation Pipeline** | Not Implemented | No WFA, Monte Carlo, or stress testing engines exist. | 100% | P1 | Build multi-stage quant validation pipeline (IS/OOS/WFA/Monte Carlo) with strict metrics. | Run full pipeline on synthetic/historical dataset; verify status output (`VALIDATED`/`REJECTED`). |
+| 22 | **Deterministic Replay Engine** | Not Implemented | No replay harness or mock time provider exists. | 100% | P1 | Implement historical event replay engine decoupled from wall-clock time. | Run recorded session twice; assert 100% identical decision and state transitions. |
+| 23 | **Security & Credential Isolation** | Not Implemented | No environment separation or secret management exists. | 100% | P0 | Enforce `.env` loading via Pydantic; restrict permissions; enforce `LIVE_TRADING=FALSE`. | Verify live order submission fails with exception when `LIVE_TRADING=FALSE`. |
+| 24 | **Operational Telemetry & Kill Switch**| Not Implemented | No system health monitor, latency tracker, or kill switch. | 100% | P1 | Implement health monitor, heartbeat watchdog, Telegram bot notifier, and manual kill switch. | Trigger manual kill switch; verify immediate cancellation of orders and lockout. |
