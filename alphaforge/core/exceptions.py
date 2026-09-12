@@ -55,3 +55,15 @@ class BasisCalculationError(AlphaForgeError):
     """Raised when index-futures basis calculation or validation invariants fail."""
 
     pass
+
+
+class RiskError(AlphaForgeError):
+    """Base exception for all risk engine and validation errors."""
+
+    pass
+
+
+class RiskValidationError(RiskError):
+    """Raised when risk inputs, configurations, or state invariants are breached."""
+
+    pass
