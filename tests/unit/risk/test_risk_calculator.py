@@ -115,10 +115,21 @@ def test_calculate_position_size_non_multiple_rejected_without_silent_flooring()
 
 
 def test_calculate_notional() -> None:
-    """Verify notional calculation."""
+    """Verify notional calculation and strict multiplier validation."""
     # Price = 24000, Qty = 50, Multiplier = 1 -> 1,200,000
     notional = calculate_notional(Decimal("24000.00"), 50, Decimal("1"))
     assert notional == Decimal("1200000.00")
+
+    # Non-positive or non-finite multiplier raises RiskValidationError
+    with pytest.raises(RiskValidationError, match="contract_multiplier"):
+        calculate_notional(Decimal("24000.00"), 50, Decimal("0"))
+
+    with pytest.raises(RiskValidationError, match="contract_multiplier"):
+        calculate_notional(Decimal("24000.00"), 50, Decimal("-1"))
+
+    # Missing multiplier cannot be called (TypeError)
+    with pytest.raises(TypeError):
+        calculate_notional(Decimal("24000.00"), 50)  # type: ignore[call-arg]
 
 
 def test_calculate_daily_loss() -> None:

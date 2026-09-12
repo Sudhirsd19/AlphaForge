@@ -111,7 +111,7 @@ def calculate_position_size(
 def calculate_notional(
     price: Decimal,
     quantity: int,
-    contract_multiplier: Decimal = Decimal("1"),
+    contract_multiplier: Decimal,
 ) -> Decimal:
     """
     Calculate total notional exposure value of a position:

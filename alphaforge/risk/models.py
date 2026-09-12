@@ -123,6 +123,13 @@ class RiskConfig(BaseModel):
         default="Asia/Kolkata",
         description="Canonical business market timezone for daily risk reset",
     )
+    allow_lot_flooring: bool = Field(
+        default=False,
+        description=(
+            "When True, automated sizing explicitly floors raw quantity to whole lot multiples. "
+            "When False (default), non-exact quantity is rejected."
+        ),
+    )
     calculation_version: int = Field(
         default=1,
         ge=1,
@@ -166,7 +173,6 @@ class RiskInput(BaseModel):
     contract_id: str = Field(description="Specific instrument/contract identifier")
     lot_size: int = Field(description="Exchange contract lot size")
     contract_multiplier: Decimal = Field(
-        default=Decimal("1"),
         description="Monetary value per point per unit quantity",
     )
     account_equity: Decimal = Field(description="Current total account equity")

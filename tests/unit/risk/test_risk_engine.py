@@ -6,6 +6,9 @@ Tests all 28 core specifications, edge cases, limits, and fail-closed invariants
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
+from pydantic import ValidationError
+
 from alphaforge.risk.engine import RiskEngine, evaluate_trade_risk
 from alphaforge.risk.enums import RiskDecisionState, RiskReasonCode, TradeSide
 from alphaforge.risk.models import (
@@ -13,6 +16,7 @@ from alphaforge.risk.models import (
     PortfolioRiskState,
     RiskConfig,
     RiskInput,
+    RiskReservation,
 )
 
 
@@ -56,6 +60,7 @@ def make_valid_portfolio_state(
     reserved_notional: Decimal = Decimal("0"),
     daily_starting_equity: Decimal = Decimal("4000000.00"),
     current_equity: Decimal = Decimal("4000000.00"),
+    active_reservations: tuple[RiskReservation, ...] = (),
 ) -> PortfolioRiskState:
     """Helper to construct a valid baseline PortfolioRiskState."""
     return PortfolioRiskState(
@@ -66,6 +71,7 @@ def make_valid_portfolio_state(
         reserved_notional=reserved_notional,
         daily_starting_equity=daily_starting_equity,
         current_equity=current_equity,
+        active_reservations=active_reservations,
     )
 
 
@@ -611,3 +617,310 @@ def test_28_reservation_release() -> None:
     d2, r2 = engine.request_risk_reservation(trade_input, portfolio)
     assert d2.decision == RiskDecisionState.APPROVED
     assert r2 is not None
+
+
+# ==============================================================================
+# PHASE 5 FORENSIC REMEDIATION REGRESSION TESTS
+# ==============================================================================
+
+
+def test_remediation_blocker_1_missing_multiplier_rejected() -> None:
+    """Blocker 1: Missing contract_multiplier must fail to construct and cannot be APPROVED."""
+    # Attempting to construct RiskInput without contract_multiplier raises ValidationError
+    with pytest.raises(ValidationError, match="contract_multiplier"):
+        RiskInput(  # type: ignore[call-arg]
+            signal_id="SIG-NO-MULT",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            entry_price=Decimal("24000.00"),
+            stop_price=Decimal("23880.00"),
+            contract_id="NIFTY26JUNFUT",
+            lot_size=25,
+            account_equity=Decimal("4000000.00"),
+            available_capital=Decimal("2000000.00"),
+            evaluation_timestamp=datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC),
+        )
+
+
+def test_remediation_blocker_1_invalid_multiplier_rejected() -> None:
+    """Blocker 1: Non-positive or non-finite contract multiplier strictly produces INVALID."""
+    portfolio = make_valid_portfolio_state()
+
+    # Zero multiplier
+    t_zero = make_valid_risk_input(contract_multiplier=Decimal("0"))
+    d_zero = evaluate_trade_risk(t_zero, portfolio)
+    assert d_zero.decision == RiskDecisionState.INVALID
+    assert d_zero.reason_code == RiskReasonCode.INVALID_CONTRACT
+
+    # Negative multiplier
+    t_neg = make_valid_risk_input(contract_multiplier=Decimal("-2.5"))
+    d_neg = evaluate_trade_risk(t_neg, portfolio)
+    assert d_neg.decision == RiskDecisionState.INVALID
+    assert d_neg.reason_code == RiskReasonCode.INVALID_CONTRACT
+
+
+def test_remediation_blocker_2_inflated_equity_rejected() -> None:
+    """Blocker 2: Inflated RiskInput equity mismatch must fail closed and NOT produce APPROVED."""
+    t_inflated = make_valid_risk_input(account_equity=Decimal("5000000.00"))
+    portfolio = make_valid_portfolio_state(account_equity=Decimal("4000000.00"))
+
+    decision = evaluate_trade_risk(t_inflated, portfolio)
+    assert decision.decision == RiskDecisionState.INVALID
+    assert decision.reason_code == RiskReasonCode.INVALID_EQUITY
+
+
+def test_remediation_blocker_2_reduced_equity_rejected() -> None:
+    """Blocker 2: Reduced RiskInput equity mismatch must fail closed and NOT produce APPROVED."""
+    t_reduced = make_valid_risk_input(account_equity=Decimal("3000000.00"))
+    portfolio = make_valid_portfolio_state(account_equity=Decimal("4000000.00"))
+
+    decision = evaluate_trade_risk(t_reduced, portfolio)
+    assert decision.decision == RiskDecisionState.INVALID
+    assert decision.reason_code == RiskReasonCode.INVALID_EQUITY
+
+
+def test_remediation_blocker_2_inflated_capital_rejected() -> None:
+    """Blocker 2: Inflated available capital mismatch must fail closed and NOT produce APPROVED."""
+    t_inflated = make_valid_risk_input(available_capital=Decimal("3000000.00"))
+    portfolio = make_valid_portfolio_state(available_capital=Decimal("2000000.00"))
+
+    decision = evaluate_trade_risk(t_inflated, portfolio)
+    assert decision.decision == RiskDecisionState.INVALID
+    assert decision.reason_code == RiskReasonCode.INSUFFICIENT_CAPITAL
+
+
+def test_remediation_blocker_2_reduced_capital_rejected() -> None:
+    """Blocker 2: Reduced available capital mismatch must fail closed and NOT produce APPROVED."""
+    t_reduced = make_valid_risk_input(available_capital=Decimal("1000000.00"))
+    portfolio = make_valid_portfolio_state(available_capital=Decimal("2000000.00"))
+
+    decision = evaluate_trade_risk(t_reduced, portfolio)
+    assert decision.decision == RiskDecisionState.INVALID
+    assert decision.reason_code == RiskReasonCode.INSUFFICIENT_CAPITAL
+
+
+def test_remediation_blocker_3_correlated_risk_includes_unitemized_exposure() -> None:
+    """
+    Blocker 3: Correlated risk cannot ignore existing portfolio risk exposure
+    even when active_reservations is empty.
+    """
+    equity = Decimal("8000000.00")
+    cap = Decimal("4000000.00")
+    group = CorrelatedGroupConfig(
+        group_id="INDEX_GROUP",
+        symbols=("NIFTY", "BANKNIFTY"),
+        max_group_risk=Decimal("0.0050"),  # 0.50% = 40,000 max group risk
+    )
+    config = RiskConfig(
+        max_single_position_notional=Decimal("0.80"),
+        correlated_groups=(group,),
+    )
+
+    # Portfolio state has 36,000 of reserved_risk from prior session positions,
+    # but active_reservations is empty ()
+    portfolio = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        reserved_risk=Decimal("36000.00"),  # Existing group exposure unitemized
+        active_reservations=(),
+    )
+
+    # Proposed NIFTY trade has 6,000 risk -> Group risk after = 36k + 6k = 42k > 40k
+    nifty_input = make_valid_risk_input(
+        signal_id="SIG-NIFTY-UNITEMIZED",
+        symbol="NIFTY",
+        account_equity=equity,
+        available_capital=cap,
+        stop_price=Decimal("23760.00"),  # 240 pts * 25 = 6,000 risk
+        proposed_quantity=25,
+    )
+
+    decision = evaluate_trade_risk(nifty_input, portfolio, config=config)
+    # Must NOT ignore reserved_risk! Must be rejected with CORRELATED_RISK_EXCEEDED!
+    assert decision.decision == RiskDecisionState.REJECTED
+    assert decision.reason_code == RiskReasonCode.CORRELATED_RISK_EXCEEDED
+
+
+def test_remediation_blocker_3_correlated_risk_with_non_group_reservations() -> None:
+    """
+    Blocker 3: Correlated risk correctly attributes unallocated reserved risk
+    without misattributing explicit non-group reservations.
+    """
+    equity = Decimal("8000000.00")
+    cap = Decimal("4000000.00")
+    group = CorrelatedGroupConfig(
+        group_id="INDEX_GROUP",
+        symbols=("NIFTY", "BANKNIFTY"),
+        max_group_risk=Decimal("0.0050"),  # 0.50% = 40,000 max group risk
+    )
+    config = RiskConfig(
+        max_single_position_notional=Decimal("0.80"),
+        correlated_groups=(group,),
+    )
+
+    # Portfolio has 50,000 total reserved risk.
+    # active_reservations has one non-group reservation for TCS with 14,000 risk.
+    # Unaccounted risk = 50,000 - 14,000 = 36,000.
+    tcs_res = RiskReservation(
+        reservation_id="RES-TCS-01",
+        signal_id="SIG-TCS-01",
+        symbol="TCS",
+        side=TradeSide.LONG,
+        entry_price=Decimal("3500.00"),
+        stop_price=Decimal("3450.00"),
+        quantity=280,
+        monetary_risk=Decimal("14000.00"),
+        notional=Decimal("980000.00"),
+        created_timestamp=datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC),
+    )
+    portfolio = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        reserved_risk=Decimal("50000.00"),
+        active_reservations=(tcs_res,),
+    )
+
+    # Proposed NIFTY trade has 6,000 risk -> Group risk after = 36k + 6k = 42k > 40k
+    nifty_input = make_valid_risk_input(
+        signal_id="SIG-NIFTY-CORR-02",
+        symbol="NIFTY",
+        account_equity=equity,
+        available_capital=cap,
+        stop_price=Decimal("23760.00"),  # 6,000 risk
+        proposed_quantity=25,
+    )
+
+    decision = evaluate_trade_risk(nifty_input, portfolio, config=config)
+    assert decision.decision == RiskDecisionState.REJECTED
+    assert decision.reason_code == RiskReasonCode.CORRELATED_RISK_EXCEEDED
+
+
+def test_remediation_blocker_3_correlated_risk_no_double_counting() -> None:
+    """
+    Blocker 3: Correlated risk does not double count exposure when active_reservations
+    fully accounts for reserved_risk.
+    """
+    equity = Decimal("8000000.00")
+    cap = Decimal("4000000.00")
+    group = CorrelatedGroupConfig(
+        group_id="INDEX_GROUP",
+        symbols=("NIFTY", "BANKNIFTY"),
+        max_group_risk=Decimal("0.0050"),  # 0.50% = 40,000 max group risk
+    )
+    config = RiskConfig(
+        max_single_position_notional=Decimal("0.80"),
+        correlated_groups=(group,),
+    )
+
+    # 36,000 reserved_risk, and active_reservations explicitly holds the 36,000 reservation
+    bn_res = RiskReservation(
+        reservation_id="RES-BN-01",
+        signal_id="SIG-BN-01",
+        symbol="BANKNIFTY",
+        side=TradeSide.LONG,
+        entry_price=Decimal("24000.00"),
+        stop_price=Decimal("23640.00"),
+        quantity=100,
+        monetary_risk=Decimal("36000.00"),
+        notional=Decimal("2400000.00"),
+        created_timestamp=datetime(2026, 6, 1, 10, 0, 0, tzinfo=UTC),
+    )
+    portfolio = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=cap,
+        reserved_risk=Decimal("36000.00"),
+        active_reservations=(bn_res,),
+    )
+
+    # Proposed NIFTY trade has 2,000 risk -> Group risk after = 36k + 2k = 38k <= 40k
+    # If double-counted, it would be 36k + 36k + 2k = 74k > 40k and reject!
+    nifty_input = make_valid_risk_input(
+        signal_id="SIG-NIFTY-NODBL",
+        symbol="NIFTY",
+        account_equity=equity,
+        available_capital=cap,
+        stop_price=Decimal("23920.00"),  # 80 pts * 25 = 2,000 risk
+        proposed_quantity=25,
+    )
+
+    decision = evaluate_trade_risk(nifty_input, portfolio, config=config)
+    # Must NOT double count! Should be APPROVED
+    assert decision.decision == RiskDecisionState.APPROVED
+    assert decision.risk_amount == Decimal("2000.00")
+
+
+def test_remediation_improvement_4_lot_flooring_disabled_by_default() -> None:
+    """Improvement 4: Under default policy, non-exact quantity rejects."""
+    equity = Decimal("4000000.00")
+    config = RiskConfig(allow_lot_flooring=False)  # Explicitly default
+
+    # Stop = 23846.15 -> risk per unit = 153.85. Raw quantity = 20,000 / 153.85 = 130.00
+    # 130 % 25 != 0 (not an exact lot multiple of 25)
+    t_input = make_valid_risk_input(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        stop_price=Decimal("23846.15"),
+        proposed_quantity=None,  # Request automated sizing
+    )
+    portfolio = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+    )
+
+    decision = evaluate_trade_risk(t_input, portfolio, config=config)
+    assert decision.decision == RiskDecisionState.REJECTED
+    assert decision.reason_code == RiskReasonCode.INVALID_LOT_SIZE
+
+
+def test_remediation_improvement_4_lot_flooring_enabled_floors_and_verifies_risk() -> None:
+    """Improvement 4: When allow_lot_flooring=True, floors to whole lots and verifies risk."""
+    equity = Decimal("4000000.00")
+    config = RiskConfig(
+        allow_lot_flooring=True,
+        max_single_position_notional=Decimal("0.80"),
+    )
+
+    # Stop = 23846.15 -> risk per unit = 153.85. Raw quantity = 20,000 / 153.85 = 129.997...
+    # Floor: 129 // 25 = 5 lots = 125 units.
+    # Actual risk = 125 * 153.85 = 19,231.25 <= 20,000.00 budget!
+    t_input = make_valid_risk_input(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        stop_price=Decimal("23846.15"),
+        proposed_quantity=None,  # Request automated sizing
+    )
+    portfolio = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+    )
+
+    decision = evaluate_trade_risk(t_input, portfolio, config=config)
+    assert decision.decision == RiskDecisionState.APPROVED
+    assert decision.quantity == 125  # Exactly 5 lots of 25
+    assert decision.risk_amount is not None
+    assert decision.risk_amount <= Decimal("20000.00")  # Strictly within budget
+
+
+def test_remediation_improvement_4_lot_flooring_too_small_rejected() -> None:
+    """Improvement 4: If affordable quantity is smaller than 1 lot, rejected even with flooring."""
+    equity = Decimal("4000000.00")
+    config = RiskConfig(allow_lot_flooring=True)
+
+    # Very large stop distance (within 3% max): 600 pts
+    # But lot size = 100 -> 1 lot risk = 600 * 100 = 60,000 > max risk 20,000
+    # Affordable raw quantity = 20,000 / 600 = 33.33 units (< 100 lot_size)
+    t_input = make_valid_risk_input(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+        stop_price=Decimal("23400.00"),  # 600 pts
+        lot_size=100,
+        proposed_quantity=None,
+    )
+    portfolio = make_valid_portfolio_state(
+        account_equity=equity,
+        available_capital=Decimal("2000000.00"),
+    )
+
+    decision = evaluate_trade_risk(t_input, portfolio, config=config)
+    assert decision.decision == RiskDecisionState.REJECTED
+    assert decision.reason_code == RiskReasonCode.POSITION_SIZE_TOO_SMALL

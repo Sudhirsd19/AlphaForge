@@ -86,20 +86,51 @@ def evaluate_trade_risk(
             timestamp=eval_ts,
         )
 
-    # 1. Equity and Capital Sanity Gates
-    equity = trade_input.account_equity
+    # 1. Equity and Capital Sanity Gates & Authoritative Consistency Checks
+    equity = portfolio_state.account_equity
     if not equity.is_finite() or equity <= Decimal("0"):
         return _invalid(
             RiskReasonCode.INVALID_EQUITY,
-            f"account_equity must be a positive finite Decimal: {equity}",
+            f"portfolio_state.account_equity must be a positive finite Decimal: {equity}",
         )
 
-    avail_cap = trade_input.available_capital
+    t_equity = trade_input.account_equity
+    if not t_equity.is_finite() or t_equity <= Decimal("0"):
+        return _invalid(
+            RiskReasonCode.INVALID_EQUITY,
+            f"trade_input.account_equity must be a positive finite Decimal: {t_equity}",
+        )
+
+    # Blocker 2: Explicit consistency check - fail closed on any mismatch
+    if t_equity != equity:
+        return _invalid(
+            RiskReasonCode.INVALID_EQUITY,
+            f"Account equity mismatch between trade_input ({t_equity}) "
+            f"and portfolio_state ({equity})",
+        )
+
+    avail_cap = portfolio_state.available_capital
     if not avail_cap.is_finite() or avail_cap <= Decimal("0"):
         return _reject(
             RiskReasonCode.INSUFFICIENT_CAPITAL,
-            f"available_capital must be positive: {avail_cap}",
+            f"portfolio_state.available_capital must be positive: {avail_cap}",
             equity=equity,
+        )
+
+    t_avail_cap = trade_input.available_capital
+    if not t_avail_cap.is_finite() or t_avail_cap <= Decimal("0"):
+        return _reject(
+            RiskReasonCode.INSUFFICIENT_CAPITAL,
+            f"trade_input.available_capital must be positive: {t_avail_cap}",
+            equity=equity,
+        )
+
+    # Blocker 2: Explicit consistency check - fail closed on any capital mismatch
+    if t_avail_cap != avail_cap:
+        return _invalid(
+            RiskReasonCode.INSUFFICIENT_CAPITAL,
+            f"Available capital mismatch between trade_input ({t_avail_cap}) "
+            f"and portfolio_state ({avail_cap})",
         )
 
     start_eq = portfolio_state.daily_starting_equity
@@ -251,18 +282,37 @@ def evaluate_trade_risk(
                 stop=stop,
                 risk_dist=risk_dist,
             )
-        if raw_qty % dec_lot != Decimal("0"):
-            return _reject(
-                RiskReasonCode.INVALID_LOT_SIZE,
-                f"Affordable quantity {raw_qty} is not an exact multiple of lot_size {lot}. "
-                "Silent rounding/flooring is strictly forbidden.",
-                equity=equity,
-                entry=entry,
-                stop=stop,
-                risk_dist=risk_dist,
-            )
-        qty = int(raw_qty)
-        trade_risk = risk_per_unit * Decimal(qty)
+        remainder = raw_qty % dec_lot
+        if remainder != Decimal("0"):
+            if not cfg.allow_lot_flooring:
+                return _reject(
+                    RiskReasonCode.INVALID_LOT_SIZE,
+                    f"Affordable quantity {raw_qty} is not an exact multiple of lot_size {lot}. "
+                    "Silent rounding/flooring is strictly forbidden under default policy.",
+                    equity=equity,
+                    entry=entry,
+                    stop=stop,
+                    risk_dist=risk_dist,
+                )
+            # Explicit flooring to whole lot multiples
+            floored_lots = int(raw_qty // dec_lot)
+            qty = floored_lots * lot
+            trade_risk = risk_per_unit * Decimal(qty)
+            if trade_risk > effective_max_trade_risk:
+                return _reject(
+                    RiskReasonCode.RISK_LIMIT_EXCEEDED,
+                    f"Floored trade risk {trade_risk} exceeds effective risk budget "
+                    f"{effective_max_trade_risk}",
+                    equity=equity,
+                    entry=entry,
+                    stop=stop,
+                    risk_dist=risk_dist,
+                    risk_amt=trade_risk,
+                    qty=qty,
+                )
+        else:
+            qty = int(raw_qty)
+            trade_risk = risk_per_unit * Decimal(qty)
 
     # 6. Single-Position Notional Limit
     trade_notional = calculate_notional(entry, qty, mult)
@@ -365,12 +415,22 @@ def evaluate_trade_risk(
     # 11. Correlated Exposure Groups
     for group in cfg.correlated_groups:
         if trade_input.symbol in group.symbols:
-            existing_grp_risk = sum(
+            group_res_risk = sum(
                 res.monetary_risk
                 for res in portfolio_state.active_reservations
                 if res.symbol in group.symbols
             )
-            grp_risk_after = existing_grp_risk + trade_risk
+            non_group_res_risk = sum(
+                res.monetary_risk
+                for res in portfolio_state.active_reservations
+                if res.symbol not in group.symbols
+            )
+            unaccounted_reserved_risk = max(
+                Decimal("0"),
+                portfolio_state.reserved_risk - (group_res_risk + non_group_res_risk),
+            )
+            group_risk_before = group_res_risk + unaccounted_reserved_risk
+            grp_risk_after = group_risk_before + trade_risk
             grp_risk_after_pct = grp_risk_after / equity
             if grp_risk_after_pct > group.max_group_risk:
                 return _reject(

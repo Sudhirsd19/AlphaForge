@@ -80,6 +80,7 @@ def test_concurrent_portfolio_risk_budget_enforcement() -> None:
         t_input = make_concurrency_risk_input(
             signal_id=f"SIG-CONCUR-{worker_id:03d}",
             equity=equity,
+            available_capital=Decimal("3000000.00"),
             stop_distance_pts=Decimal("600.00"),
             quantity=25,
         )

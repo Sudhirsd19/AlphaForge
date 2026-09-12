@@ -80,15 +80,20 @@ $$\text{stop\_distance\_pct} = \frac{\text{risk\_distance}}{P_{\text{entry}}}$$
   - Minimum stop distance: $\text{stop\_distance\_pct} \ge 0.10\%$ (`minimum_stop_distance`). Below this fails with `STOP_DISTANCE_TOO_SMALL`.
   - Maximum stop distance: $\text{stop\_distance\_pct} \le 3.00\%$ (`maximum_stop_distance`). Above this fails with `STOP_DISTANCE_TOO_LARGE`.
 
-### 3.3 Position Sizing & Contract Multiplier
-- **Risk Per Unit:**
+### 3.3 Position Sizing, Lot-Sizing Policy & Contract Multiplier
+- **Explicit Contract Multiplier (No Fallback):**
+  `contract_multiplier` must be explicitly supplied for every trade. There is strictly no default (`Decimal("1")` fallback eliminated). Non-positive or non-finite multipliers strictly produce `INVALID` (`INVALID_CONTRACT`).
   $$r_{\text{unit}} = \text{risk\_distance} \times \text{contract\_multiplier}$$
 - **Base Per-Trade Risk Budget:**
   $$R_{\text{max}} = \text{account\_equity} \times \text{max\_risk\_per\_trade} \quad (\text{default } 0.50\%)$$
-- **Automated Sizing (when `proposed_quantity` is None):**
-  $$Q_{\text{raw}} = \frac{R_{\text{max}}}{r_{\text{unit}}}$$
-  $$Q = \left\lfloor \frac{Q_{\text{raw}}}{\text{lot\_size}} \right\rfloor \times \text{lot\_size}$$
-  If $Q < \text{lot\_size}$, the trade is rejected with `POSITION_SIZE_TOO_SMALL`.
+- **Explicit Lot-Sizing Policy:**
+  - **Policy 1 (Default: `allow_lot_flooring = False`):**
+    Automated position sizing requires the raw affordable quantity $Q_{\text{raw}} = R_{\text{effective}} / r_{\text{unit}}$ to be an exact integer multiple of `lot_size`. If $Q_{\text{raw}} \pmod{\text{lot\_size}} \neq 0$, the trade is deterministically rejected with `INVALID_LOT_SIZE`.
+  - **Policy 2 (`allow_lot_flooring = True`):**
+    Automated sizing explicitly floors the raw quantity to whole lots:
+    $$Q = \left\lfloor \frac{Q_{\text{raw}}}{\text{lot\_size}} \right\rfloor \times \text{lot\_size}$$
+    The engine then recomputes actual trade risk $R_{\text{trade}} = Q \times r_{\text{unit}}$ and strictly verifies $R_{\text{trade}} \le R_{\text{effective}}$. Upward rounding is strictly impossible.
+  - If $Q < \text{lot\_size}$, the trade is rejected with `POSITION_SIZE_TOO_SMALL`.
 - **Explicit Sizing Validation:**
   When `proposed_quantity` is specified, it must satisfy:
   1. $Q > 0$ and $Q \pmod{\text{lot\_size}} == 0$. Otherwise rejected with `INVALID_LOT_SIZE`.
@@ -104,7 +109,14 @@ $$\text{stop\_distance\_pct} = \frac{\text{risk\_distance}}{P_{\text{entry}}}$$
   $$N_{\text{reserved}} + N_{\text{trade}} \le \text{account\_equity} \times \text{max\_portfolio\_notional} \quad (\text{default } 100.0\%)$$
   Breach rejects with `PORTFOLIO_NOTIONAL_EXCEEDED`.
 
-### 3.5 Portfolio Risk & Concurrency Limits
+### 3.5 Authoritative Account & Capital State Consistency
+`PortfolioRiskState` is the authoritative source of truth for account state.
+Before evaluating trade risk, the engine performs explicit strict equality checks:
+$$\text{trade\_input.account\_equity} == \text{portfolio\_state.account\_equity}$$
+$$\text{trade\_input.available\_capital} == \text{portfolio\_state.available\_capital}$$
+Any mismatch (inflated or reduced equity/capital) fails closed immediately with `INVALID` (`INVALID_EQUITY` or `INSUFFICIENT_CAPITAL`). The engine never chooses the larger value, never averages, and never falls back.
+
+### 3.6 Portfolio Risk & Concurrency Limits
 - **Portfolio Aggregate Risk:**
   $$R_{\text{total\_after}} = R_{\text{reserved}} + R_{\text{trade}} \le \text{account\_equity} \times \text{max\_portfolio\_risk} \quad (\text{default } 2.00\%)$$
   Breach rejects with `PORTFOLIO_RISK_EXCEEDED`.
@@ -112,7 +124,7 @@ $$\text{stop\_distance\_pct} = \frac{\text{risk\_distance}}{P_{\text{entry}}}$$
   $$\text{open\_trades} + \text{active\_reservations} + 1 \le \text{max\_open\_trades} \quad (\text{default } 5)$$
   Breach rejects with `MAX_OPEN_TRADES_EXCEEDED`.
 
-### 3.6 Available Capital & Risk Reserve Buffer
+### 3.7 Available Capital & Risk Reserve Buffer
 - **Collateral / Margin Requirement:**
   If not explicitly provided by broker margin rules, baseline margin is calculated as:
   $$C_{\text{base}} = N_{\text{trade}} \times 0.15 \quad (\text{15\% initial margin requirement})$$
@@ -120,7 +132,7 @@ $$\text{stop\_distance\_pct} = \frac{\text{risk\_distance}}{P_{\text{entry}}}$$
   $$C_{\text{required}} = C_{\text{base}} \times (1 + \text{risk\_reserve\_buffer}) \quad (\text{default } 5\%)$$
   If $\text{available\_capital} < C_{\text{required}}$, the trade is rejected with `INSUFFICIENT_CAPITAL`.
 
-### 3.7 Daily Loss Limits & Throttling
+### 3.8 Daily Loss Limits & Throttling
 Tracking daily loss relative to trading session opening equity:
 $$\text{daily\_loss} = \max(0, \text{daily\_starting\_equity} - \text{current\_equity})$$
 $$\text{daily\_loss\_pct} = \frac{\text{daily\_loss}}{\text{daily\_starting\_equity}}$$
@@ -132,10 +144,22 @@ $$\text{daily\_loss\_pct} = \frac{\text{daily\_loss}}{\text{daily\_starting\_equ
    $$R_{\text{remaining}} = \max(0, \text{daily\_starting\_equity} \times \text{daily\_loss\_hard\_limit} - \text{daily\_loss})$$
    $$R_{\text{effective\_max}} = \min(R_{\text{max}} \times 0.50, R_{\text{remaining}})$$
 
-### 3.8 Correlated Exposure Groups
+### 3.9 Correlated Exposure Groups & Authoritative Existing Risk
 Instruments sharing underlying market risk (e.g. `NIFTY` and `BANKNIFTY`) are configured into deterministic correlation groups.
-$$\sum_{s \in G} R_s \le \text{account\_equity} \times \text{max\_group\_risk}$$
-Breach rejects with `CORRELATED_RISK_EXCEEDED`.
+Existing exposure that belongs to the group is authoritatively computed from both active reservations and portfolio aggregate reserved risk:
+
+$$R_{\text{group\_res}} = \sum_{r \in \text{active\_reservations}, \, r.\text{symbol} \in G} r.\text{risk}$$
+$$R_{\text{non\_group\_res}} = \sum_{r \in \text{active\_reservations}, \, r.\text{symbol} \notin G} r.\text{risk}$$
+$$R_{\text{unaccounted}} = \max\left(0, \, R_{\text{portfolio\_reserved}} - (R_{\text{group\_res}} + R_{\text{non\_group\_res}})\right)$$
+$$R_{\text{group\_before}} = R_{\text{group\_res}} + R_{\text{unaccounted}}$$
+$$R_{\text{group\_after}} = R_{\text{group\_before}} + R_{\text{new\_trade}}$$
+
+$$\frac{R_{\text{group\_after}}}{\text{account\_equity}} \le \text{max\_group\_risk}$$
+
+This formulation guarantees:
+- **No undercounting:** Unitemized portfolio reserved risk is safely attributed to group exposure.
+- **No double counting:** Active reservations fully itemizing reserved risk produce $R_{\text{unaccounted}} = 0$.
+- Breach deterministically rejects with `CORRELATED_RISK_EXCEEDED`.
 
 ---
 
