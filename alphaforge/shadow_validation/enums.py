@@ -22,6 +22,7 @@ class MarketDataAnomalyType(StrEnum):
     FUTURE_TIMESTAMP = "FUTURE_TIMESTAMP"
     SEQUENCE_GAP = "SEQUENCE_GAP"
     SEQUENCE_REVERSAL = "SEQUENCE_REVERSAL"
+    UNVERIFIED_PROVENANCE = "UNVERIFIED_PROVENANCE"
 
 
 class FillExecutionType(StrEnum):
@@ -57,7 +58,10 @@ class DataSourceType(StrEnum):
 
     SYNTHETIC = "SYNTHETIC"
     HISTORICAL = "HISTORICAL"
+    REPLAY = "REPLAY"
+    MOCK = "MOCK"
     REAL_MARKET_SHADOW = "REAL_MARKET_SHADOW"
+    UNKNOWN = "UNKNOWN"
 
 
 class CertificationLevelStatus(StrEnum):

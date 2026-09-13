@@ -15,6 +15,7 @@ from alphaforge.core.exceptions import DataIntegrityError
 from alphaforge.data.enums import InstrumentType
 from alphaforge.data.models import MarketCandle
 from alphaforge.shadow_validation.enums import DataSourceType, MarketDataAnomalyType
+from alphaforge.shadow_validation.market_data_adapter import ProvenanceVerifier
 from alphaforge.shadow_validation.models import MarketStreamEvent
 
 if TYPE_CHECKING:
@@ -80,7 +81,12 @@ class MarketStreamValidator:
         now_utc = datetime.now(UTC)
         anomalies: list[MarketDataAnomalyType] = []
 
+        source_type = self._expected_data_source
         if isinstance(event, MarketCandle):
+            if self._expected_data_source == DataSourceType.REAL_MARKET_SHADOW:
+                anomalies.append(MarketDataAnomalyType.UNVERIFIED_PROVENANCE)
+                source_type = DataSourceType.SYNTHETIC
+
             seq = (self._last_sequence_no + 1) if self._last_sequence_no is not None else 1
             stream_event = MarketStreamEvent(
                 event_id=f"EVT-{event.symbol}-{int(event.exchange_timestamp.timestamp())}",
@@ -95,11 +101,18 @@ class MarketStreamValidator:
                 low_price=event.low,
                 close_price=event.close,
                 volume=event.volume,
-                data_source=self._expected_data_source,
+                data_source=source_type,
                 anomalies=[],
             )
         else:
             stream_event = event
+            if stream_event.data_source == DataSourceType.REAL_MARKET_SHADOW:
+                is_prov_valid, _fail_reason = ProvenanceVerifier.verify_provenance(stream_event)
+                if not is_prov_valid:
+                    anomalies.append(MarketDataAnomalyType.UNVERIFIED_PROVENANCE)
+                    stream_event = stream_event.model_copy(
+                        update={"data_source": DataSourceType.SYNTHETIC}
+                    )
 
         # 1. Duplicate event check
         if stream_event.event_id in self._seen_event_ids:

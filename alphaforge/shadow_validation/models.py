@@ -27,6 +27,32 @@ from alphaforge.shadow_validation.enums import (  # noqa: TC001
 )
 
 
+class FeedProvenanceToken(BaseModel):
+    """
+    Cryptographic and operational provenance token verifying external live feed origin.
+    Prevents self-declared provenance fraud.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    provider: str = Field(description="Authorized provider identifier, e.g. NSE_FEED_GATEWAY")
+    connection_session_id: str = Field(description="Active authenticated stream session ID")
+    source_timestamp: datetime = Field(description="Timestamp attached by provider at egress")
+    provider_event_id: str | None = Field(default=None, description="Provider sequence or tick ID")
+    raw_payload_hash: str = Field(description="SHA-256 digest of wire payload")
+    ingress_signature: str = Field(description="HMAC/Signature proving adapter verified receipt")
+    is_live_external: bool = Field(
+        default=False, description="True ONLY for verified external live socket"
+    )
+
+    @field_validator("source_timestamp")
+    @classmethod
+    def validate_utc(cls, v: datetime) -> datetime:
+        if v.tzinfo is None or v.utcoffset() != UTC.utcoffset(v):
+            raise DataIntegrityError(f"Timestamp must be timezone-aware UTC: {v}")
+        return v
+
+
 class MarketStreamEvent(BaseModel):
     """Enriched market stream event with multi-tiered causal timestamps and sequence tracking."""
 
@@ -47,6 +73,9 @@ class MarketStreamEvent(BaseModel):
     data_source: DataSourceType = Field(description="Data source category")
     anomalies: list[MarketDataAnomalyType] = Field(default_factory=list)
     is_session_valid: bool = Field(default=True)
+    provenance: FeedProvenanceToken | None = Field(
+        default=None, description="Cryptographic feed provenance token"
+    )
 
     @field_validator(
         "exchange_timestamp",
@@ -201,6 +230,9 @@ class ImmutableEvidencePackage(BaseModel):
     replay_result: dict[str, Any]
     certification_levels: dict[str, str]
     manifest_hash: str
+    provider: str = Field(default="UNVERIFIED")
+    connection_session_id: str = Field(default="NONE")
+    provenance_verified_events_count: int = Field(default=0)
 
     @classmethod
     def create(cls, data: dict[str, Any]) -> ImmutableEvidencePackage:

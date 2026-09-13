@@ -6,9 +6,11 @@ immutable evidence packages.
 
 from __future__ import annotations
 
+import json
 import time
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from alphaforge.execution.enums import OrderSide
@@ -86,6 +88,8 @@ class LongDurationShadowRunner:
         run_id = f"PHASE17-{self.data_source_type.value}-{int(start_time.timestamp())}"
         decisions_count = 0
         valid_events_count = 0
+        provenance_verified_events_count = 0
+        effective_data_source = self.data_source_type
 
         for candle in candles:
             t0 = time.perf_counter()
@@ -94,6 +98,11 @@ class LongDurationShadowRunner:
             event = self.validator.validate_event(candle)
             if not event.anomalies:
                 valid_events_count += 1
+
+            if event.provenance and event.provenance.is_live_external:
+                provenance_verified_events_count += 1
+            elif self.data_source_type == DataSourceType.REAL_MARKET_SHADOW:
+                effective_data_source = DataSourceType.SYNTHETIC
 
             # 2. Engine causal step
             self.engine.process_candle(candle)
@@ -157,9 +166,12 @@ class LongDurationShadowRunner:
 
         if (
             self.data_source_type == DataSourceType.REAL_MARKET_SHADOW
+            and effective_data_source == DataSourceType.REAL_MARKET_SHADOW
+            and provenance_verified_events_count >= self.config.minimum_valid_market_events
             and duration >= self.config.minimum_duration_seconds
             and valid_events_count >= self.config.minimum_valid_market_events
             and decisions_count >= self.config.minimum_shadow_decisions
+            and len(self.causal_certifier.violations) == 0
         ):
             level_c = "PASS"
         else:
@@ -171,7 +183,7 @@ class LongDurationShadowRunner:
             "config_hash": "cfg-phase17-v1",
             "strategy_version": "1.0.0",
             "contract_metadata_version": "3.0.0",
-            "data_source_type": self.data_source_type,
+            "data_source_type": effective_data_source,
             "start_time": start_time,
             "end_time": end_time,
             "duration_seconds": duration,
@@ -200,6 +212,28 @@ class LongDurationShadowRunner:
                 "level_b": level_b,
                 "level_c": level_c,
             },
+            "provider": (
+                candles[0].source if candles and hasattr(candles[0], "source") else "UNVERIFIED"
+            ),
+            "connection_session_id": (
+                "AUTHENTICATED_LIVE_SESSION"
+                if effective_data_source == DataSourceType.REAL_MARKET_SHADOW
+                else "NONE"
+            ),
+            "provenance_verified_events_count": provenance_verified_events_count,
         }
 
         return ImmutableEvidencePackage.create(evidence_payload)
+
+    def persist_evidence_package(
+        self,
+        package: ImmutableEvidencePackage,
+        output_dir: Path | str = "evidence/shadow_validation",
+    ) -> Path:
+        """Persist evidence package JSON to disk."""
+        target_dir = Path(output_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        file_path = target_dir / f"{package.run_id}_evidence.json"
+        with file_path.open("w", encoding="utf-8") as f:
+            f.write(json.dumps(package.model_dump(), indent=2, sort_keys=True, default=str))
+        return file_path
