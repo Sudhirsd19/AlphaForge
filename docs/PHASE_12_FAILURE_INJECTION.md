@@ -87,7 +87,7 @@ alphaforge/
 
 5. **Deterministic Injectors**:
    - `FailingLedgerStorage`: Wraps `AbstractLedgerStorage`, injects write/read failures after $N$ operations.
-   - `CorruptingLedgerStorage`: Mutates hashes, previous hashes, payloads, or sequence numbers.
+   - `CorruptingLedgerStorage`: Mutates hashes, previous hashes, payloads, or sequence numbers. Supports deterministic inline corruption during `append()` via `corrupt_hash_at` and `corrupt_sequence_at` using non-mutating model copies.
    - `FailingStateStore`: Simulates atomic state store read/write corruptions.
    - `TimeoutBroker`: Wraps `AbstractBroker`, injecting simulated broker timeouts or network losses.
    - `CrashSimulator`: Raises `ProcessCrashError` at configured lifecycle boundaries.
@@ -186,25 +186,25 @@ The framework enforces 10 reusable invariant functions defined in `alphaforge.fa
    $$\forall i \ne j, \quad \text{order\_id}_i \ne \text{order\_id}_j$$
    Proves zero order duplication occurs across retries, timeouts, or concurrent submissions.
 
-2. **`assert_no_duplicate_fills(fills: Sequence[str])`**  
-   $$\forall i \ne j, \quad \text{fill\_id}_i \ne \text{fill\_id}_j$$
-   Guarantees no fill event is processed more than once.
+2. **`assert_no_duplicate_fills(fills: Sequence[dict | Any])`**  
+   $$\text{Fill Identity} = \begin{cases} \text{fill\_id} & \text{if explicitly defined} \\ (\text{order\_id}, \text{qty}, \text{price}, \text{timestamp}, \text{partial\_idx}) & \text{otherwise} \end{cases}$$  
+   Guarantees no logical fill event is processed more than once across different ledger sequences, while correctly permitting distinct partial fills.
 
-3. **`assert_no_phantom_positions(active_positions, verified_broker_positions)`**  
-   $$\text{active\_positions} \subseteq \text{verified\_broker\_positions}$$
-   Ensures the system never records or maintains a position not acknowledged by the broker.
+3. **`assert_no_phantom_positions(active_positions, authoritative_executions)`**  
+   $$\text{POSITION} \implies \exists \text{ execution } \mid \text{symbol} = \text{pos.symbol} \land \text{side} = \text{pos.side} \land \text{pos.qty} \le \sum \text{exec.qty}$$  
+   Validates full execution provenance chain ($\text{POSITION} \to \text{fill/execution} \to \text{order\_id} \to \text{broker/audit truth}$). Normalizes side representation (`BUY`/`LONG` and `SELL`/`SHORT`) and strictly forbids unbacked positions.
 
 4. **`assert_no_double_pnl(trades: Sequence[dict])`**  
-   $$\sum \text{net\_pnl}_{\text{effective}} = \sum_{\text{unique trade\_id}} \text{net\_pnl}$$
+   $$\sum \text{net\_pnl}_{\text{effective}} = \sum_{\text{unique trade\_id}} \text{net\_pnl}$$  
    Guarantees duplicate execution or fill messages cannot double-count realized PnL.
 
 5. **`assert_valid_fsm_history(order_id: str, history: Sequence[OrderState])`**  
-   $$\forall k \in [1, |H|-1], \quad (H_{k-1}, H_k) \in \text{ALLOWED\_TRANSITIONS}$$
+   $$\forall k \in [1, |H|-1], \quad (H_{k-1}, H_k) \in \text{ALLOWED\_TRANSITIONS}$$  
    Ensures every order transition obeys the formal 17-state transition matrix. Once in a terminal state (`FILLED`, `CANCELLED`, `REJECTED`, `EXPIRED`), no further transitions may occur.
 
 6. **`assert_hash_chain_intact(events: Sequence[AuditEvent])`**  
-   $$\forall k \in [1, N-1], \quad \text{events}[k].\text{previous\_event\_hash} = \text{events}[k-1].\text{event\_hash}$$
-   Verifies cryptographic immutability of the audit ledger stream.
+   $$\forall k \in [1, N-1], \quad \text{events}[k].\text{previous\_event\_hash} = \text{events}[k-1].\text{event\_hash} \quad \land \quad \text{events}[k].\text{event\_hash} = \text{SHA256}(\text{canonical}(\text{events}[k]))$$  
+   Verifies cryptographic immutability of the audit ledger stream: unbroken hash chain, contiguous sequence numbering, and authentic recomputed SHA-256 event digests.
 
 7. **`assert_risk_limits_enforced(portfolio: PortfolioRiskState, config: RiskConfig)`**  
    $$\text{open\_trades} \le \text{max\_open\_trades} \quad \land \quad \text{daily\_loss} \le \text{max\_daily\_loss}$$
@@ -218,7 +218,7 @@ The framework enforces 10 reusable invariant functions defined in `alphaforge.fa
 
 ## 7. Test Traceability Matrix
 
-The Phase 12 test suite comprises **100 tests** (84 unit failure scenarios, 6 golden adversarial scenarios, and 10 property tests) across 11 test files:
+The Phase 12 test suite comprises **112 tests** (95 unit failure scenarios, 7 golden adversarial scenarios, and 10 property tests) across 12 test files:
 
 | Test File | Test IDs | Count | Coverage Area | Status |
 | :--- | :--- | :---: | :--- | :---: |
@@ -232,8 +232,9 @@ The Phase 12 test suite comprises **100 tests** (84 unit failure scenarios, 6 go
 | `test_concurrency_faults.py` | RACE1–RACE5 | 5 | Deterministic thread-barrier races: exits, risk reservations, submits, reconciliation, appends | PASS |
 | `test_risk_faults.py` | Risk-1..Risk-9 | 9 | Max positions, daily loss lockout, circuit breakers, reservation persistence across crash | PASS |
 | `test_golden_adversarial.py` | GOLDEN-1..6 | 7 | Complex multi-failure end-to-end integration scenarios | PASS |
+| `test_forensic_remediation.py` | FI-H1, FI-S1, FI-F1..F3, FI-P1..P5 | 12 | Deterministic hash/seq corruption, hierarchical fill deduplication, position execution provenance | PASS |
 | `test_fault_injection_properties.py` | FP1–FP10 | 10 | Hypothesis property tests proving invariants under arbitrary randomized parameters | PASS |
-| **Total Phase 12 Tests** | — | **100** | — | **100% PASS** |
+| **Total Phase 12 Tests** | — | **112** | — | **100% PASS** |
 
 ---
 
@@ -293,7 +294,7 @@ To guarantee 100% reproducible test outcomes:
 
 ## 10. Static-Scan Results
 
-Targeted static scans across all 16 Phase 12 files yielded zero violations:
+Targeted static scans across all 17 Phase 12 files yielded zero violations:
 
 | Check | Target Pattern | Matches Found | Status |
 | :--- | :--- | :---: | :---: |
@@ -312,12 +313,12 @@ Targeted static scans across all 16 Phase 12 files yielded zero violations:
 
 Execution across the entire AlphaForge test suite:
 
-- **Full Pytest Suite**: **696 passed** in 17.58s
+- **Full Pytest Suite**: **708 passed** in ~18s
   - 596 existing baseline tests (Phases 1–11)
-  - 100 new Phase 12 tests
+  - 112 Phase 12 tests (102 unit + 10 property tests)
   - 0 failed, 0 errors, 0 skipped
 - **Ruff Linter**: `All checks passed!` (0 errors across entire workspace)
-- **Ruff Formatter**: `198 files already formatted` (100% compliance)
+- **Ruff Formatter**: `154 files already formatted` (100% compliance)
 - **Mypy Typechecker**:
   - `mypy alphaforge`: `Success: no issues found in 77 source files`
   - `mypy --strict alphaforge/fault_injection`: `Success: no issues found in 4 source files`
@@ -337,8 +338,8 @@ Execution across the entire AlphaForge test suite:
 | Requirement | Verification Evidence | Status |
 | :--- | :--- | :---: |
 | **No Trading Logic Modified** | `git diff origin/master alphaforge/strategy/ alphaforge/risk/ alphaforge/execution/` is empty | CONFIRMED |
-| **100 Tests Passing** | All 100 Phase 12 tests pass in 5.3s; full suite 696 tests pass in 17.58s | CONFIRMED |
-| **All Fault Scenarios Exercised** | D1–D6, L1–L8, O1–O9, C1–C8, K1–K5, S1–S5, T1–T5, RACE1–RACE5, Risk, GOLDEN-1..6, FP1–FP10 | CONFIRMED |
+| **112 Tests Passing** | All 112 Phase 12 tests pass in 1.3s; full suite 708 tests pass in ~18s | CONFIRMED |
+| **All Fault Scenarios Exercised** | D1–D6, L1–L8, O1–O9, C1–C8, K1–K5, S1–S5, T1–T5, RACE1–RACE5, Risk, GOLDEN-1..6, FP1–FP10, and FI-H1, FI-S1, FI-F1..F3, FI-P1..P5 | CONFIRMED |
 | **Zero Live Credentials/Calls** | Static scan confirmed 0 matches for live exchanges, URLs, or secrets | CONFIRMED |
 | **Deterministic Execution** | Zero `time.sleep()` calls, thread barriers used throughout | CONFIRMED |
 | **Strict Type Safety** | `mypy --strict alphaforge/fault_injection` passes with 0 issues | CONFIRMED |

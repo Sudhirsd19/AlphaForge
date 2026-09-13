@@ -186,9 +186,9 @@ Phase 17 = Controlled Live
 - **Dependencies:** Phase 11.
 - **Files/Modules:** `alphaforge/fault_injection/*`, `tests/unit/fault_injection/*`, `tests/property/test_fault_injection_properties.py`, `docs/PHASE_12_FAILURE_INJECTION.md`.
 - **Implementation Tasks:** Build isolated deterministic fault injection module (`models.py`, `injectors.py`, `invariants.py`), implement unit failure suites (D1–D6, L1–L8, O1–O9, C1–C8, K1–K5, S1–S5, T1–T5, RACE1–RACE5, Risk-1..9), golden adversarial scenarios (GOLDEN-1..6), and property tests (FP1–FP10).
-- **Tests:** 100 deterministic tests (84 unit failure scenarios, 6 golden adversarial scenarios, 10 property tests).
+- **Tests:** 112 deterministic tests (95 unit failure scenarios, 7 golden adversarial scenarios, 10 property tests).
 - **Acceptance Criteria:** System gracefully halts, fails closed, reconciles, and reports alerts across all scenarios without capital leakage, state fabrication, or duplicate execution.
-- **Exit Gate:** 100/100 failure-injection tests passing; 696/696 full suite passing; zero live exchange or credentials leaks; formal documentation complete; user sign-off.
+- **Exit Gate:** 112/112 failure-injection tests passing; 708/708 full suite passing; zero live exchange or credentials leaks; formal documentation complete; user sign-off.
 - **Status:** IMPLEMENTED / VALIDATED (Freeze Ready).
 - **Risks:** Incomplete test harness isolation; mitigated by isolated `alphaforge/fault_injection/` module with zero modifications to production domain logic.
 

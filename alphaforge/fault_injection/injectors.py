@@ -111,7 +111,25 @@ class CorruptingLedgerStorage(AbstractLedgerStorage):
                 self._delegate.append(event)
                 self._delegate.append(event)
                 return
-            self._delegate.append(event)
+
+            to_append = event
+            if self._corrupt_hash_at is not None and self._append_count == self._corrupt_hash_at:
+                corrupted_hash = (
+                    event.event_hash[:-4] + "dead"
+                    if not event.event_hash.endswith("dead")
+                    else event.event_hash[:-4] + "beef"
+                )
+                to_append = to_append.model_copy(update={"event_hash": corrupted_hash})
+
+            if (
+                self._corrupt_sequence_at is not None
+                and self._append_count == self._corrupt_sequence_at
+            ):
+                to_append = to_append.model_copy(
+                    update={"sequence_number": to_append.sequence_number + 999}
+                )
+
+            self._delegate.append(to_append)
 
     def read_all(self) -> list[AuditEvent]:
         return self._delegate.read_all()

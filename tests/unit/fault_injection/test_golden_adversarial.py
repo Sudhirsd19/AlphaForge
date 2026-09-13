@@ -26,7 +26,10 @@ from alphaforge.fault_injection.injectors import (
 )
 from alphaforge.fault_injection.invariants import (
     assert_hash_chain_intact,
+    assert_no_double_pnl,
+    assert_no_duplicate_fills,
     assert_no_duplicate_orders,
+    assert_valid_fsm_history,
 )
 from alphaforge.ledger.ledger import AuditLedger
 from alphaforge.ledger.models import AuditEvent, AuditEventType
@@ -84,17 +87,17 @@ class TestGOLDEN1BrokerAcceptCrashRestart:
 
 class TestGOLDEN2FillDuplicatedRestart:
     """
-    GOLDEN-2: Fill event duplicated → restart → one effective fill.
-    Invariant: idempotent fill, no double PnL.
+    GOLDEN-2: Fill event duplicated under different sequence → restart → one effective fill.
+    Invariant: idempotent fill, no double PnL, terminal state protection.
     """
 
-    def test_duplicate_fill_event_is_idempotent(self) -> None:
+    def test_duplicate_fill_under_different_sequence_prevented(self) -> None:
         storage = InMemoryLedgerStorage()
         ledger = AuditLedger(storage, auto_verify_on_startup=False)
         ts = datetime(2026, 9, 13, 9, 30, tzinfo=UTC)
 
-        # First fill event
-        ev1 = ledger.append(
+        # First fill event recorded in ledger
+        ledger.append(
             event_type=AuditEventType.ORDER_FILLED,
             entity_type="ORDER",
             entity_id="ORD-GOLDEN2",
@@ -104,28 +107,77 @@ class TestGOLDEN2FillDuplicatedRestart:
                 "fill_qty": 50,
                 "price": "24050.00",
                 "fill_id": "FILL-001",
+                "symbol": "NIFTY",
+                "side": "LONG",
             },
             event_timestamp=ts,
         )
 
-        # Duplicate fill event (exact same data) → idempotent
-        ev2 = ledger.append(
-            event_type=AuditEventType.ORDER_FILLED,
-            entity_type="ORDER",
-            entity_id="ORD-GOLDEN2",
-            correlation_id="CORR-GOLDEN2",
-            causation_id="ROOT",
-            payload={
-                "fill_qty": 50,
-                "price": "24050.00",
-                "fill_id": "FILL-001",
-            },
-            event_timestamp=ts,
+        # FSM processes first fill into terminal state FILLED
+        fsm = OrderStateMachine(
+            order_id="ORD-GOLDEN2",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            created_at=ts,
+            initial_state=OrderState.CREATED,
         )
+        fsm.transition(OrderState.VALIDATED, event=OrderEvent.VALIDATE_SUCCESS)
+        fsm.transition(OrderState.SUBMITTED, event=OrderEvent.SUBMIT)
+        fsm.transition(OrderState.ACKNOWLEDGED, event=OrderEvent.ACKNOWLEDGE)
+        r1 = fsm.transition(
+            OrderState.FILLED,
+            event=OrderEvent.FULL_FILL,
+            fill_qty=50,
+            fill_price=Decimal("24050.00"),
+        )
+        assert r1.success is True
+        assert fsm.current_state == OrderState.FILLED
+        assert fsm.filled_quantity == 50
 
-        # Same event returned (idempotent)
-        assert ev1.event_id == ev2.event_id
-        assert storage.count() == 1  # Only one event stored
+        # Duplicate fill arrives under DIFFERENT ledger sequence (e.g. seq 1 vs seq 2)
+        fill_1 = {
+            "order_id": "ORD-GOLDEN2",
+            "fill_id": "FILL-001",
+            "filled_quantity": 50,
+            "average_price": Decimal("24050.00"),
+            "timestamp": ts,
+            "sequence": 1,
+        }
+        fill_2 = {
+            "order_id": "ORD-GOLDEN2",
+            "fill_id": "FILL-001",
+            "filled_quantity": 50,
+            "average_price": Decimal("24050.00"),
+            "timestamp": ts,
+            "sequence": 2,  # Different sequence!
+        }
+
+        # Invariant detects duplicate fill despite sequence difference
+        with pytest.raises(AssertionError, match="Duplicate fill detected"):
+            assert_no_duplicate_fills([fill_1, fill_2])
+
+        # Attempting second fill on FSM cannot increase position
+        fsm.transition(
+            OrderState.FILLED,
+            event=OrderEvent.FULL_FILL,
+            fill_qty=50,
+            fill_price=Decimal("24050.00"),
+            raise_on_error=False,
+        )
+        assert fsm.filled_quantity == 50  # Position remains strictly 50, not 100!
+
+        # Invariant: exactly one PnL realization
+        trade_pnls = [("TRADE-GOLDEN2", Decimal("2500.00"))]
+        assert_no_double_pnl(trade_pnls)
+
+        with pytest.raises(AssertionError, match="Double PnL detected"):
+            assert_no_double_pnl(
+                [
+                    ("TRADE-GOLDEN2", Decimal("2500.00")),
+                    ("TRADE-GOLDEN2", Decimal("2500.00")),
+                ]
+            )
 
 
 class TestGOLDEN3CheckpointCorruptedRestart:
@@ -313,6 +365,23 @@ class TestGOLDEN5ConcurrentExitReconciliation:
                 OrderState.UNKNOWN, event=OrderEvent.COMMUNICATION_LOST, raise_on_error=False
             )
             assert not r.success
+
+        # Invariant: exactly one close -> single PnL record
+        assert_no_double_pnl([("TRADE-GOLDEN5", Decimal("750.00"))])
+
+        # Invariant: full transition chain obeys FSM legality
+        assert_valid_fsm_history(
+            [
+                (OrderState.CREATED.value, OrderState.VALIDATED.value),
+                (OrderState.VALIDATED.value, OrderState.SUBMITTED.value),
+                (OrderState.SUBMITTED.value, OrderState.ACKNOWLEDGED.value),
+                (OrderState.ACKNOWLEDGED.value, OrderState.FILLED.value),
+                (OrderState.FILLED.value, OrderState.PROTECTION_PENDING.value),
+                (OrderState.PROTECTION_PENDING.value, OrderState.PROTECTED.value),
+                (OrderState.PROTECTED.value, OrderState.EXIT_PENDING.value),
+                (OrderState.EXIT_PENDING.value, final.value),
+            ]
+        )
 
 
 class TestGOLDEN6RiskReservationCrashRecovery:
