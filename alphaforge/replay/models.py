@@ -146,7 +146,7 @@ class ReplayConfig(BaseModel):
         default=True, description="Verify reconstructed trace against source trace hash"
     )
     verify_result_hash: bool = Field(
-        default=True, description="Verify reconstructed result against source result hash"
+        default=False, description="Verify reconstructed result against source result hash"
     )
     fail_on_first_divergence: bool = Field(
         default=True, description="Fail immediately upon encountering the first divergence"

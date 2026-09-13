@@ -34,6 +34,9 @@ from alphaforge.backtest.models import (
     BacktestConfig,
     BacktestResult,
     BacktestTrade,
+    EquitySnapshot,
+    QuantGateResult,
+    QuantGateStatus,
     TraceEntry,
     TraceEventType,
     compute_result_canonical_hash,
@@ -413,7 +416,7 @@ def test_r9_fsm_illegal_transition() -> None:
         entity_id="ORD_FSM",
         correlation_id="RUN_FSM",
         causation_id="GENESIS",
-        payload={"order_id": "ORD_FSM", "quantity": 1, "side": "LONG"},
+        payload={"order_id": "ORD_FSM", "symbol": "NIFTY", "quantity": 1, "side": "LONG"},
         event_timestamp=t0,
     )
     # Reject the order -> transitions to terminal REJECTED state
@@ -1318,12 +1321,299 @@ def test_r34_terminal_state_resurrection_strictly_fails() -> None:
 
 
 # ---------------------------------------------------------------------------
+# R35: Source equity curve mutation isolation
+# ---------------------------------------------------------------------------
+def test_r35_source_equity_curve_mutation_isolation() -> None:
+    bt_engine, bt_res = _run_sample_backtest()
+    events = bt_engine.ledger._storage.read_all()
+
+    clean_res = ReplayEngine(
+        ReplayConfig(), ReplayArtifactSource(events=events, backtest_result=bt_res)
+    ).replay()
+    assert clean_res.status == ReplayStatus.PASS
+    assert clean_res.reconstructed_result is not None
+
+    bogus_snap = EquitySnapshot(
+        timestamp=bt_res.config.start_time,
+        equity=Decimal("999999999"),
+        cash=Decimal("999999999"),
+        margin_used=Decimal("0"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        cumulative_fees=Decimal("0"),
+        cumulative_slippage=Decimal("0"),
+        notional_exposure=Decimal("0"),
+        drawdown=Decimal("0"),
+        drawdown_pct=Decimal("0"),
+    )
+    corrupted_res = bt_res.model_copy(update={"equity_curve": bt_res.equity_curve + (bogus_snap,)})
+
+    tampered_source = ReplayArtifactSource(events=events, backtest_result=corrupted_res)
+    tampered_replay = ReplayEngine(ReplayConfig(), tampered_source).replay()
+
+    assert tampered_replay.status == ReplayStatus.PASS
+    assert tampered_replay.reconstructed_result is not None
+    assert (
+        tampered_replay.reconstructed_result.equity_curve
+        == clean_res.reconstructed_result.equity_curve
+    )
+    assert not any(
+        s.equity == Decimal("999999999") for s in tampered_replay.reconstructed_result.equity_curve
+    )
+
+
+# ---------------------------------------------------------------------------
+# R36: Source quant gates mutation isolation
+# ---------------------------------------------------------------------------
+def test_r36_source_quant_gates_mutation_isolation() -> None:
+    bt_engine, bt_res = _run_sample_backtest()
+    events = bt_engine.ledger._storage.read_all()
+
+    clean_res = ReplayEngine(
+        ReplayConfig(), ReplayArtifactSource(events=events, backtest_result=bt_res)
+    ).replay()
+    assert clean_res.status == ReplayStatus.PASS
+    assert clean_res.reconstructed_result is not None
+
+    fake_gate = QuantGateResult(
+        gate_id="GATE_FAKE_HACK",
+        gate_name="FAKE_GATE",
+        status=QuantGateStatus.FAIL,
+        reason="Malicious injection",
+        evidence={},
+    )
+    corrupted_res = bt_res.model_copy(update={"quant_gates": bt_res.quant_gates + (fake_gate,)})
+
+    tampered_source = ReplayArtifactSource(events=events, backtest_result=corrupted_res)
+    tampered_replay = ReplayEngine(ReplayConfig(), tampered_source).replay()
+
+    assert tampered_replay.status == ReplayStatus.PASS
+    assert tampered_replay.reconstructed_result is not None
+    assert (
+        tampered_replay.reconstructed_result.quant_gates
+        == clean_res.reconstructed_result.quant_gates
+    )
+    assert not any(
+        g.gate_id == "GATE_FAKE_HACK" for g in tampered_replay.reconstructed_result.quant_gates
+    )
+
+
+# ---------------------------------------------------------------------------
+# R37: Source diagnostics, warnings, and errors mutation isolation
+# ---------------------------------------------------------------------------
+def test_r37_source_diagnostics_warnings_errors_isolation() -> None:
+    bt_engine, bt_res = _run_sample_backtest()
+    events = bt_engine.ledger._storage.read_all()
+
+    corrupted_res = bt_res.model_copy(
+        update={
+            "diagnostics": {"corrupted_key": "corrupted_val"},
+            "warnings": ("corrupted_warning_str",),
+            "errors": ("corrupted_error_str",),
+        }
+    )
+
+    tampered_source = ReplayArtifactSource(events=events, backtest_result=corrupted_res)
+    res = ReplayEngine(ReplayConfig(), tampered_source).replay()
+
+    assert res.status == ReplayStatus.PASS
+    assert res.reconstructed_result is not None
+    assert res.reconstructed_result.diagnostics == {}
+    assert res.reconstructed_result.warnings == ()
+    assert res.reconstructed_result.errors == ()
+
+
+# ---------------------------------------------------------------------------
+# R38: Source non-audit trace entries mutation isolation
+# ---------------------------------------------------------------------------
+def test_r38_source_non_audit_trace_entries_mutation_isolation() -> None:
+    bt_engine, bt_res = _run_sample_backtest()
+    events = bt_engine.ledger._storage.read_all()
+
+    fake_entry = TraceEntry(
+        timestamp=bt_res.config.start_time,
+        event_type=TraceEventType.ORDER_SIMULATED,
+        entity_id="BOGUS_TRACE_ENTITY_999",
+        symbol="NIFTY",
+        price=Decimal("12345"),
+    )
+    corrupted_res = bt_res.model_copy(
+        update={"execution_trace": bt_res.execution_trace + (fake_entry,)}
+    )
+
+    tampered_source = ReplayArtifactSource(events=events, backtest_result=corrupted_res)
+
+    # 1. With verify_execution_trace=False: replay succeeds and
+    # reconstructed trace ignores bogus entry
+    res_no_verify = ReplayEngine(
+        ReplayConfig(verify_execution_trace=False), tampered_source
+    ).replay()
+    assert res_no_verify.status == ReplayStatus.PASS
+    assert res_no_verify.reconstructed_result is not None
+    assert not any(
+        t.entity_id == "BOGUS_TRACE_ENTITY_999"
+        for t in res_no_verify.reconstructed_result.execution_trace
+    )
+    assert res_no_verify.final_state is not None
+    assert not any(t.entity_id == "BOGUS_TRACE_ENTITY_999" for t in res_no_verify.final_state.trace)
+
+    # 2. With verify_execution_trace=True: replay detects trace divergence
+    # against corrupted source trace
+    res_verify = ReplayEngine(ReplayConfig(verify_execution_trace=True), tampered_source).replay()
+    assert res_verify.status == ReplayStatus.FAIL
+    assert res_verify.first_divergence is not None
+    assert res_verify.first_divergence.mismatch_category == "TRACE_HASH_MISMATCH"
+
+
+# ---------------------------------------------------------------------------
+# R39: Missing mandatory authoritative equity event handling
+# ---------------------------------------------------------------------------
+def test_r39_missing_mandatory_equity_event_handling() -> None:
+    ledger = AuditLedger(InMemoryLedgerStorage())
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    e1 = ledger.append(
+        event_type=AuditEventType.SIGNAL_GENERATED,
+        entity_type="SIGNAL",
+        entity_id="SIG_39",
+        correlation_id="RUN_39",
+        causation_id="GENESIS",
+        payload={"signal_id": "SIG_39", "direction": "LONG", "symbol": "NIFTY"},
+        event_timestamp=t0,
+    )
+    ledger.append(
+        event_type=AuditEventType.ORDER_SIMULATED,
+        entity_type="ORDER",
+        entity_id="ORD_39",
+        correlation_id="RUN_39",
+        causation_id=e1.event_id,
+        payload={"order_id": "ORD_39", "symbol": "NIFTY", "quantity": 1, "side": "LONG"},
+        event_timestamp=t0 + timedelta(minutes=1),
+    )
+    events = ledger._storage.read_all()
+
+    fake_manifest = ReplayManifest(
+        source_run_id="RUN_39",
+        source_dataset_id="DS_39",
+        source_dataset_checksum="CHK_39",
+        source_strategy_id="STRAT_39",
+        source_strategy_version="1.0.0",
+        source_engine_version="1.0.0",
+        source_result_canonical_hash="f" * 64,
+        source_trace_canonical_hash="e" * 64,
+    )
+
+    _, sample_res = _run_sample_backtest()
+    source_with_res = ReplayArtifactSource(
+        events=events, manifest=fake_manifest, backtest_result=sample_res
+    )
+
+    res_incom = ReplayEngine(
+        ReplayConfig(verify_execution_trace=False, verify_result_hash=False),
+        source_with_res,
+    ).replay()
+    assert res_incom.reconstruction_status == "RESULT_RECONSTRUCTION_INCOMPLETE"
+    assert res_incom.status == ReplayStatus.PASS
+
+    res_fail = ReplayEngine(
+        ReplayConfig(verify_execution_trace=False, verify_result_hash=True),
+        source_with_res,
+    ).replay()
+    assert res_fail.status == ReplayStatus.FAIL
+    assert res_fail.first_divergence is not None
+    assert res_fail.first_divergence.mismatch_category == "RESULT_HASH_MISMATCH"
+
+
+# ---------------------------------------------------------------------------
+# R40: Missing mandatory metadata fails closed
+# ---------------------------------------------------------------------------
+def test_r40_missing_mandatory_order_metadata_fails_closed() -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+
+    # 1. Missing quantity
+    storage1 = InMemoryLedgerStorage()
+    ledger1 = AuditLedger(storage1)
+    ledger1.append(
+        event_type=AuditEventType.ORDER_SIMULATED,
+        entity_type="ORDER",
+        entity_id="ORD_NO_QTY",
+        correlation_id="RUN_40",
+        causation_id="GENESIS",
+        payload={"order_id": "ORD_NO_QTY", "symbol": "NIFTY", "side": "LONG"},
+        event_timestamp=t0,
+    )
+    res1 = ReplayEngine(
+        ReplayConfig(), ReplayArtifactSource(events=ledger1._storage.read_all())
+    ).replay()
+    assert res1.status == ReplayStatus.FAIL
+    assert res1.first_divergence is not None
+    assert res1.first_divergence.mismatch_category == "MISSING_TRADE_DATA"
+
+    # 2. Missing side
+    storage2 = InMemoryLedgerStorage()
+    ledger2 = AuditLedger(storage2)
+    ledger2.append(
+        event_type=AuditEventType.ORDER_SIMULATED,
+        entity_type="ORDER",
+        entity_id="ORD_NO_SIDE",
+        correlation_id="RUN_40",
+        causation_id="GENESIS",
+        payload={"order_id": "ORD_NO_SIDE", "symbol": "NIFTY", "quantity": 10},
+        event_timestamp=t0,
+    )
+    res2 = ReplayEngine(
+        ReplayConfig(), ReplayArtifactSource(events=ledger2._storage.read_all())
+    ).replay()
+    assert res2.status == ReplayStatus.FAIL
+    assert res2.first_divergence is not None
+    assert res2.first_divergence.mismatch_category == "MISSING_TRADE_DATA"
+
+    # 3. Missing symbol
+    storage3 = InMemoryLedgerStorage()
+    ledger3 = AuditLedger(storage3)
+    ledger3.append(
+        event_type=AuditEventType.ORDER_SIMULATED,
+        entity_type="ORDER",
+        entity_id="ORD_NO_SYM",
+        correlation_id="RUN_40",
+        causation_id="GENESIS",
+        payload={"order_id": "ORD_NO_SYM", "quantity": 10, "side": "LONG"},
+        event_timestamp=t0,
+    )
+    res3 = ReplayEngine(
+        ReplayConfig(), ReplayArtifactSource(events=ledger3._storage.read_all())
+    ).replay()
+    assert res3.status == ReplayStatus.FAIL
+    assert res3.first_divergence is not None
+    assert res3.first_divergence.mismatch_category == "MISSING_TRADE_DATA"
+
+
+# ---------------------------------------------------------------------------
 # Adversarial Golden Test: source audit events valid, reference artifacts wrong
 # ---------------------------------------------------------------------------
 def test_adversarial_golden_independent_reconstruction() -> None:
     bt_engine, bt_res = _run_sample_backtest()
     events = bt_engine.ledger._storage.read_all()
 
+    bogus_snap = EquitySnapshot(
+        timestamp=bt_res.config.start_time,
+        equity=Decimal("999999999"),
+        cash=Decimal("999999999"),
+        margin_used=Decimal("0"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        cumulative_fees=Decimal("0"),
+        cumulative_slippage=Decimal("0"),
+        notional_exposure=Decimal("0"),
+        drawdown=Decimal("0"),
+        drawdown_pct=Decimal("0"),
+    )
+    fake_gate = QuantGateResult(
+        gate_id="GATE_FAKE_HACK",
+        gate_name="FAKE_GATE",
+        status=QuantGateStatus.FAIL,
+        reason="Malicious injection",
+        evidence={},
+    )
     fake_trace_entry = TraceEntry(
         timestamp=bt_res.config.start_time,
         event_type=TraceEventType.ORDER_SIMULATED,
@@ -1332,6 +1622,17 @@ def test_adversarial_golden_independent_reconstruction() -> None:
         price=Decimal("999999"),
     )
     forged_trace = (fake_trace_entry,)
+
+    corrupted_res = bt_res.model_copy(
+        update={
+            "equity_curve": (bogus_snap,),
+            "quant_gates": (fake_gate,),
+            "diagnostics": {"corrupted_key": "corrupted_val"},
+            "warnings": ("corrupted_warning_str",),
+            "errors": ("corrupted_error_str",),
+            "execution_trace": forged_trace,
+        }
+    )
 
     forged_manifest = ReplayManifest(
         source_run_id=bt_res.backtest_run_id,
@@ -1348,7 +1649,7 @@ def test_adversarial_golden_independent_reconstruction() -> None:
         events=events,
         trace=forged_trace,
         manifest=forged_manifest,
-        backtest_result=bt_res,
+        backtest_result=corrupted_res,
     )
 
     config = ReplayConfig(
@@ -1359,7 +1660,23 @@ def test_adversarial_golden_independent_reconstruction() -> None:
 
     assert res.status == ReplayStatus.FAIL
     assert res.first_divergence is not None
-    assert res.first_divergence.mismatch_category in ("TRACE_HASH_MISMATCH", "RESULT_HASH_MISMATCH")
+    assert res.first_divergence.mismatch_category in (
+        "TRACE_HASH_MISMATCH",
+        "RESULT_HASH_MISMATCH",
+    )
     assert res.final_state is not None
     assert "FORGED_ENTITY_999" not in res.final_state.orders
-    assert res.replay_trace_hash != "b" * 64
+    assert not any(s.equity == Decimal("999999999") for s in res.final_state.equity_curve)
+    assert not any(g.gate_id == "GATE_FAKE_HACK" for g in res.final_state.quant_gates)
+
+    if res.reconstructed_result is not None:
+        assert res.reconstructed_result.diagnostics == {}
+        assert res.reconstructed_result.warnings == ()
+        assert res.reconstructed_result.errors == ()
+        assert not any(
+            s.equity == Decimal("999999999") for s in res.reconstructed_result.equity_curve
+        )
+        assert not any(g.gate_id == "GATE_FAKE_HACK" for g in res.reconstructed_result.quant_gates)
+        assert not any(
+            t.entity_id == "FORGED_ENTITY_999" for t in res.reconstructed_result.execution_trace
+        )

@@ -15,10 +15,12 @@ from alphaforge.backtest.metrics import calculate_backtest_metrics
 from alphaforge.backtest.models import (
     BacktestResult,
     BacktestTrade,
+    EquitySnapshot,
     QuantGateResult,
     QuantGateStatus,
     TraceEntry,
     TraceEventType,
+    ValidationStatus,
     compute_result_canonical_hash,
     compute_trace_canonical_hash,
 )
@@ -140,6 +142,8 @@ class ReplayEngine:
             events_verified = 0
 
         first_divergence: ReplayMismatch | None = None
+        saw_backtest_started: bool = self._initial_checkpoint is not None
+        saw_backtest_completed: bool = False
 
         for event in events:
             # Skip events already incorporated into resumed checkpoint
@@ -155,6 +159,11 @@ class ReplayEngine:
                 if "signal_id" in event.payload:
                     known_causal_ids.add(str(event.payload["signal_id"]))
                 continue
+
+            if event.event_type == AuditEventType.BACKTEST_STARTED:
+                saw_backtest_started = True
+            elif event.event_type == AuditEventType.BACKTEST_COMPLETED:
+                saw_backtest_completed = True
 
             # Prefix replay cutoff handling
             if self._config.mode == ReplayMode.PREFIX:
@@ -342,56 +351,60 @@ class ReplayEngine:
             and self._config.mode != ReplayMode.VALIDATION_ONLY
         ):
             source_res = self._source.backtest_result
-            # Independently compute performance metrics from reconstructed trades
+            # Independently compute performance metrics strictly from reconstructed
+            # trades and equity curve
+            replayed_equity = tuple(reconstructed_state.equity_curve)
+            replayed_trades = tuple(reconstructed_state.trades)
+            replayed_trace = tuple(reconstructed_state.trace)
+            reconstructed_gates = tuple(reconstructed_state.quant_gates)
+
             indep_metrics = calculate_backtest_metrics(
-                trades=list(reconstructed_state.trades),
-                equity_curve=source_res.equity_curve,
-                initial_capital=source_res.config.initial_capital,
+                trades=list(replayed_trades),
+                equity_curve=list(replayed_equity),
+                initial_capital=reconstructed_state.portfolio.initial_capital,
                 start_time=source_res.config.start_time,
                 end_time=source_res.config.end_time,
             )
-            # Assemble combined execution trace with reconstructed audit trace entries
-            audit_trace_types = {
-                TraceEventType.SIGNAL_GENERATED,
-                TraceEventType.RISK_EVALUATED,
-                TraceEventType.ORDER_SIMULATED,
-                TraceEventType.FILL_SIMULATED,
-                TraceEventType.TRADE_CLOSED,
-            }
-            non_audit_trace = [
-                e for e in source_res.execution_trace if e.event_type not in audit_trace_types
-            ]
-            combined_trace = tuple(
-                sorted(
-                    non_audit_trace + list(reconstructed_state.trace),
-                    key=lambda e: e.timestamp,
-                )
-            )
+
+            # Reconstruct validation status strictly from reconstructed gates
+            reconstructed_val_status = ValidationStatus.VALID
+            if any(g.status == QuantGateStatus.FAIL for g in reconstructed_gates):
+                reconstructed_val_status = ValidationStatus.INVALID
+            elif any(g.status == QuantGateStatus.WARNING for g in reconstructed_gates):
+                reconstructed_val_status = ValidationStatus.WARNING
 
             initial_reconstructed = BacktestResult(
-                backtest_run_id=source_res.backtest_run_id,
+                backtest_run_id=manifest.source_run_id,
                 config=source_res.config,
                 dataset_metadata=source_res.dataset_metadata,
-                trades=tuple(reconstructed_state.trades),
-                equity_curve=source_res.equity_curve,
+                trades=replayed_trades,
+                equity_curve=replayed_equity,
                 metrics=indep_metrics,
-                validation_status=source_res.validation_status,
-                quant_gates=source_res.quant_gates,
-                diagnostics=dict(source_res.diagnostics),
-                warnings=tuple(source_res.warnings),
-                errors=tuple(source_res.errors),
-                completion_status=source_res.completion_status,
-                execution_trace=combined_trace,
+                validation_status=reconstructed_val_status,
+                quant_gates=reconstructed_gates,
+                diagnostics={},
+                warnings=(),
+                errors=(),
+                completion_status="COMPLETED" if saw_backtest_completed else "INCOMPLETE",
+                execution_trace=replayed_trace,
             )
             # Compute canonical result hash strictly from reconstructed result
             replay_result_hash = compute_result_canonical_hash(initial_reconstructed)
             reconstructed_result = initial_reconstructed.model_copy(
                 update={
                     "result_canonical_hash": replay_result_hash,
-                    "trace_canonical_hash": compute_trace_canonical_hash(combined_trace),
+                    "trace_canonical_hash": replay_trace_hash,
                 }
             )
-            reconstruction_status = "COMPLETE"
+
+            if not saw_backtest_started and events_processed > 0:
+                reconstruction_status = "RESULT_RECONSTRUCTION_INCOMPLETE"
+            elif source_result_hash is not None and replay_result_hash == source_result_hash:
+                reconstruction_status = "COMPLETE"
+            elif source_result_hash is not None:
+                reconstruction_status = "RESULT_RECONSTRUCTION_INCOMPLETE"
+            else:
+                reconstruction_status = "COMPLETE"
 
             if self._config.verify_result_hash and source_result_hash is not None:
                 result_mismatch = ResultHashValidator.validate(
@@ -470,7 +483,7 @@ class ReplayEngine:
         )
         return engine.replay()
 
-    def _resolve_symbol(self, event: AuditEvent | None = None) -> str:
+    def _resolve_symbol(self, event: AuditEvent | None = None) -> str | None:
         """Deterministically resolve market symbol from event payload, manifest, or result."""
         if event is not None and "symbol" in event.payload:
             sym = str(event.payload["symbol"]).strip()
@@ -480,7 +493,7 @@ class ReplayEngine:
             return self._source.manifest.source_contract_id
         if self._source.backtest_result is not None:
             return self._source.backtest_result.dataset_metadata.symbol
-        return "UNKNOWN"
+        return None
 
     @staticmethod
     def _with_state_before(
@@ -522,8 +535,41 @@ class ReplayEngine:
             )
 
         if event.event_type == AuditEventType.BACKTEST_STARTED:
-            cap_str = str(payload.get("initial_capital", "1000000"))
-            initial_cap = Decimal(cap_str)
+            if "initial_capital" in payload:
+                cap_str = str(payload["initial_capital"])
+            elif self._source.backtest_result is not None:
+                cap_str = str(self._source.backtest_result.config.initial_capital)
+            else:
+                cap_str = "1000000"
+
+            try:
+                initial_cap = Decimal(cap_str)
+            except Exception:
+                return ReplayMismatch(
+                    divergent_sequence=event.sequence_number,
+                    event_id=event.event_id,
+                    event_type=str(event.event_type),
+                    source_fingerprint="DECIMAL_INITIAL_CAPITAL",
+                    replay_fingerprint=cap_str,
+                    mismatch_category="MISSING_TRADE_DATA",
+                    diagnostic=(
+                        f"Invalid initial_capital '{cap_str}' at seq {event.sequence_number}"
+                    ),
+                )
+
+            if initial_cap <= Decimal("0"):
+                return ReplayMismatch(
+                    divergent_sequence=event.sequence_number,
+                    event_id=event.event_id,
+                    event_type=str(event.event_type),
+                    source_fingerprint="POSITIVE_INITIAL_CAPITAL",
+                    replay_fingerprint=str(initial_cap),
+                    mismatch_category="MISSING_TRADE_DATA",
+                    diagnostic=(
+                        f"Non-positive initial capital {initial_cap} at seq {event.sequence_number}"
+                    ),
+                )
+
             contract_id = payload.get("contract_id")
             exp_str = payload.get("expiry_datetime") or payload.get("expiry_timestamp")
             exp_dt: datetime | None = None
@@ -554,12 +600,62 @@ class ReplayEngine:
                     }
                 ),
             )
+            # Authoritative initial EquitySnapshot
+            init_snap = EquitySnapshot(
+                timestamp=ts,
+                equity=initial_cap,
+                cash=initial_cap,
+                margin_used=Decimal("0"),
+                realized_pnl=Decimal("0"),
+                unrealized_pnl=Decimal("0"),
+                cumulative_fees=Decimal("0"),
+                cumulative_slippage=Decimal("0"),
+                notional_exposure=Decimal("0"),
+                drawdown=Decimal("0"),
+                drawdown_pct=Decimal("0"),
+            )
+            object.__setattr__(state, "equity_curve", state.equity_curve + (init_snap,))
 
         elif event.event_type == AuditEventType.SIGNAL_GENERATED:
             sig_id = str(payload.get("signal_id", event.entity_id))
-            dir_str = str(payload.get("direction", "LONG")).upper()
+            dir_raw = payload.get("direction")
+            if dir_raw is None:
+                return ReplayMismatch(
+                    divergent_sequence=event.sequence_number,
+                    event_id=event.event_id,
+                    event_type=str(event.event_type),
+                    source_fingerprint="KNOWN_DIRECTION",
+                    replay_fingerprint="MISSING_DIRECTION",
+                    mismatch_category="MISSING_TRADE_DATA",
+                    diagnostic=(
+                        f"Missing direction in signal {sig_id} at seq {event.sequence_number}"
+                    ),
+                )
+            dir_str = str(dir_raw).strip().upper()
+            if dir_str not in ("LONG", "BUY", "SHORT", "SELL"):
+                return ReplayMismatch(
+                    divergent_sequence=event.sequence_number,
+                    event_id=event.event_id,
+                    event_type=str(event.event_type),
+                    source_fingerprint="LEGAL_DIRECTION",
+                    replay_fingerprint=dir_str,
+                    mismatch_category="MISSING_TRADE_DATA",
+                    diagnostic=f"Invalid signal direction '{dir_str}' in signal {sig_id}",
+                )
             side = TradeSide.LONG if dir_str in ("LONG", "BUY") else TradeSide.SHORT
             symbol = self._resolve_symbol(event)
+            if not symbol:
+                return ReplayMismatch(
+                    divergent_sequence=event.sequence_number,
+                    event_id=event.event_id,
+                    event_type=str(event.event_type),
+                    source_fingerprint="VALID_SYMBOL",
+                    replay_fingerprint="NONE",
+                    mismatch_category="MISSING_TRADE_DATA",
+                    diagnostic=(
+                        f"Missing or unresolvable symbol for signal at seq {event.sequence_number}"
+                    ),
+                )
             entry_ref_str = payload.get("entry_price")
             entry_ref = Decimal(str(entry_ref_str)) if entry_ref_str is not None else None
             stop_ref = str(payload.get("stop_loss", ""))
@@ -583,11 +679,104 @@ class ReplayEngine:
 
         elif event.event_type in (AuditEventType.ORDER_SIMULATED, AuditEventType.ORDER_CREATED):
             order_id = str(payload.get("order_id", event.entity_id))
-            side_str = str(payload.get("side", "LONG"))
-            side = TradeSide.LONG if side_str.upper() in ("BUY", "LONG") else TradeSide.SHORT
-            qty = int(payload.get("quantity", 1))
-            symbol = self._resolve_symbol(event)
             signal_id = str(payload.get("signal_id", event.causation_id or "")) or None
+
+            # Resolve side strictly without defaulting to LONG
+            if "side" in payload:
+                side_str = str(payload["side"]).strip().upper()
+                if side_str not in ("BUY", "LONG", "SELL", "SHORT"):
+                    return ReplayMismatch(
+                        divergent_sequence=event.sequence_number,
+                        event_id=event.event_id,
+                        event_type=str(event.event_type),
+                        source_fingerprint="LEGAL_SIDE",
+                        replay_fingerprint=side_str,
+                        mismatch_category="MISSING_TRADE_DATA",
+                        diagnostic=f"Invalid order side '{side_str}' for order {order_id}",
+                    )
+                side = TradeSide.LONG if side_str in ("BUY", "LONG") else TradeSide.SHORT
+            else:
+                matching_sig = next(
+                    (
+                        te
+                        for te in reversed(state.trace)
+                        if te.event_type == TraceEventType.SIGNAL_GENERATED
+                        and (te.entity_id == signal_id or te.entity_id == event.causation_id)
+                    ),
+                    None,
+                )
+                if matching_sig is not None and matching_sig.side is not None:
+                    side = matching_sig.side
+                else:
+                    return ReplayMismatch(
+                        divergent_sequence=event.sequence_number,
+                        event_id=event.event_id,
+                        event_type=str(event.event_type),
+                        source_fingerprint="KNOWN_ORDER_SIDE",
+                        replay_fingerprint="MISSING_SIDE",
+                        mismatch_category="MISSING_TRADE_DATA",
+                        diagnostic=(
+                            f"Missing mandatory side for order {order_id} at seq "
+                            f"{event.sequence_number}"
+                        ),
+                    )
+
+            # Resolve quantity strictly without defaulting to 1
+            if "quantity" not in payload:
+                return ReplayMismatch(
+                    divergent_sequence=event.sequence_number,
+                    event_id=event.event_id,
+                    event_type=str(event.event_type),
+                    source_fingerprint="POSITIVE_QUANTITY",
+                    replay_fingerprint="MISSING_QUANTITY",
+                    mismatch_category="MISSING_TRADE_DATA",
+                    diagnostic=(
+                        f"Missing order quantity for order {order_id} at seq "
+                        f"{event.sequence_number}"
+                    ),
+                )
+            try:
+                qty = int(payload["quantity"])
+            except Exception:
+                return ReplayMismatch(
+                    divergent_sequence=event.sequence_number,
+                    event_id=event.event_id,
+                    event_type=str(event.event_type),
+                    source_fingerprint="INTEGER_QUANTITY",
+                    replay_fingerprint=str(payload["quantity"]),
+                    mismatch_category="MISSING_TRADE_DATA",
+                    diagnostic=(
+                        f"Invalid order quantity '{payload['quantity']}' for order {order_id}"
+                    ),
+                )
+            if qty <= 0:
+                return ReplayMismatch(
+                    divergent_sequence=event.sequence_number,
+                    event_id=event.event_id,
+                    event_type=str(event.event_type),
+                    source_fingerprint="POSITIVE_QUANTITY",
+                    replay_fingerprint=str(qty),
+                    mismatch_category="MISSING_TRADE_DATA",
+                    diagnostic=(
+                        f"Non-positive order quantity {qty} for order {order_id} at seq "
+                        f"{event.sequence_number}"
+                    ),
+                )
+
+            symbol = self._resolve_symbol(event)
+            if not symbol:
+                return ReplayMismatch(
+                    divergent_sequence=event.sequence_number,
+                    event_id=event.event_id,
+                    event_type=str(event.event_type),
+                    source_fingerprint="VALID_SYMBOL",
+                    replay_fingerprint="NONE",
+                    mismatch_category="MISSING_TRADE_DATA",
+                    diagnostic=(
+                        f"Missing or unresolvable symbol for order {order_id} at seq "
+                        f"{event.sequence_number}"
+                    ),
+                )
 
             order_price: Decimal | None = None
             if "entry_price" in payload:
@@ -678,21 +867,84 @@ class ReplayEngine:
                 # ENTRY FILL
                 raw_side = payload.get("side")
                 if raw_side is not None:
-                    side_str = str(raw_side)
-                    side = (
-                        TradeSide.LONG if side_str.upper() in ("BUY", "LONG") else TradeSide.SHORT
-                    )
+                    side_str = str(raw_side).strip().upper()
+                    if side_str not in ("BUY", "LONG", "SELL", "SHORT"):
+                        return ReplayMismatch(
+                            divergent_sequence=event.sequence_number,
+                            event_id=event.event_id,
+                            event_type=str(event.event_type),
+                            source_fingerprint="LEGAL_SIDE",
+                            replay_fingerprint=side_str,
+                            mismatch_category="MISSING_TRADE_DATA",
+                            diagnostic=f"Invalid fill side '{side_str}' for order {order_id}",
+                        )
+                    side = TradeSide.LONG if side_str in ("BUY", "LONG") else TradeSide.SHORT
                 elif order_id in state.orders:
                     side = state.orders[order_id].side
                 else:
-                    side = TradeSide.LONG
+                    return ReplayMismatch(
+                        divergent_sequence=event.sequence_number,
+                        event_id=event.event_id,
+                        event_type=str(event.event_type),
+                        source_fingerprint="KNOWN_FILL_SIDE",
+                        replay_fingerprint="MISSING_SIDE",
+                        mismatch_category="MISSING_TRADE_DATA",
+                        diagnostic=f"Cannot determine side for entry fill of order {order_id}",
+                    )
 
-                qty = (
-                    int(payload["quantity"])
-                    if "quantity" in payload and payload["quantity"] is not None
-                    else (state.orders[order_id].quantity if order_id in state.orders else 1)
-                )
+                if "quantity" in payload and payload["quantity"] is not None:
+                    try:
+                        qty = int(payload["quantity"])
+                    except Exception:
+                        return ReplayMismatch(
+                            divergent_sequence=event.sequence_number,
+                            event_id=event.event_id,
+                            event_type=str(event.event_type),
+                            source_fingerprint="INTEGER_QUANTITY",
+                            replay_fingerprint=str(payload["quantity"]),
+                            mismatch_category="MISSING_TRADE_DATA",
+                            diagnostic=(
+                                f"Invalid fill quantity '{payload['quantity']}' for order "
+                                f"{order_id}"
+                            ),
+                        )
+                elif order_id in state.orders:
+                    qty = state.orders[order_id].quantity
+                else:
+                    return ReplayMismatch(
+                        divergent_sequence=event.sequence_number,
+                        event_id=event.event_id,
+                        event_type=str(event.event_type),
+                        source_fingerprint="KNOWN_FILL_QUANTITY",
+                        replay_fingerprint="MISSING_QUANTITY",
+                        mismatch_category="MISSING_TRADE_DATA",
+                        diagnostic=f"Cannot determine quantity for entry fill of order {order_id}",
+                    )
+
+                if qty <= 0:
+                    return ReplayMismatch(
+                        divergent_sequence=event.sequence_number,
+                        event_id=event.event_id,
+                        event_type=str(event.event_type),
+                        source_fingerprint="POSITIVE_QUANTITY",
+                        replay_fingerprint=str(qty),
+                        mismatch_category="MISSING_TRADE_DATA",
+                        diagnostic=f"Non-positive entry fill quantity {qty} for order {order_id}",
+                    )
+
                 symbol = self._resolve_symbol(event)
+                if not symbol:
+                    return ReplayMismatch(
+                        divergent_sequence=event.sequence_number,
+                        event_id=event.event_id,
+                        event_type=str(event.event_type),
+                        source_fingerprint="VALID_SYMBOL",
+                        replay_fingerprint="NONE",
+                        mismatch_category="MISSING_TRADE_DATA",
+                        diagnostic=(
+                            f"Missing or unresolvable symbol for entry fill of order {order_id}"
+                        ),
+                    )
 
                 if order_id in state.orders:
                     curr_ord = state.orders[order_id]
@@ -780,6 +1032,29 @@ class ReplayEngine:
                         }
                     ),
                 )
+
+                curr_eq = state.portfolio.equity
+                peak_eq = max(
+                    state.portfolio.initial_capital,
+                    *(s.equity for s in state.equity_curve),
+                    curr_eq,
+                )
+                dd = max(Decimal("0"), peak_eq - curr_eq)
+                dd_pct = (dd / peak_eq) if peak_eq > Decimal("0") else Decimal("0")
+                fill_snap = EquitySnapshot(
+                    timestamp=ts,
+                    equity=curr_eq,
+                    cash=state.portfolio.cash,
+                    margin_used=state.position.margin_used,
+                    realized_pnl=state.portfolio.cumulative_realized_pnl,
+                    unrealized_pnl=state.portfolio.unrealized_pnl,
+                    cumulative_fees=state.portfolio.cumulative_fees,
+                    cumulative_slippage=state.portfolio.cumulative_slippage,
+                    notional_exposure=state.position.notional_exposure,
+                    drawdown=dd,
+                    drawdown_pct=dd_pct,
+                )
+                object.__setattr__(state, "equity_curve", state.equity_curve + (fill_snap,))
 
                 trace_entry = TraceEntry(
                     timestamp=ts,
@@ -914,17 +1189,35 @@ class ReplayEngine:
             if exit_price_val is not None:
                 exit_price = Decimal(str(exit_price_val))
             elif "gross_pnl" in payload or "net_pnl" in payload:
-                qty_dec = Decimal(pos.quantity) if pos.quantity > 0 else Decimal("1")
-                mult = (
-                    state.contract.contract_multiplier
-                    if state.contract.contract_multiplier > 0
-                    else Decimal("1")
-                )
+                if pos.quantity <= 0:
+                    return ReplayMismatch(
+                        divergent_sequence=event.sequence_number,
+                        event_id=event.event_id,
+                        event_type=str(event.event_type),
+                        source_fingerprint="POSITIVE_QUANTITY",
+                        replay_fingerprint=str(pos.quantity),
+                        mismatch_category="MISSING_TRADE_DATA",
+                        diagnostic=(
+                            f"Non-positive position quantity {pos.quantity} for trade {trade_id}"
+                        ),
+                    )
+                dec_qty = Decimal(pos.quantity)
+                mult = state.contract.contract_multiplier
+                if mult <= Decimal("0"):
+                    return ReplayMismatch(
+                        divergent_sequence=event.sequence_number,
+                        event_id=event.event_id,
+                        event_type=str(event.event_type),
+                        source_fingerprint="POSITIVE_MULTIPLIER",
+                        replay_fingerprint=str(mult),
+                        mismatch_category="MISSING_TRADE_DATA",
+                        diagnostic=f"Non-positive contract multiplier {mult} for trade {trade_id}",
+                    )
                 if "gross_pnl" in payload:
                     g_pnl = Decimal(str(payload["gross_pnl"]))
                 else:
                     g_pnl = Decimal(str(payload["net_pnl"])) + tot_fees + tot_slippage
-                price_diff = g_pnl / (qty_dec * mult)
+                price_diff = g_pnl / (dec_qty * mult)
                 exit_price = (
                     pos.entry_reference_price + price_diff
                     if pos.side == TradeSide.LONG
@@ -1035,6 +1328,7 @@ class ReplayEngine:
             )
 
             object.__setattr__(state, "trades", state.trades + (trade,))
+            new_cash = state.portfolio.cash + gross_pnl - exit_slippage - exit_fee
             object.__setattr__(
                 state,
                 "portfolio",
@@ -1044,14 +1338,37 @@ class ReplayEngine:
                         + gross_pnl,
                         "cumulative_fees": state.portfolio.cumulative_fees + exit_fee,
                         "cumulative_slippage": state.portfolio.cumulative_slippage + exit_slippage,
-                        "cash": state.portfolio.cash + gross_pnl - exit_slippage - exit_fee,
-                        "equity": state.portfolio.equity + net_pnl,
+                        "cash": new_cash,
+                        "equity": new_cash,
                         "completed_trades_count": state.portfolio.completed_trades_count + 1,
                     }
                 ),
             )
             object.__setattr__(state, "position", ReplayPositionState(has_open_position=False))
             object.__setattr__(state, "last_exit_fill", None)
+
+            curr_eq = state.portfolio.equity
+            peak_eq = max(
+                state.portfolio.initial_capital,
+                *(s.equity for s in state.equity_curve),
+                curr_eq,
+            )
+            dd = max(Decimal("0"), peak_eq - curr_eq)
+            dd_pct = (dd / peak_eq) if peak_eq > Decimal("0") else Decimal("0")
+            trade_snap = EquitySnapshot(
+                timestamp=ts,
+                equity=curr_eq,
+                cash=state.portfolio.cash,
+                margin_used=Decimal("0"),
+                realized_pnl=state.portfolio.cumulative_realized_pnl,
+                unrealized_pnl=Decimal("0"),
+                cumulative_fees=state.portfolio.cumulative_fees,
+                cumulative_slippage=state.portfolio.cumulative_slippage,
+                notional_exposure=Decimal("0"),
+                drawdown=dd,
+                drawdown_pct=dd_pct,
+            )
+            object.__setattr__(state, "equity_curve", state.equity_curve + (trade_snap,))
 
             trace_entry = TraceEntry(
                 timestamp=ts,
@@ -1199,6 +1516,30 @@ class ReplayEngine:
                 evidence=evidence_dict,
             )
             object.__setattr__(state, "quant_gates", state.quant_gates + (gate,))
+
+        elif event.event_type == AuditEventType.BACKTEST_COMPLETED:
+            curr_eq = state.portfolio.equity
+            peak_eq = max(
+                state.portfolio.initial_capital,
+                *(s.equity for s in state.equity_curve),
+                curr_eq,
+            )
+            dd = max(Decimal("0"), peak_eq - curr_eq)
+            dd_pct = (dd / peak_eq) if peak_eq > Decimal("0") else Decimal("0")
+            final_snap = EquitySnapshot(
+                timestamp=ts,
+                equity=curr_eq,
+                cash=state.portfolio.cash,
+                margin_used=Decimal("0"),
+                realized_pnl=state.portfolio.cumulative_realized_pnl,
+                unrealized_pnl=Decimal("0"),
+                cumulative_fees=state.portfolio.cumulative_fees,
+                cumulative_slippage=state.portfolio.cumulative_slippage,
+                notional_exposure=Decimal("0"),
+                drawdown=dd,
+                drawdown_pct=dd_pct,
+            )
+            object.__setattr__(state, "equity_curve", state.equity_curve + (final_snap,))
 
         # Update last processed sequence, hash, and timestamp
         object.__setattr__(state, "last_processed_sequence", event.sequence_number)

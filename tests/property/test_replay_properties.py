@@ -31,6 +31,9 @@ from alphaforge.backtest.engine import BacktestEngine
 from alphaforge.backtest.models import (
     BacktestConfig,
     BacktestResult,
+    EquitySnapshot,
+    QuantGateResult,
+    QuantGateStatus,
     TraceEntry,
     TraceEventType,
     compute_result_canonical_hash,
@@ -47,6 +50,7 @@ from alphaforge.replay.engine import ReplayEngine
 from alphaforge.replay.loader import ReplayArtifactSource
 from alphaforge.replay.models import (
     ReplayConfig,
+    ReplayManifest,
     ReplayMode,
     ReplayStatus,
 )
@@ -951,3 +955,210 @@ def test_p46_checkpoint_fingerprint_invariance(checkpoint_seq: int) -> None:
     assert resumed_res.status == ReplayStatus.PASS
     assert resumed_res.final_state is not None
     assert resumed_res.final_state_fingerprint == full_fp
+
+
+# ---------------------------------------------------------------------------
+# P47: Source Equity Mutations Cannot Alter Replay-Derived Equity
+# ---------------------------------------------------------------------------
+@settings(max_examples=10, deadline=None)
+@given(
+    bogus_equity=st.integers(min_value=1, max_value=999999999),
+)
+def test_p47_source_equity_mutations_isolation(bogus_equity: int) -> None:
+    engine, bt_res = _run_backtest_fixture(40, 15)
+    events = engine.ledger._storage.read_all()
+
+    # Clean replay baseline
+    clean_res = ReplayEngine(
+        ReplayConfig(), ReplayArtifactSource(events=events, backtest_result=bt_res)
+    ).replay()
+    assert clean_res.status == ReplayStatus.PASS
+    assert clean_res.reconstructed_result is not None
+    clean_curve = clean_res.reconstructed_result.equity_curve
+
+    injected_snap = EquitySnapshot(
+        timestamp=bt_res.config.start_time,
+        equity=Decimal(bogus_equity),
+        cash=Decimal(bogus_equity),
+        margin_used=Decimal("0"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        cumulative_fees=Decimal("0"),
+        cumulative_slippage=Decimal("0"),
+        notional_exposure=Decimal("0"),
+        drawdown=Decimal("0"),
+        drawdown_pct=Decimal("0"),
+    )
+    tampered_bt_res = bt_res.model_copy(
+        update={"equity_curve": bt_res.equity_curve + (injected_snap,)}
+    )
+
+    tampered_replay = ReplayEngine(
+        ReplayConfig(),
+        ReplayArtifactSource(events=events, backtest_result=tampered_bt_res),
+    ).replay()
+
+    assert tampered_replay.status == ReplayStatus.PASS
+    assert tampered_replay.reconstructed_result is not None
+    assert tampered_replay.reconstructed_result.equity_curve == clean_curve
+    assert not any(
+        s.equity == Decimal(bogus_equity) for s in tampered_replay.reconstructed_result.equity_curve
+    )
+
+
+# ---------------------------------------------------------------------------
+# P48: Source Quant-Gate Mutations Cannot Alter Replay-Derived Gate State
+# ---------------------------------------------------------------------------
+@settings(max_examples=10, deadline=None)
+@given(
+    gate_suffix=st.integers(min_value=100, max_value=99999),
+)
+def test_p48_source_quant_gates_isolation(gate_suffix: int) -> None:
+    engine, bt_res = _run_backtest_fixture(40, 15)
+    events = engine.ledger._storage.read_all()
+
+    clean_res = ReplayEngine(
+        ReplayConfig(), ReplayArtifactSource(events=events, backtest_result=bt_res)
+    ).replay()
+    assert clean_res.status == ReplayStatus.PASS
+    assert clean_res.reconstructed_result is not None
+    clean_gates = clean_res.reconstructed_result.quant_gates
+
+    fake_gate_id = f"GATE_HACK_{gate_suffix}"
+    fake_gate = QuantGateResult(
+        gate_id=fake_gate_id,
+        gate_name="HACKED_GATE",
+        status=QuantGateStatus.FAIL,
+        reason="Malicious injection",
+        evidence={},
+    )
+    tampered_bt_res = bt_res.model_copy(update={"quant_gates": bt_res.quant_gates + (fake_gate,)})
+
+    tampered_replay = ReplayEngine(
+        ReplayConfig(),
+        ReplayArtifactSource(events=events, backtest_result=tampered_bt_res),
+    ).replay()
+
+    assert tampered_replay.status == ReplayStatus.PASS
+    assert tampered_replay.reconstructed_result is not None
+    assert tampered_replay.reconstructed_result.quant_gates == clean_gates
+    assert not any(
+        g.gate_id == fake_gate_id for g in tampered_replay.reconstructed_result.quant_gates
+    )
+
+
+# ---------------------------------------------------------------------------
+# P49: Source Diagnostics, Warnings, and Errors Mutations Cannot Alter Result
+# ---------------------------------------------------------------------------
+@settings(max_examples=10, deadline=None)
+@given(
+    tag=st.text(min_size=3, max_size=15, alphabet="abcdefghijklmnopqrstuvwxyz"),
+)
+def test_p49_source_diagnostics_warnings_errors_isolation(tag: str) -> None:
+    engine, bt_res = _run_backtest_fixture(40, 15)
+    events = engine.ledger._storage.read_all()
+
+    tampered_bt_res = bt_res.model_copy(
+        update={
+            "diagnostics": {f"key_{tag}": f"val_{tag}"},
+            "warnings": (f"warning_{tag}",),
+            "errors": (f"error_{tag}",),
+        }
+    )
+
+    tampered_replay = ReplayEngine(
+        ReplayConfig(),
+        ReplayArtifactSource(events=events, backtest_result=tampered_bt_res),
+    ).replay()
+
+    assert tampered_replay.status == ReplayStatus.PASS
+    assert tampered_replay.reconstructed_result is not None
+    assert tampered_replay.reconstructed_result.diagnostics == {}
+    assert tampered_replay.reconstructed_result.warnings == ()
+    assert tampered_replay.reconstructed_result.errors == ()
+
+
+# ---------------------------------------------------------------------------
+# P50: Source Non-Authoritative Trace Mutations Cannot Alter Replay Trace
+# ---------------------------------------------------------------------------
+@settings(max_examples=10, deadline=None)
+@given(
+    price_noise=st.integers(min_value=50000, max_value=999999),
+)
+def test_p50_source_trace_mutations_isolation(price_noise: int) -> None:
+    engine, bt_res = _run_backtest_fixture(40, 15)
+    events = engine.ledger._storage.read_all()
+
+    clean_res = ReplayEngine(
+        ReplayConfig(verify_execution_trace=False),
+        ReplayArtifactSource(events=events, backtest_result=bt_res),
+    ).replay()
+    assert clean_res.status == ReplayStatus.PASS
+    assert clean_res.reconstructed_result is not None
+    clean_trace = clean_res.reconstructed_result.execution_trace
+
+    fake_entity = f"FORGED_ENTITY_{price_noise}"
+    fake_entry = TraceEntry(
+        timestamp=bt_res.config.start_time,
+        event_type=TraceEventType.ORDER_SIMULATED,
+        entity_id=fake_entity,
+        symbol="NIFTY",
+        price=Decimal(price_noise),
+    )
+    tampered_bt_res = bt_res.model_copy(
+        update={"execution_trace": bt_res.execution_trace + (fake_entry,)}
+    )
+
+    tampered_replay = ReplayEngine(
+        ReplayConfig(verify_execution_trace=False),
+        ReplayArtifactSource(events=events, backtest_result=tampered_bt_res),
+    ).replay()
+
+    assert tampered_replay.status == ReplayStatus.PASS
+    assert tampered_replay.reconstructed_result is not None
+    assert tampered_replay.reconstructed_result.execution_trace == clean_trace
+    assert not any(
+        t.entity_id == fake_entity for t in tampered_replay.reconstructed_result.execution_trace
+    )
+
+
+# ---------------------------------------------------------------------------
+# P51: Removing Authoritative Result Data Fails When Result Verification Enabled
+# ---------------------------------------------------------------------------
+@settings(max_examples=10, deadline=None)
+@given(
+    drop_index=st.integers(min_value=0, max_value=1),
+)
+def test_p51_missing_authoritative_data_fails_result_verification(drop_index: int) -> None:
+    engine, bt_res = _run_backtest_fixture(40, 15)
+    events = list(engine.ledger._storage.read_all())
+
+    manifest = ReplayManifest(
+        source_run_id=bt_res.backtest_run_id,
+        source_dataset_id=bt_res.config.dataset_id,
+        source_dataset_checksum="CHK_P51",
+        source_strategy_id=bt_res.config.strategy_id,
+        source_strategy_version=bt_res.config.strategy_version,
+        source_engine_version="1.0.0",
+        source_result_canonical_hash=bt_res.result_canonical_hash,
+        source_trace_canonical_hash=bt_res.trace_canonical_hash,
+    )
+
+    if drop_index == 0:
+        tampered_events = [e for e in events if e.event_type != AuditEventType.BACKTEST_STARTED]
+    else:
+        tampered_events = [e for e in events if e.event_type != AuditEventType.BACKTEST_COMPLETED]
+
+    source = ReplayArtifactSource(
+        events=tampered_events,
+        manifest=manifest,
+        backtest_result=bt_res,
+    )
+
+    res = ReplayEngine(
+        ReplayConfig(verify_result_hash=True, verify_execution_trace=False),
+        source,
+    ).replay()
+
+    assert res.status == ReplayStatus.FAIL
+    assert res.first_divergence is not None
