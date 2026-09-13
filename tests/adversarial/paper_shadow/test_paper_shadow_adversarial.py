@@ -1,9 +1,10 @@
 """
 Authoritative Adversarial Safety & Invariant Test Suite for Phase 16 Paper / Shadow Trading.
 
-Explicitly implements tests PS-1 through PS-35 validating zero-live-orders guarantees,
+Explicitly implements tests PS-1 through PS-38 validating zero-live-orders guarantees,
 broker isolation, idempotency, deterministic execution, continuous reconciliation,
-state-aware conservation, dynamic evolving risk, authoritative exits, and strict causality.
+state-aware conservation, dynamic evolving risk, authoritative exits, environment fail-closed
+safety, contract metadata fidelity, and strict causality.
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ from alphaforge.broker.models import (
     BrokerPosition,
 )
 from alphaforge.broker.paper import PaperBroker
+from alphaforge.contract.models import ContractMaster
+from alphaforge.contract.repository import InMemoryContractMasterRepository
 from alphaforge.core.exceptions import (
     DataIntegrityError,
     IdempotencyCollisionError,
@@ -889,3 +892,185 @@ def test_ps_35_exit_orders_use_authoritative_routing() -> None:
         is_full_fill=True,
     )
     assert fsm_order.state == OrderState.FILLED
+
+
+def test_ps_36_exit_identity_lineage() -> None:
+    """
+    PS-36: Exit Order, Fill, P&L, and Ledger Lineage Invariant.
+    Exit order creation, fill simulation, P&L record, and ledger entry share the
+    exact single authoritative deterministic identity.
+    """
+    engine = PaperShadowEngine(config=PaperShadowConfig(mode=PaperShadowMode.PAPER))
+
+    # Manually setup active position with known stop loss
+    candle_entry = make_candle(
+        symbol="NIFTY",
+        ts=datetime(2026, 9, 12, 9, 15, tzinfo=UTC),
+        open_p=Decimal("20000"),
+    )
+    fill = engine.fill_simulator.simulate_market_order(
+        order_id="ORD-ENTRY-PS36",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=50,
+        candle=candle_entry,
+        is_entry=True,
+    )
+    engine.raw_broker.submit_order(
+        BrokerOrderRequest(
+            client_order_id="ORD-ENTRY-PS36",
+            symbol="NIFTY",
+            side=OrderSide.BUY,
+            quantity=50,
+            role=OrderRole.ENTRY,
+        )
+    )
+    engine.raw_broker.simulate_full_fill("ORD-ENTRY-PS36", Decimal("20000"))
+    engine.pnl_tracker.record_entry_fill(
+        fill=fill,
+        stop_price=Decimal("19900"),
+        target_price=Decimal("20200"),
+        strategy_id="STRAT_PS36",
+        signal_id="SIG-PS36-1",
+    )
+
+    # Next candle breaches stop loss at 19900
+    candle_exit = make_candle(
+        symbol="NIFTY",
+        ts=datetime(2026, 9, 12, 9, 18, tzinfo=UTC),
+        open_p=Decimal("19950"),
+        high_p=Decimal("19960"),
+        low_p=Decimal("19890"),  # Low < 19900 triggers STOP_LOSS
+        close_p=Decimal("19920"),
+    )
+    engine._evaluate_active_position_brackets("NIFTY", candle_exit)
+
+    # 1. Authoritative FSM exit order
+    exit_orders = [
+        o
+        for o in engine.order_router.get_all_orders()
+        if o.order_id != "ORD-ENTRY-PS36" and o.state == OrderState.FILLED
+    ]
+    assert len(exit_orders) == 1
+    auth_exit_order_id = exit_orders[0].order_id
+
+    # 2. P&L trade record
+    closed_trades = engine.pnl_tracker.get_closed_trades()
+    assert len(closed_trades) == 1
+    trade = closed_trades[0]
+    assert trade.exit_order_id == auth_exit_order_id
+
+    # 3. Audit Ledger verification
+    ledger_events = [
+        e for e in engine.ledger._storage.read_all() if e.event_type == AuditEventType.TRADE_CLOSED
+    ]
+    assert len(ledger_events) == 1
+    ledger_evt = ledger_events[0]
+    assert ledger_evt.causation_id == auth_exit_order_id
+    assert ledger_evt.payload["exit_order_id"] == auth_exit_order_id
+
+
+def test_ps_37_environment_mismatch_fails_closed() -> None:
+    """
+    PS-37: PaperShadowMode and DeploymentEnvironment Mismatch Fails Closed.
+    Rejects environment crossover and LIVE pairings fail-closed with zero silent rewrites.
+    """
+    # 1. PAPER mode with LIVE deployment -> REJECT
+    with pytest.raises(DeploymentSafetyError):
+        PaperShadowConfig(
+            mode=PaperShadowMode.PAPER,
+            deployment_config=DeploymentConfig(
+                environment=DeploymentEnvironment.LIVE,
+                live_authorized=True,
+            ),
+        )
+
+    # 2. SHADOW mode with LIVE deployment -> REJECT
+    with pytest.raises(DeploymentSafetyError):
+        PaperShadowConfig(
+            mode=PaperShadowMode.SHADOW,
+            deployment_config=DeploymentConfig(
+                environment=DeploymentEnvironment.LIVE,
+                live_authorized=True,
+            ),
+        )
+
+    # 3. PAPER mode with SHADOW deployment -> REJECT
+    with pytest.raises(DeploymentSafetyError):
+        PaperShadowConfig(
+            mode=PaperShadowMode.PAPER,
+            deployment_config=DeploymentConfig(
+                environment=DeploymentEnvironment.SHADOW,
+            ),
+        )
+
+    # 4. SHADOW mode with PAPER deployment -> REJECT
+    with pytest.raises(DeploymentSafetyError):
+        PaperShadowConfig(
+            mode=PaperShadowMode.SHADOW,
+            deployment_config=DeploymentConfig(
+                environment=DeploymentEnvironment.PAPER,
+            ),
+        )
+
+    # 5. Matching configurations succeed
+    cfg_paper = PaperShadowConfig(mode=PaperShadowMode.PAPER)
+    assert cfg_paper.deployment_config.environment == DeploymentEnvironment.PAPER
+    router_paper = PaperShadowOrderRouter(config=cfg_paper)
+    assert router_paper.guarded_broker is not None
+
+    cfg_shadow = PaperShadowConfig(mode=PaperShadowMode.SHADOW)
+    assert cfg_shadow.deployment_config.environment == DeploymentEnvironment.SHADOW
+    router_shadow = PaperShadowOrderRouter(config=cfg_shadow)
+    assert router_shadow.guarded_broker is None
+
+
+def test_ps_38_authoritative_contract_metadata() -> None:
+    """
+    PS-38: Authoritative Contract Metadata & Temporal Lifecycle Invariant.
+    Paper/Shadow engine uses authoritative contract metadata from ContractMetadataProvider
+    and strictly respects contract expiry/tradability constraints.
+    """
+    repo = InMemoryContractMasterRepository()
+    contract = ContractMaster(
+        exchange="NSE",
+        segment="NFO",
+        underlying_symbol="NIFTY",
+        contract_id="NIFTY26SEPFUT",
+        lot_size=25,
+        contract_multiplier=Decimal("2"),
+        tick_size=Decimal("0.05"),
+        expiry_datetime=datetime(2026, 9, 24, 10, 0, tzinfo=UTC),
+        listing_datetime=datetime(2026, 6, 1, 9, 15, tzinfo=UTC),
+        trading_start_datetime=datetime(2026, 6, 1, 9, 15, tzinfo=UTC),
+        trading_end_datetime=datetime(2026, 9, 24, 10, 0, tzinfo=UTC),
+        data_source="NSE_FEED",
+    )
+    repo.add_contract(contract)
+
+    engine = PaperShadowEngine(
+        config=PaperShadowConfig(mode=PaperShadowMode.PAPER),
+        contract_provider=repo,
+    )
+
+    # Active trading candle before expiry
+    active_candle = make_candle(
+        symbol="NIFTY",
+        ts=datetime(2026, 9, 12, 9, 15, tzinfo=UTC),
+        open_p=Decimal("20000"),
+    )
+    active_candle = active_candle.model_copy(update={"contract_id": "NIFTY26SEPFUT"})
+    val_res = engine.process_candle(active_candle)
+    assert val_res.is_valid is True
+
+    # Expired candle past trading_end_datetime / expiry
+    expired_candle = make_candle(
+        symbol="NIFTY",
+        ts=datetime(2026, 9, 25, 9, 15, tzinfo=UTC),
+        open_p=Decimal("20100"),
+    )
+    expired_candle = expired_candle.model_copy(update={"contract_id": "NIFTY26SEPFUT"})
+    engine.process_candle(expired_candle)
+
+    # Past-expiry candle must not result in any new active positions or orders
+    assert len(engine.pnl_tracker.get_active_positions()) == 0

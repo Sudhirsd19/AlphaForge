@@ -20,8 +20,8 @@ from alphaforge.broker.models import (
 from alphaforge.broker.paper import PaperBroker
 from alphaforge.core.exceptions import OrderValidationError
 from alphaforge.deployment.broker_guard import DeploymentBrokerGuard
-from alphaforge.deployment.config import DeploymentConfig
 from alphaforge.deployment.enums import DeploymentEnvironment
+from alphaforge.deployment.exceptions import DeploymentSafetyError
 from alphaforge.execution.enums import (
     OrderEvent,
     OrderSide,
@@ -64,23 +64,28 @@ class PaperShadowOrderRouter:
         self._idempotency = idempotency_registry or IdempotencyRegistry()
         self._state_machines: dict[str, OrderStateMachine] = {}
 
-        # Set up broker execution boundary
+        # Validate environment match strictly fail-closed - NEVER silently rewrite
+        deployment_cfg = config.deployment_config
         if self._mode == PaperShadowMode.PAPER:
-            raw_broker = broker if broker is not None else PaperBroker()
-            # Wrap in Phase 15 DeploymentBrokerGuard to enforce safety invariants
-            deployment_cfg = config.deployment_config
             if deployment_cfg.environment != DeploymentEnvironment.PAPER:
-                deployment_cfg = DeploymentConfig(
-                    environment=DeploymentEnvironment.PAPER,
-                    runtime_root=deployment_cfg.runtime_root,
+                raise DeploymentSafetyError(
+                    f"PaperShadowOrderRouter in PAPER mode requires DeploymentEnvironment.PAPER, "
+                    f"got {deployment_cfg.environment.name}"
                 )
+            raw_broker = broker if broker is not None else PaperBroker()
             self._guarded_broker: AbstractBroker | None = DeploymentBrokerGuard(
                 delegate=raw_broker,
                 config=deployment_cfg,
             )
-        else:
-            # SHADOW mode: strictly no broker execution
+        elif self._mode == PaperShadowMode.SHADOW:
+            if deployment_cfg.environment != DeploymentEnvironment.SHADOW:
+                raise DeploymentSafetyError(
+                    f"PaperShadowOrderRouter in SHADOW mode requires DeploymentEnvironment.SHADOW, "
+                    f"got {deployment_cfg.environment.name}"
+                )
             self._guarded_broker = None
+        else:
+            raise DeploymentSafetyError(f"Unsupported PaperShadowMode: {self._mode}")
 
     @property
     def mode(self) -> PaperShadowMode:

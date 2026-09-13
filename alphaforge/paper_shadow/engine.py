@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 from alphaforge.broker.models import BrokerOrderType
 from alphaforge.broker.paper import PaperBroker
+from alphaforge.contract.enums import ContractStatus
+from alphaforge.contract.lifecycle import evaluate_contract_lifecycle
 from alphaforge.core.enums import (
     FuturesConfirmationStatus,
     SignalDirection,
@@ -61,6 +63,7 @@ from alphaforge.strategy.engine import DeterministicStrategyEngine
 
 if TYPE_CHECKING:
     from alphaforge.broker.interface import AbstractBroker
+    from alphaforge.contract.repository import ContractMetadataProvider
     from alphaforge.core.models import Candle, StrategySignal
     from alphaforge.data.models import MarketCandle
     from alphaforge.strategy.config import StrategyConfig
@@ -80,11 +83,13 @@ class PaperShadowEngine:
         broker: AbstractBroker | None = None,
         kill_switch: KillSwitch | None = None,
         audit_ledger: AuditLedger | None = None,
+        contract_provider: ContractMetadataProvider | None = None,
         git_commit: str = "81fba27684d848beecbd6d2d3e8f484fd090b0fe",
     ) -> None:
         self._config = config or PaperShadowConfig()
         self._mode = self._config.mode
         self._git_commit = git_commit
+        self._contract_provider = contract_provider
         self._lock = threading.RLock()
         self._state = ForwardRunState.INITIALIZING
         self._start_time: datetime | None = None
@@ -166,12 +171,20 @@ class PaperShadowEngine:
             return self._state
 
     @property
+    def fill_simulator(self) -> DeterministicFillSimulator:
+        return self._fill_sim
+
+    @property
     def pnl_tracker(self) -> PaperPnLTracker:
         return self._pnl_tracker
 
     @property
     def order_router(self) -> PaperShadowOrderRouter:
         return self._order_router
+
+    @property
+    def raw_broker(self) -> AbstractBroker:
+        return self._raw_broker
 
     @property
     def shadow_comparator(self) -> ShadowComparator:
@@ -239,6 +252,36 @@ class PaperShadowEngine:
                 return val_res
 
             sym = candle.symbol.strip().upper()
+            contract_id = candle.contract_id.strip().upper()
+            lot_size = self._config.lot_size
+            multiplier = self._config.contract_multiplier
+
+            # Step 1.5: Authoritative Contract Metadata & Lifecycle Check (Phase 3)
+            if self._contract_provider is not None:
+                contract = self._contract_provider.get_contract(contract_id)
+                if contract is None:
+                    # Fallback to underlying lookup if not found directly by ID
+                    contracts = self._contract_provider.get_contracts_for_underlying(sym)
+                    for c in contracts:
+                        if (
+                            evaluate_contract_lifecycle(c, candle.exchange_timestamp)
+                            == ContractStatus.ACTIVE
+                        ):
+                            contract = c
+                            break
+                if contract is not None:
+                    c_status = evaluate_contract_lifecycle(contract, candle.exchange_timestamp)
+                    if c_status != ContractStatus.ACTIVE:
+                        # Non-active contract (EXPIRED/SUSPENDED):
+                        # update mark-to-market and brackets, block new entries
+                        self._processed_candles_count += 1
+                        self._current_candles[sym] = candle
+                        self._evaluate_active_position_brackets(sym, candle)
+                        return val_res
+                    contract_id = contract.contract_id
+                    lot_size = contract.lot_size
+                    multiplier = contract.contract_multiplier
+
             self._processed_candles_count += 1
             self._current_candles[sym] = candle
             strat_candle = candle.to_strategy_candle()
@@ -299,12 +342,12 @@ class PaperShadowEngine:
                     side=trade_side,
                     entry_price=signal.entry_reference,
                     stop_price=signal.stop_reference,
-                    contract_id=f"{sym}-FUT",
-                    lot_size=self._config.lot_size,
-                    contract_multiplier=self._config.contract_multiplier,
+                    contract_id=contract_id,
+                    lot_size=lot_size,
+                    contract_multiplier=multiplier,
                     account_equity=portfolio_state.account_equity,
                     available_capital=portfolio_state.available_capital,
-                    proposed_quantity=self._config.lot_size,
+                    proposed_quantity=lot_size,
                     evaluation_timestamp=candle.exchange_timestamp,
                 )
                 risk_decision, _ = self._risk_engine.request_risk_reservation(
@@ -331,7 +374,7 @@ class PaperShadowEngine:
                             symbol=sym,
                             signal=signal,
                             side=trade_side,
-                            quantity=risk_decision.quantity or self._config.lot_size,
+                            quantity=risk_decision.quantity or lot_size,
                             candle=candle,
                         )
                 else:
@@ -454,6 +497,8 @@ class PaperShadowEngine:
         Evaluate resting stop-loss and take-profit orders for open positions.
         Strictly uses authoritative strategy/signal exit levels — ZERO synthetic percentages.
         Exit orders are routed through authoritative OrderRouter / FSM / DeploymentBrokerGuard.
+        Enforces strict identity lineage:
+        EXIT ORDER ID == FILL ORDER ID == P&L exit_order_id == AUDIT causation_id
         """
         active_pos = self._pnl_tracker.get_active_positions().get(symbol)
         if active_pos is None:
@@ -465,72 +510,84 @@ class PaperShadowEngine:
         if stop_p is None and target_p is None:
             return
 
-        exit_signal_id = f"EXIT-{active_pos.entry_order_id}"
-        bracket_res = self._fill_sim.evaluate_resting_brackets(
-            order_id=exit_signal_id,
-            symbol=symbol,
+        # 1. Detect SL/TP trigger without manufacturing premature fill order ID
+        is_triggered, bracket_type = self._fill_sim.check_bracket_trigger(
             side=active_pos.side,
-            quantity=active_pos.quantity,
             stop_price=stop_p,
             target_price=target_p,
             candle=candle,
         )
+        if not is_triggered or bracket_type is None:
+            return
 
-        if bracket_res.triggered and bracket_res.fill is not None:
-            fill = bracket_res.fill
+        exit_signal_id = f"EXIT-{active_pos.signal_id or active_pos.entry_order_id}"
+        exit_side = TradeSide.SHORT if active_pos.side == TradeSide.LONG else TradeSide.LONG
 
-            # Route exit order through authoritative OrderRouter / FSM / DeploymentBrokerGuard
-            exit_side = TradeSide.SHORT if active_pos.side == TradeSide.LONG else TradeSide.LONG
-            fsm_exit_order, broker_exit_order = self._order_router.create_and_route_order(
-                strategy_id=active_pos.strategy_id or "AF_STRAT",
-                strategy_version=active_pos.strategy_version or "1.0.0",
-                symbol=symbol,
-                role=OrderRole.EXIT,
-                signal_id=exit_signal_id,
-                side=exit_side,
-                quantity=fill.filled_qty,
-                order_type=BrokerOrderType.MARKET,
-                timestamp=candle.exchange_timestamp,
-            )
-            self._orders_count += 1
+        # 2. Create authoritative EXIT order: OrderRouter -> FSM -> BrokerGuard -> Broker
+        fsm_exit_order, broker_exit_order = self._order_router.create_and_route_order(
+            strategy_id=active_pos.strategy_id or "AF_STRAT",
+            strategy_version=active_pos.strategy_version or "1.0.0",
+            symbol=symbol,
+            role=OrderRole.EXIT,
+            signal_id=exit_signal_id,
+            side=exit_side,
+            quantity=active_pos.quantity,
+            order_type=BrokerOrderType.MARKET,
+            timestamp=candle.exchange_timestamp,
+        )
+        self._orders_count += 1
+        authoritative_exit_order_id = fsm_exit_order.order_id
 
-            # Update PaperBroker position if applicable
-            if isinstance(self._raw_broker, PaperBroker):
-                self._raw_broker.simulate_full_fill(
-                    client_order_id=fsm_exit_order.order_id,
-                    fill_price=fill.effective_price,
-                )
+        # 3. Simulate execution fill using the authoritative EXIT order ID
+        fill = self._fill_sim.simulate_bracket_fill(
+            order_id=authoritative_exit_order_id,
+            symbol=symbol,
+            side=active_pos.side,
+            quantity=active_pos.quantity,
+            bracket_type=bracket_type,
+            stop_price=stop_p,
+            target_price=target_p,
+            candle=candle,
+        )
+        self._fills_count += 1
 
-            # Update FSM state machine: ACKNOWLEDGED -> FILLED
-            self._order_router.record_fill_transition(
-                client_order_id=fsm_exit_order.order_id,
-                fill_quantity=fill.filled_qty,
+        # 4. Update PaperBroker position if applicable
+        if isinstance(self._raw_broker, PaperBroker):
+            self._raw_broker.simulate_full_fill(
+                client_order_id=authoritative_exit_order_id,
                 fill_price=fill.effective_price,
-                is_full_fill=True,
             )
 
-            # Close active position in PnL tracker
-            trade = self._pnl_tracker.record_exit_fill(
-                fill=fill,
-                exit_reason=bracket_res.bracket_type or "BRACKET_EXIT",
-            )
-            self._fills_count += 1
+        # 5. Update FSM state machine: ACKNOWLEDGED -> FILLED on authoritative order
+        self._order_router.record_fill_transition(
+            client_order_id=authoritative_exit_order_id,
+            fill_quantity=fill.filled_qty,
+            fill_price=fill.effective_price,
+            is_full_fill=True,
+        )
 
-            # Record in Audit Ledger
-            self._ledger.append(
-                event_type=AuditEventType.TRADE_CLOSED,
-                entity_type="POSITION",
-                entity_id=trade.trade_id,
-                correlation_id=active_pos.entry_order_id,
-                causation_id=fsm_exit_order.order_id,
-                payload={
-                    "symbol": symbol,
-                    "gross_pnl": str(trade.gross_pnl),
-                    "net_pnl": str(trade.net_pnl),
-                    "exit_reason": trade.exit_reason or "EXIT",
-                },
-                event_timestamp=candle.exchange_timestamp,
-            )
+        # 6. Close active position in PnL tracker (fill.order_id == auth_exit_order_id)
+        trade = self._pnl_tracker.record_exit_fill(
+            fill=fill,
+            exit_reason=bracket_type,
+        )
+
+        # 7. Record in Audit Ledger with authoritative exit order ID as causation_id
+        self._ledger.append(
+            event_type=AuditEventType.TRADE_CLOSED,
+            entity_type="POSITION",
+            entity_id=trade.trade_id,
+            correlation_id=active_pos.entry_order_id,
+            causation_id=authoritative_exit_order_id,
+            payload={
+                "symbol": symbol,
+                "exit_order_id": authoritative_exit_order_id,
+                "gross_pnl": str(trade.gross_pnl),
+                "net_pnl": str(trade.net_pnl),
+                "exit_reason": trade.exit_reason or "EXIT",
+            },
+            event_timestamp=candle.exchange_timestamp,
+        )
 
     def shutdown(self) -> ForwardRunReport:
         """

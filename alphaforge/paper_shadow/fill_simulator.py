@@ -188,27 +188,23 @@ class DeterministicFillSimulator:
             reason="LIMIT_ORDER_EXECUTED",
         )
 
-    def evaluate_resting_brackets(
+    def check_bracket_trigger(
         self,
-        order_id: str,
-        symbol: str,
         side: TradeSide,
-        quantity: int,
         stop_price: Decimal | None,
         target_price: Decimal | None,
         candle: MarketCandle,
-    ) -> BracketEvaluationResult:
+    ) -> tuple[bool, str | None]:
         """
-        Evaluate resting stop-loss and take-profit protection against candle range.
+        Check whether resting stop-loss or take-profit price levels are breached by candle range.
+        Returns (is_triggered, bracket_type) where bracket_type is 'STOP_LOSS' or 'TAKE_PROFIT'.
         Enforces conservative same-bar SL/TP ambiguity resolution (SL triggered first).
         """
         if stop_price is None and target_price is None:
-            return BracketEvaluationResult(triggered=False, fill=None, bracket_type=None)
+            return False, None
 
-        dec_qty = Decimal(quantity)
         high = candle.high
         low = candle.low
-        open_p = candle.open
 
         sl_hit = False
         tp_hit = False
@@ -225,7 +221,7 @@ class DeterministicFillSimulator:
                 tp_hit = low <= target_price
 
         if not sl_hit and not tp_hit:
-            return BracketEvaluationResult(triggered=False, fill=None, bracket_type=None)
+            return False, None
 
         # Ambiguity resolution
         if sl_hit and tp_hit:
@@ -235,7 +231,26 @@ class DeterministicFillSimulator:
         else:
             execute_sl = False
 
-        if execute_sl:
+        return True, "STOP_LOSS" if execute_sl else "TAKE_PROFIT"
+
+    def simulate_bracket_fill(
+        self,
+        order_id: str,
+        symbol: str,
+        side: TradeSide,
+        quantity: int,
+        bracket_type: str,
+        stop_price: Decimal | None,
+        target_price: Decimal | None,
+        candle: MarketCandle,
+    ) -> SimulatedFill:
+        """
+        Simulate the execution fill for a triggered bracket exit against the authoritative order ID.
+        """
+        dec_qty = Decimal(quantity)
+        open_p = candle.open
+
+        if bracket_type == "STOP_LOSS":
             assert stop_price is not None
             # Conservative Stop-Loss execution with gap handling
             if side == TradeSide.LONG:
@@ -256,7 +271,7 @@ class DeterministicFillSimulator:
             )
             slippage_loss = abs(effective_exit - ref_exit) * dec_qty * self._multiplier
 
-            fill = SimulatedFill(
+            return SimulatedFill(
                 order_id=order_id,
                 timestamp=candle.exchange_timestamp,
                 symbol=symbol,
@@ -271,8 +286,6 @@ class DeterministicFillSimulator:
                 gross_notional=notional,
                 reason="RESTING_STOP_LOSS_TRIGGERED",
             )
-            return BracketEvaluationResult(triggered=True, fill=fill, bracket_type="STOP_LOSS")
-
         else:
             assert target_price is not None
             # Take-Profit execution
@@ -290,7 +303,7 @@ class DeterministicFillSimulator:
             )
             slippage_loss = abs(effective_exit - ref_exit) * dec_qty * self._multiplier
 
-            fill = SimulatedFill(
+            return SimulatedFill(
                 order_id=order_id,
                 timestamp=candle.exchange_timestamp,
                 symbol=symbol,
@@ -305,7 +318,41 @@ class DeterministicFillSimulator:
                 gross_notional=notional,
                 reason="RESTING_TAKE_PROFIT_TRIGGERED",
             )
-            return BracketEvaluationResult(triggered=True, fill=fill, bracket_type="TAKE_PROFIT")
+
+    def evaluate_resting_brackets(
+        self,
+        order_id: str,
+        symbol: str,
+        side: TradeSide,
+        quantity: int,
+        stop_price: Decimal | None,
+        target_price: Decimal | None,
+        candle: MarketCandle,
+    ) -> BracketEvaluationResult:
+        """
+        Evaluate resting stop-loss and take-profit protection against candle range.
+        Enforces conservative same-bar SL/TP ambiguity resolution (SL triggered first).
+        """
+        triggered, b_type = self.check_bracket_trigger(
+            side=side,
+            stop_price=stop_price,
+            target_price=target_price,
+            candle=candle,
+        )
+        if not triggered or b_type is None:
+            return BracketEvaluationResult(triggered=False, fill=None, bracket_type=None)
+
+        fill = self.simulate_bracket_fill(
+            order_id=order_id,
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            bracket_type=b_type,
+            stop_price=stop_price,
+            target_price=target_price,
+            candle=candle,
+        )
+        return BracketEvaluationResult(triggered=True, fill=fill, bracket_type=b_type)
 
     def simulate_partial_fill(
         self,

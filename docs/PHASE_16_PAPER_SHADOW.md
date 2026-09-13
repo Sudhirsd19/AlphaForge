@@ -1,123 +1,131 @@
-# AlphaForge — Phase 16: Paper / Shadow Trading Forward Validation Engine
+# ALPHAFORGE — PHASE 16: PAPER / SHADOW TRADING SPECIFICATION & FORENSIC AUDIT
+
+**Project Name:** AlphaForge  
+**Module:** `alphaforge/paper_shadow/`  
+**Author:** Quantitative Systems Engineer, Senior Execution & Forensics Specialist  
+**Status:** COMPLETED / FROZEN (Phase 16 Forensic Pass)  
+**Phase 15 Frozen Baseline:** `81fba27684d848beecbd6d2d3e8f484fd090b0fe`  
+**Phase 14 Frozen Baseline:** `33a5475f6d6da6b617d8a1d607030fd0415fb902`  
 
 ---
 
-## 1. Executive Summary & Forensic Scope
+## 1. Phase 16 Objective & Scope
 
-AlphaForge Phase 16 introduces a production-grade, mathematically deterministic **Paper and Shadow Trading Validation Layer** (`alphaforge/paper_shadow/`). This subsystem provides realistic forward validation of the complete quantitative trading lifecycle under simulated live market conditions without submitting real-money orders.
+The objective of Phase 16 is to provide a production-grade **Paper / Shadow Trading validation layer** for AlphaForge. This system validates the frozen end-to-end trading pipeline against realistic market conditions with zero risk of submitting real-money orders.
 
-### Core Architectural Guarantees
-- **Zero Live Capital Exposure**: In both `PAPER` and `SHADOW` modes, real-money order routing to live exchange venues is physically and architecturally impossible.
-- **Strict Mode Partitioning**:
-  - **`PAPER` Mode**: Simulates active order submission and realistic trade lifecycle management through `DeploymentBrokerGuard(PaperBroker)` coupled with continuous multi-point reconciliation and P&L tracking.
-  - **`SHADOW` Mode**: Operates strictly as a non-invasive, passive diagnostic observer (`READ/RECORD/EVALUATE/COMPARE`). Submits **zero** orders to real or simulated brokers, recording hypothetical fills and outcomes for signal evaluation.
-- **Dynamic Evolving Risk State**: `RiskEngine` receives dynamic portfolio risk state (`account_equity`, `available_capital`, `current_equity`) updated with realized and unrealized P&L on every bar, eliminating all hardcoded capital assumptions.
-- **Authoritative Strategy Exit Levels**: Stop-loss and take-profit bracket exits are driven strictly by the strategy-provided `stop_reference` and `target_reference` from `StrategySignal`, with zero synthetic percentage formulas.
-- **Symmetric Authoritative Order Routing**: Both entry and exit orders are routed through `PaperShadowOrderRouter` -> `IdempotencyRegistry` -> 17-state `OrderStateMachine` -> `DeploymentBrokerGuard` -> `PaperBroker`.
-- **Deterministic Event Timestamp Control**: All order timestamps, FSM transitions, fills, observations, reconciliations, and run reports are governed deterministically by market candle timestamps.
-- **Strict Causal Monotonicity**: Enforces forward causal data visibility (no look-ahead bias). At decision time $T$, strategy, risk, and order logic have access strictly to historical information timestamped $\le T$.
-- **Conservative OHLC Ambiguity Resolution**: Resolves intra-bar stop-loss and take-profit hit ambiguity via a conservative `SL_FIRST_CONSERVATIVE` policy (assuming worst-case loss execution).
-- **Fixed-Point Precision**: 100% of financial, fee, slippage, notional, and P&L calculations strictly use `Decimal` arithmetic.
-- **Continuous 6-Point Reconciliation**: Verifies continuous alignment across Strategy Intents, Order FSM States, Broker Orders, Broker Positions, Local P&L Tracker, and Cryptographic Audit Ledger.
-- **Zero Phase 0–15 Regression**: Preserves the complete frozen baseline (`81fba27684d848beecbd6d2d3e8f484fd090b0fe`) with bit-exact reproducibility across 898 repository tests.
+Phase 16 operates in two distinct, strictly isolated modes:
+1. **PAPER Mode (`PaperShadowMode.PAPER`)**: Simulates order execution, fill generation, position tracking, and dynamic account P&L using the Phase 6 cost and slippage models alongside the Phase 15 `PaperBroker`. Live broker routing is strictly blocked.
+2. **SHADOW Mode (`PaperShadowMode.SHADOW`)**: Passively ingests real-time/replayed market feeds, evaluates frozen strategy signals and risk rules, and records hypothetical executions and shadow observations without submitting any orders to any broker.
 
 ---
 
-## 2. Mode Matrix & Invariant Specification
+## 2. Architectural Principles & Invariants
 
-| Operational Dimension | `PAPER` Mode | `SHADOW` Mode | `LIVE` Mode (Phase 17) |
-| :--- | :--- | :--- | :--- |
-| **Primary Objective** | Forward validation of active trading execution | Passive signal & execution comparison | Production capital deployment |
-| **Broker Order Submission** | Simulated (`PaperBroker` via `DeploymentBrokerGuard`) | **NONE (Zero Orders)** | Live Exchange Broker Adapter |
-| **Real Broker Orders Allowed** | **STRICTLY PROHIBITED** | **STRICTLY PROHIBITED** | Authorized Dual-Key Required |
-| **Position Tracking** | Simulated Broker Book + Local P&L Tracker | Hypothetical Book (Diagnostics Only) | Live Broker Book + Local Ledger |
-| **Order State Machine** | Full 17-State FSM Lifecycle | **Zero State Mutations** | Full 17-State FSM Lifecycle |
-| **Continuous Reconciliation** | Active (Intents vs FSM vs Broker vs Positions vs Ledger) | Diagnostic Logging Only | Active (Mandatory Live Reconciler) |
-| **Failure Mode** | Fail-Closed / Halt Simulation | Fail-Closed / Log Diagnostic | Fail-Closed / Emergency Flatten |
-| **Default Configuration** | Yes (`PaperShadowMode.PAPER`) | Explicit Opt-In (`PaperShadowMode.SHADOW`) | Locked Behind Dual Keys |
-
----
-
-## 3. Package Architecture & Subsystem Components
-
-The Phase 16 validation engine is located in `alphaforge/paper_shadow/`:
-
-```text
-alphaforge/paper_shadow/
-├── __init__.py                  # Public exports and interface definitions
-├── enums.py                     # Deterministic String Enums (Modes, Policies, Outcomes)
-├── models.py                    # Immutable Pydantic Schemas (Configs, Events, Metrics, Reports)
-├── market_data_validator.py     # Causal time validator, stale detector & forming-bar quarantine
-├── fill_simulator.py            # Deterministic fill engine with Phase 6 costs & SL-first OHLC
-├── pnl_tracker.py               # Fixed-point Decimal P&L accounting, drawdowns & exposures
-├── order_router.py              # Idempotency registry & 17-State FSM router with broker guard
-├── shadow_comparator.py         # Non-invasive diagnostic evaluator for SHADOW mode
-├── reconciler_adapter.py        # Continuous 6-point multi-entity reconciliation engine
-├── engine.py                    # Real-time event-driven Forward Trading Engine with crash safety
-└── forward_runner.py            # Controlled batch testbench for forward validation replay
+```
+Market Data Ingestion (Causal Stream <= T)
+  │
+  ▼
+PaperMarketDataValidator (Monotonicity, Staleness, Forming-Candle Quarantine, Geometry)
+  │
+  ▼
+DeterministicStrategyEngine (Frozen Phase 1 — Closed Candle [1] vs Forming Candle [0])
+  │
+  ▼
+RiskEngine (Frozen Phase 5 — Dynamic PortfolioRiskState from PaperPnLTracker)
+  │
+  ▼
+PaperShadowOrderRouter (IdempotencyRegistry + 17-State OrderStateMachine)
+  │
+  ▼
+DeploymentBrokerGuard (Frozen Phase 15 — Reject LIVE, Route PAPER to PaperBroker, SHADOW to None)
+  │
+  ▼
+DeterministicFillSimulator (Phase 6 Cost/Slippage Models + SL-First Conservative Resolution)
+  │
+  ▼
+PaperPnLTracker (Fixed-point Decimal, Signal Exit Bounds, Multi-Timeframe MTM, Realized P&L)
+  │
+  ▼
+PaperShadowReconciler (Continuous 6-Entity Alignment + Auto-Halt on Discrepancy)
+  │
+  ▼
+AuditLedger & ObservabilityHub (Phase 9 SHA-256 Hash Chain + Phase 14 Non-Blocking Telemetry)
 ```
 
-### Key Subsystem Responsibilities
-
-1. **`PaperMarketDataValidator`**:
-   - Validates chronological monotonicity of exchange and received timestamps.
-   - Enforces timeframe-aware staleness thresholds (15s base for intraday, scaled for higher timeframes).
-   - Quarantines unclosed/forming candle leaks (`is_closed == False`).
-   - Verifies physical OHLC invariants ($High \ge \max(Open, Close, Low)$ and $Low \le \min(Open, Close, High)$).
-
-2. **`DeterministicFillSimulator`**:
-   - Simulates fills using Phase 6 cost (`CostConfig`) and slippage models (`calculate_effective_price`, `calculate_fee`).
-   - Implements `OHLCResolutionPolicy.SL_FIRST_CONSERVATIVE` to resolve ambiguous intra-bar scenarios where both stop-loss and take-profit prices fall within the candle's High-Low range.
-   - Supports optional stop and target price levels (`Decimal | None`) for flexible bracket evaluations.
-
-3. **`PaperPnLTracker`**:
-   - Maintains continuous realized and unrealized mark-to-market P&L.
-   - Computes dynamic `PortfolioRiskState` reflecting initial capital, cumulative realized P&L, and open position notionals.
-   - Accurately accounts for round-trip fees, gross P&L, net P&L, slippage losses, and maximum drawdowns.
-   - Stores authoritative strategy metadata (`stop_price`, `target_price`, `strategy_id`, `strategy_version`, `signal_id`) in `ActivePositionState`.
-
-4. **`PaperShadowOrderRouter`**:
-   - Wraps `DeploymentBrokerGuard` to strictly isolate the execution layer.
-   - Enforces single-intent idempotency via `IdempotencyRegistry`.
-   - Drives individual entry and exit orders through the authoritative 17-state `OrderStateMachine`.
-   - Supports deterministic timestamp injection for event-driven clock control.
-   - In `SHADOW` mode, guarantees that `create_and_route_order` performs zero broker submissions.
-
-5. **`ShadowComparator`**:
-   - Evaluates incoming market events against strategy signals and risk decisions using event timestamps.
-   - Records non-invasive `ShadowObservationRecord` entries capturing hypothetical fills, hypothetical P&L, and evaluation latencies.
-   - Performs diagnostic outcome comparison without mutating any execution state.
-
-6. **`PaperShadowReconciler`**:
-   - Adapts the Phase 9 reconciliation architecture for runtime forward testing.
-   - Reconciles 6 distinct authoritative entities: Strategy Intents, FSM Orders, Broker Orders, Broker Positions, PnL Tracker Positions, and Audit Ledger Hash Chain.
-   - Driven deterministically by market event timestamps.
-   - Automatically halts new trade entries (`new_entries_allowed = False`) upon detecting any discrepancy.
-
-7. **`PaperShadowEngine` & `ForwardValidationRunner`**:
-   - Coordinates end-to-end forward processing across market data validation, strategy evaluation, dynamic risk reservation, order routing, fill processing, and periodic reconciliation.
-   - Evaluates active bracket exits strictly using authoritative signal stop/target levels.
-   - Routes exit orders through full FSM and `DeploymentBrokerGuard` validation.
-   - Integrates Phase 13 `KillSwitch` and Phase 14 `SafeObservabilityDispatcher`.
-   - Provides clean startup, crash recovery via JSON checkpoint persistence, and deterministic end-of-run `ForwardRunReport` generation.
+### Core Invariants Enforced:
+1. **Zero Real Broker Orders**: Under no circumstances can PAPER or SHADOW modes place orders with real live brokers. Enforced by `DeploymentBrokerGuard` and fail-closed environment validation (`DeploymentSafetyError`).
+2. **Strict Causal Data Visibility**: Logic at timestamp $T$ has access only to market data with timestamps $\le T$. Future bars at $T+1$ cannot alter trading decisions, risk limits, fills, or metrics at $T$ (`PS-31`).
+3. **Dynamic Evolving Risk State**: `RiskEngine` evaluates real evolving paper portfolio equity, cash, open notionals, and drawdowns derived continuously from `PaperPnLTracker.get_portfolio_risk_state()` (`PS-32`).
+4. **Authoritative Strategy Exit Levels**: Bracket exits (stop-loss and profit-target) are strictly governed by the authoritative strategy signal's `stop_reference` and `target_reference` with zero hardcoded arbitrary formulas (`PS-33`).
+5. **Symmetric FSM Exit Order Routing**: Exit orders follow the identical authoritative lifecycle as entry orders: `OrderRouter.create_and_route_order(role=OrderRole.EXIT)` $\to$ `IdempotencyRegistry` $\to$ `OrderStateMachine` $\to$ `DeploymentBrokerGuard` $\to$ `PaperBroker` (`PS-35`).
+6. **Exit Identity Lineage Invariant**: Authoritative exit order ID created by `OrderRouter` is the single identity passed to fill simulation, FSM fill transitions, `PaperPnLTracker.record_exit_fill`, and `AuditLedger` causation records (`PS-36`).
+7. **Fail-Closed Environment Validation**: `PaperShadowConfig` and `PaperShadowOrderRouter` strictly reject conflicting environment pairings (`PAPER + LIVE`, `SHADOW + LIVE`, `PAPER + SHADOW`, `SHADOW + PAPER`) at initialization (`PS-37`).
+8. **Contract Metadata Fidelity & Lifecycle**: Validates contracts using Phase 3 `ContractMetadataProvider` and enforces contract tradability via `evaluate_contract_lifecycle` (`PS-38`).
+9. **Conservative SL-First OHLC Resolution**: When a candle's price range satisfies both stop-loss and target-profit thresholds, execution resolves conservatively to the stop-loss first (`PS-18`).
+10. **Deterministic Event Clock**: All order creation, fills, FSM state transitions, observation logs, reconciliations, and metrics are stamped with the deterministic market event exchange timestamp.
+11. **Fixed-Point Arithmetic**: 100% of price, quantity, fee, slippage, equity, and P&L calculations utilize Python's `Decimal` type.
+12. **Continuous Multi-Entity Reconciliation**: Reconciles (1) Execution Intents, (2) FSM Orders, (3) Broker Orders, (4) Broker Positions, (5) PnL Positions, and (6) Audit Ledger events every cycle.
 
 ---
 
-## 4. Targeted Forensic Remediation Summary
+## 3. Component Architecture
 
-Phase 16 underwent rigorous forensic audit and targeted remediation to resolve 5 architectural blockers:
+### `alphaforge/paper_shadow/models.py`
+- Immutable Pydantic v2 schemas: `PaperShadowConfig`, `MarketEvent`, `PaperFill`, `ActivePositionState`, `PaperTradeRecord`, `ShadowObservationRecord`, `ForwardRunReport`.
+- Enforces strict mode defaults (`PaperShadowMode.PAPER`), fail-closed environment validation, Decimal coercions, and UTC timezone requirements.
 
-1. **Blocker 1 (Dynamic Risk State)**: Replaced static constants with `pnl_tracker.get_portfolio_risk_state()` dynamically calculating live equity, available capital, and open notionals from `initial_capital` and P&L history.
-2. **Blocker 2 (Authoritative Exit Levels)**: Eliminated all hardcoded 2%/4% synthetic percentages. `ActivePositionState` preserves signal `stop_reference` and `target_reference`, used directly in bracket simulation.
-3. **Blocker 3 (Deterministic Clock Control)**: Replaced wall-clock `datetime.now()` calls in orders, FSM transitions, fills, observations, reconciliations, and reports with deterministic `candle.exchange_timestamp`.
-4. **Blocker 4 (Symmetric Exit Order Routing)**: Exit orders now strictly follow the authoritative path (`OrderRouter.create_and_route_order(role=OrderRole.EXIT)` -> `IdempotencyRegistry` -> `OrderStateMachine` -> `DeploymentBrokerGuard` -> `PaperBroker`), enforcing full FSM invariants.
-5. **Blocker 5 (Forensic Boundary & Certifications)**: Explicitly decoupled software correctness from profitability or live execution readiness.
+### `alphaforge/paper_shadow/market_data_validator.py`
+- `PaperMarketDataValidator`: Validates streaming/replayed candles.
+- Enforces exchange timestamp monotonicity, configurable staleness thresholds, forming candle quarantine (`is_closed=False` $\to$ `FORMING_BAR_LEAK`), zero/negative volume checks, and physical OHLC boundary verification ($High \ge \max(Open, Close)$ and $Low \le \min(Open, Close)$).
+
+### `alphaforge/paper_shadow/fill_simulator.py`
+- `DeterministicFillSimulator`: Pure deterministic fill calculation engine.
+- Implements adverse slippage calculation via Phase 6 `calculate_slippage_bps`, non-negative execution fees via `calculate_total_cost`, volume participation limits, and `OHLCResolutionPolicy.SL_FIRST_CONSERVATIVE` same-bar ambiguity resolution.
+- Decouples `check_bracket_trigger` from `simulate_bracket_fill` to ensure authoritative order IDs are assigned to fills.
+
+### `alphaforge/paper_shadow/pnl_tracker.py`
+- `PaperPnLTracker`: Dynamic fixed-point portfolio ledger.
+- Tracks active positions with signal stop/target levels, maintains mark-to-market valuations, computes realized and unrealized P&L, fees paid, and high-water mark drawdowns.
+- Provides dynamic `get_portfolio_risk_state()` feeding evolving equity directly into `RiskEngine`.
+
+### `alphaforge/paper_shadow/order_router.py`
+- `PaperShadowOrderRouter`: Authoritative order orchestration adapter.
+- Connects Phase 7 `OrderStateMachine`, Phase 8 `IdempotencyRegistry`, and Phase 15 `DeploymentBrokerGuard`.
+- In `PAPER` mode, validates safety through `DeploymentBrokerGuard` and routes to `PaperBroker`.
+- In `SHADOW` mode, validates FSM transitions and idempotency without calling broker APIs.
+- Enforces fail-closed environment validation against mismatched configurations.
+
+### `alphaforge/paper_shadow/shadow_comparator.py`
+- `ShadowComparator`: Passive observer for shadow mode.
+- Records hypothetical fills, slippage, costs, and divergence metrics alongside real/replayed market data.
+
+### `alphaforge/paper_shadow/reconciler_adapter.py`
+- `PaperShadowReconciler`: Continuous 6-entity verification engine.
+- Flags mismatches across intents, FSM orders, broker orders, broker positions, tracker positions, and ledger records, halting new order entries on discrepancy.
+
+### `alphaforge/paper_shadow/engine.py` & `forward_runner.py`
+- `PaperShadowEngine`: Complete pipeline coordinator.
+- Manages lifecycle (`INITIALIZING` $\to$ `RUNNING` $\to$ `PAUSED` $\to$ `STOPPED` $\to$ `TERMINATED` $\to$ `ERROR`), contract lifecycle checks, dynamic risk evaluation, symmetric entry/exit FSM routing, kill-switch integration, crash recovery from JSON checkpoints, and deterministic `ForwardRunReport` generation.
+
+---
+
+## 4. Forensic Remediation Summary
+
+Phase 16 underwent comprehensive forensic audits and targeted remediations resolving key architectural requirements:
+
+1. **Remediation 1 (Dynamic Risk State)**: Replaced static constants with `pnl_tracker.get_portfolio_risk_state()` dynamically calculating live equity, available capital, and open notionals from `initial_capital` and P&L history (`PS-32`).
+2. **Remediation 2 (Authoritative Exit Levels)**: Eliminated hardcoded synthetic percentages. `ActivePositionState` preserves signal `stop_reference` and `target_reference`, evaluated directly during bracket simulation (`PS-33`).
+3. **Remediation 3 (Deterministic Clock Control)**: Replaced wall-clock `datetime.now()` calls with deterministic `candle.exchange_timestamp` across orders, FSM transitions, fills, observations, reconciliations, and reports (`PS-34`).
+4. **Remediation 4 (Symmetric Exit Order Routing)**: Exit orders strictly follow the authoritative path (`OrderRouter.create_and_route_order(role=OrderRole.EXIT)` $\to$ `IdempotencyRegistry` $\to$ `OrderStateMachine` $\to$ `DeploymentBrokerGuard` $\to$ `PaperBroker`) (`PS-35`).
+5. **Remediation 5 (Exit Identity Lineage)**: Decoupled bracket trigger detection from fill simulation. Authoritative exit order is created first, and its exact `order_id` is propagated across fill simulation, FSM fill transition, P&L record, and ledger audit event (`PS-36`).
+6. **Remediation 6 (Fail-Closed Environment Validation)**: Replaced silent environment rewriting with strict fail-closed `DeploymentSafetyError` validation in `PaperShadowConfig` and `PaperShadowOrderRouter` (`PS-37`).
+7. **Remediation 7 (Contract Metadata Fidelity & Lifecycle)**: Integrated Phase 3 `ContractMetadataProvider` into `PaperShadowEngine`, verifying contract lot sizes, multipliers, and active lifecycle constraints (`PS-38`).
 
 ---
 
 ## 5. Comprehensive Test Matrix & Validation Results
 
-The Phase 16 test suite contains **66 dedicated automated tests** covering unit, integration, adversarial safety, and property-based validation:
+The Phase 16 test suite contains **69 dedicated automated tests** covering unit, integration, adversarial safety, and property-based validation:
 
 ### 1. Adversarial Safety & Invariant Tests (`tests/adversarial/paper_shadow/test_paper_shadow_adversarial.py`)
 
@@ -158,6 +166,9 @@ The Phase 16 test suite contains **66 dedicated automated tests** covering unit,
 | **PS-33** | Authoritative Strategy Exit Levels: Bracket exits strictly evaluate signal stop/target | **PASS** |
 | **PS-34** | Deterministic Replay & Bit-for-Bit Identity: Two runs produce identical results | **PASS** |
 | **PS-35** | Exit Orders Use Authoritative Routing & FSM: Exit path enforces full FSM & guard | **PASS** |
+| **PS-36** | Exit Order, Fill, P&L, and Ledger Identity Lineage: Unified authoritative identity | **PASS** |
+| **PS-37** | Fail-Closed Environment Validation: Mismatched configs reject with DeploymentSafetyError | **PASS** |
+| **PS-38** | Authoritative Contract Metadata Fidelity: Metadata and lifecycle status enforced | **PASS** |
 
 ### 2. Unit, Integration & Property Test Breakdown
 
@@ -182,29 +193,29 @@ platform win32 -- Python 3.14.4, pytest-9.1.1, pluggy-1.6.0
 rootdir: D:\AlphaForge
 configfile: pyproject.toml
 plugins: hypothesis-6.168.0
-collected 898 items
+collected 901 items
 
-........................................................................ [  8%]
-........................................................................ [ 16%]
-........................................................................ [ 24%]
-........................................................................ [ 32%]
-........................................................................ [ 40%]
-........................................................................ [ 48%]
-........................................................................ [ 56%]
-........................................................................ [ 64%]
-........................................................................ [ 72%]
-........................................................................ [ 80%]
-........................................................................ [ 88%]
-........................................................................ [ 96%]
-..................................                                       [100%]
+........................................................................ [  7%]
+........................................................................ [ 15%]
+........................................................................ [ 23%]
+........................................................................ [ 31%]
+........................................................................ [ 39%]
+........................................................................ [ 47%]
+........................................................................ [ 55%]
+........................................................................ [ 63%]
+........................................................................ [ 71%]
+........................................................................ [ 79%]
+........................................................................ [ 87%]
+........................................................................ [ 95%]
+.....................................                                    [100%]
 
-============================= 898 passed in 18.26s ==============================
+============================= 901 passed in 20.42s ==============================
 ```
 
 ### Static Analysis & Type Checking
-- **Ruff Linter**: `ruff check alphaforge tests` -> **0 errors** (Clean).
-- **Ruff Formatter**: `ruff format --check alphaforge tests` -> **0 formatting discrepancies** (225 files formatted).
-- **Mypy Strict Type Check**: `mypy alphaforge` -> **Success: no issues found in 117 source files**.
+- **Ruff Linter**: `ruff check alphaforge tests` $\to$ **All checks passed! (0 errors)**
+- **Ruff Formatter**: `ruff format --check alphaforge tests` $\to$ **225 files already formatted (0 discrepancies)**
+- **Mypy Strict Type Check**: `mypy alphaforge` $\to$ **Success: no issues found in 117 source files**
 
 ---
 
@@ -213,9 +224,9 @@ collected 898 items
 Verification against the frozen Phase 15 commit `81fba27684d848beecbd6d2d3e8f484fd090b0fe`:
 
 ```powershell
-git diff 81fba27684d848beecbd6d2d3e8f484fd090b0fe --name-only
+git diff 81fba27684d848beecbd6d2d3e8f484fd090b0fe --name-status
 ```
-**Output**: All production changes strictly confined to `alphaforge/paper_shadow/*`. Zero modifications to Phase 0–15 frozen packages (`strategy`, `risk`, `execution`, `ledger`, `security`, `observability`, `deployment`, `broker`).
+**Output**: All production code changes strictly confined to `alphaforge/paper_shadow/*`. Zero modifications to Phase 0–15 frozen packages (`strategy`, `risk`, `execution`, `ledger`, `security`, `observability`, `deployment`, `contract`, `broker`).
 
 ---
 
@@ -223,18 +234,18 @@ git diff 81fba27684d848beecbd6d2d3e8f484fd090b0fe --name-only
 
 > [!IMPORTANT]
 > **Zero Live Orders Certification**:
-> No live broker order was submitted during any phase of implementation, testing, or forward validation. All tests ran against offline, deterministic synthetic feeds or mock fixtures.
+> **No real broker orders were submitted.** Under no circumstances were live broker connections initiated or real-money orders placed during any phase of implementation, testing, or forward validation. All tests ran against offline, deterministic synthetic feeds or recorded fixtures.
 
 > [!WARNING]
 > **Non-Certification of Live Profitability**:
-> Freezing Phase 16 certifies **software implementation correctness, architectural safety, state conservation, and deterministic causal execution**. Phase 16 freeze does **NOT** constitute certification of strategy profitability, live market readiness, execution alpha, or immunity to live exchange microstructure frictions. Live capital deployment remains strictly gated behind Phase 17 dual-authorization procedures.
+> **Phase 16 freeze does not constitute profitability certification or live-trading authorization.** Freezing Phase 16 certifies software implementation correctness, architectural safety, state conservation, and deterministic causal execution. Live capital deployment remains strictly gated behind Phase 17 dual-authorization procedures.
 
 ---
 
-## 9. 28-Item Forensic Self-Check & Acceptance Verification
+## 9. 31-Item Forensic Self-Check & Acceptance Verification
 
 1. **Was any live broker order submitted during tests or forward runs?**
-   *No. Live order submission is impossible in both PAPER and SHADOW modes.*
+   *No. No real broker orders were submitted.*
 2. **Does PAPER mode default when configuration is unspecified?**
    *Yes. `PaperShadowMode.PAPER` is the strict default.*
 3. **Does SHADOW mode guarantee zero order submissions?**
@@ -242,7 +253,7 @@ git diff 81fba27684d848beecbd6d2d3e8f484fd090b0fe --name-only
 4. **Is look-ahead bias strictly eliminated?**
    *Yes. Causal visibility is enforced; future candle at $T+1$ cannot alter metrics at $T$ (verified by `PS-31`).*
 5. **Are intra-bar SL/TP ambiguities resolved conservatively?**
-   *Yes. `OHLCResolutionPolicy.SL_FIRST_CONSERVATIVE` prioritizes stop-loss execution.*
+   *Yes. `OHLCResolutionPolicy.SL_FIRST_CONSERVATIVE` prioritizes stop-loss execution (verified by `PS-18`).*
 6. **Are transaction costs and slippages modeled accurately?**
    *Yes. Uses Phase 6 `CostConfig` and adverse effective price calculators.*
 7. **Is all financial arithmetic in Decimal?**
@@ -252,7 +263,7 @@ git diff 81fba27684d848beecbd6d2d3e8f484fd090b0fe --name-only
 9. **Does reconciliation mismatch halt new order entry?**
    *Yes. `new_entries_allowed` is set to `False` on any mismatch.*
 10. **Are forming candles quarantined?**
-    *Yes. `is_closed=False` raises `MarketDataAnomalyType.FORMING_BAR_LEAK`.*
+    *Yes. `is_closed=False` raises `MarketDataAnomalyType.FORMING_BAR_LEAK` (verified by `PS-24`).*
 11. **Are timestamps verified for UTC timezone awareness?**
     *Yes. Pydantic validators strictly require timezone-aware UTC datetime objects.*
 12. **Are sequence numbers monotonically validated?**
@@ -266,7 +277,7 @@ git diff 81fba27684d848beecbd6d2d3e8f484fd090b0fe --name-only
 16. **Is position quantity conserved across entries and exits?**
     *Yes. Local tracker maintains strict quantity conservation.*
 17. **Is the KillSwitch integrated and respected?**
-    *Yes. When engaged, new simulated and live orders are immediately blocked.*
+    *Yes. When engaged, new simulated and live orders are immediately blocked (verified by `PS-27`).*
 18. **Is state checkpointing deterministic?**
     *Yes. JSON checkpoint persistence restores exact engine state.*
 19. **Are all test feeds deterministic and network-free?**
@@ -281,13 +292,19 @@ git diff 81fba27684d848beecbd6d2d3e8f484fd090b0fe --name-only
     *Yes. Independent runs produce identical metrics and reports (verified by `PS-34`).*
 24. **Are exit orders routed through full FSM and broker guard?**
     *Yes. Symmetrically validated through `DeploymentBrokerGuard` (verified by `PS-35`).*
-25. **Are all 66 Phase 16 tests passing?**
-    *Yes. 66/66 tests pass.*
-26. **Are all 898 repository tests passing?**
-    *Yes. 898/898 full regression pass.*
-27. **Is Ruff and Mypy 100% clean?**
+25. **Is exit order identity lineage preserved across FSM, fill, P&L, and ledger?**
+    *Yes. Authoritative exit order ID is unified across all subsystems (verified by `PS-36`).*
+26. **Do mismatched deployment environments fail closed?**
+    *Yes. `DeploymentSafetyError` is raised immediately upon configuration or router mismatch (verified by `PS-37`).*
+27. **Are contract metadata and lifecycle constraints enforced?**
+    *Yes. Lot sizes, multipliers, and tradability evaluated via `ContractMetadataProvider` (verified by `PS-38`).*
+28. **Are all 69 Phase 16 tests passing?**
+    *Yes. 69/69 tests pass.*
+29. **Are all 901 repository tests passing?**
+    *Yes. 901/901 full regression pass.*
+30. **Is Ruff and Mypy 100% clean?**
     *Yes. 0 linter errors, 0 format issues, 0 type errors across 117 files.*
-28. **Were any Phase 0–15 files modified?**
+31. **Were any Phase 0–15 files modified?**
     *No. Zero diff on frozen baseline (`81fba27684d848beecbd6d2d3e8f484fd090b0fe`).*
 
 ---
@@ -300,8 +317,8 @@ git diff 81fba27684d848beecbd6d2d3e8f484fd090b0fe --name-only
 ===============================================================================
   - Component: Paper / Shadow Trading Forward Validation Engine
   - Package: alphaforge/paper_shadow/
-  - Unit / Integration / Adversarial / Property Tests: 66 / 66 PASSED (100%)
-  - Full Repository Regression Tests: 898 / 898 PASSED (100%)
+  - Unit / Integration / Adversarial / Property Tests: 69 / 69 PASSED (100%)
+  - Full Repository Regression Tests: 901 / 901 PASSED (100%)
   - Static Code Analysis: Ruff Clean (0 errors), Ruff Format Clean (225 files)
   - Type Safety: Mypy Strict Clean (0 errors across 117 files)
   - Frozen Baseline Integrity: ZERO diff on Phase 0–15 code

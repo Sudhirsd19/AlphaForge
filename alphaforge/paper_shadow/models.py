@@ -13,6 +13,7 @@ import hashlib
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path  # noqa: TC003
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -20,6 +21,8 @@ from alphaforge.core.exceptions import DataIntegrityError
 from alphaforge.cost.models import CostConfig
 from alphaforge.data.models import MarketCandle  # noqa: TC001
 from alphaforge.deployment.config import DeploymentConfig
+from alphaforge.deployment.enums import DeploymentEnvironment
+from alphaforge.deployment.exceptions import DeploymentSafetyError
 from alphaforge.paper_shadow.enums import (
     OHLCResolutionPolicy,
     PaperShadowMode,
@@ -89,13 +92,44 @@ class PaperShadowConfig(BaseModel):
         description="Configuration schema version",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_default_deployment_config(cls, data: dict[str, Any] | Any) -> dict[str, Any] | Any:
+        """Resolve appropriate default deployment environment if not explicitly provided."""
+        if isinstance(data, dict) and "deployment_config" not in data:
+            mode_val = data.get("mode", PaperShadowMode.PAPER)
+            if mode_val in (PaperShadowMode.SHADOW, "SHADOW"):
+                data["deployment_config"] = DeploymentConfig(
+                    environment=DeploymentEnvironment.SHADOW
+                )
+            else:
+                data["deployment_config"] = DeploymentConfig(
+                    environment=DeploymentEnvironment.PAPER
+                )
+        return data
+
     @model_validator(mode="after")
     def validate_config_invariants(self) -> PaperShadowConfig:
-        """Verify contract multiplier is finite and positive."""
+        """Verify contract multiplier is finite and fail closed on environment mismatch."""
         if not self.contract_multiplier.is_finite() or self.contract_multiplier <= Decimal("0"):
             raise DataIntegrityError(
                 f"contract_multiplier must be a positive finite Decimal: {self.contract_multiplier}"
             )
+        # Fail closed on environment mismatch - zero silent rewrites
+        if self.mode == PaperShadowMode.PAPER:
+            if self.deployment_config.environment != DeploymentEnvironment.PAPER:
+                raise DeploymentSafetyError(
+                    f"Environment mismatch: PaperShadowMode.PAPER cannot run in "
+                    f"DeploymentEnvironment.{self.deployment_config.environment.name}"
+                )
+        elif self.mode == PaperShadowMode.SHADOW:
+            if self.deployment_config.environment != DeploymentEnvironment.SHADOW:
+                raise DeploymentSafetyError(
+                    f"Environment mismatch: PaperShadowMode.SHADOW cannot run in "
+                    f"DeploymentEnvironment.{self.deployment_config.environment.name}"
+                )
+        else:
+            raise DeploymentSafetyError(f"Unsupported PaperShadowMode: {self.mode}")
         return self
 
     def compute_config_hash(self) -> str:
