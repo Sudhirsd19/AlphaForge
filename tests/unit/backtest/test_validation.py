@@ -11,7 +11,9 @@ from typing import Any
 import pytest
 
 from alphaforge.backtest.datasets import BacktestDataset
+from alphaforge.backtest.engine import BacktestEngine
 from alphaforge.backtest.models import (
+    BacktestConfig,
     BacktestMetrics,
     BacktestTrade,
     EquitySnapshot,
@@ -27,6 +29,7 @@ from alphaforge.backtest.validation import (
     QuantGateEvaluator,
     WalkForwardEngine,
 )
+from alphaforge.contract.models import ContractMaster
 from alphaforge.data.enums import InstrumentType
 from alphaforge.data.models import MarketCandle
 from alphaforge.risk.enums import TradeSide
@@ -784,6 +787,340 @@ def test_quant_gate_e_contract_lifecycle_deliberate_failure() -> None:
     gate_e_warn = next(g for g in gates_warn if g.gate_id == "Gate E")
     assert gate_e_warn.status == QuantGateStatus.WARNING
     assert any("Contract master omitted" in w for w in warns_warn)
+
+
+def test_gate_e_test_1_normal_expiry() -> None:
+    """Test 1 — Normal expiry: position reaches expiry -> forced close -> Gate E PASS."""
+    from tests.unit.backtest.test_engine import _load_fixture_candles
+
+    candles = _load_fixture_candles()
+    last_c = candles[-1]
+    c1 = MarketCandle(
+        symbol="NIFTY",
+        instrument_type=InstrumentType.INDEX,
+        contract_id="NIFTY-SPOT",
+        exchange_timestamp=last_c.exchange_timestamp + timedelta(minutes=3),
+        received_timestamp=last_c.exchange_timestamp + timedelta(minutes=3, milliseconds=10),
+        timeframe="3m",
+        open=Decimal("24100.00"),
+        high=Decimal("24150.00"),
+        low=Decimal("24090.00"),
+        close=Decimal("24120.00"),
+        volume=2000,
+        source="NSE",
+    )
+    c2 = MarketCandle(
+        symbol="NIFTY",
+        instrument_type=InstrumentType.INDEX,
+        contract_id="NIFTY-SPOT",
+        exchange_timestamp=last_c.exchange_timestamp + timedelta(minutes=6),
+        received_timestamp=last_c.exchange_timestamp + timedelta(minutes=6, milliseconds=10),
+        timeframe="3m",
+        open=Decimal("24120.00"),
+        high=Decimal("24130.00"),
+        low=Decimal("24080.00"),
+        close=Decimal("24090.00"),
+        volume=2000,
+        source="NSE",
+    )
+    candles.extend([c1, c2])
+
+    t0 = candles[0].exchange_timestamp
+    t_exp = c2.exchange_timestamp
+
+    contract = ContractMaster(
+        exchange="NSE",
+        segment="NFO",
+        underlying_symbol="NIFTY",
+        contract_id="NIFTY26SEPFUT",
+        expiry_datetime=t_exp,
+        listing_datetime=t0 - timedelta(days=90),
+        trading_start_datetime=t0 - timedelta(days=90),
+        trading_end_datetime=t_exp,
+        lot_size=1,
+        tick_size=Decimal("0.05"),
+        contract_multiplier=Decimal("1"),
+        data_source="NSE",
+    )
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id="DS_TEST1",
+        start_time=t0,
+        end_time=c2.exchange_timestamp + timedelta(minutes=3),
+        initial_capital=Decimal("1000000"),
+        warmup_bars=15,
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    engine = BacktestEngine(cfg, BacktestDataset("DS_TEST1", candles), contract_master=contract)
+    res = engine.run()
+
+    # Position reached expiry and was closed with exit_reason CONTRACT_EXPIRED
+    assert any(t.exit_reason == "CONTRACT_EXPIRED" and t.is_forced_close for t in res.trades)
+    assert engine.post_expiry_fills == 0
+    gate_e = next(g for g in res.quant_gates if g.gate_id == "Gate E")
+    assert gate_e.status == QuantGateStatus.PASS
+    assert gate_e.evidence["contract_metadata_valid"] is True
+    assert gate_e.evidence["lifecycle_violation"] is False
+    assert gate_e.evidence["post_expiry_fills"] == 0
+    assert gate_e.evidence["contract_valid"] is True
+
+
+def test_gate_e_test_2_pending_entry_at_expiry() -> None:
+    """Test 2 — Pending entry at expiry: rejected, post_expiry_fills == 0 -> Gate E PASS."""
+    from tests.unit.backtest.test_engine import _load_fixture_candles
+
+    candles = _load_fixture_candles()
+    last_c = candles[-1]
+    c1 = MarketCandle(
+        symbol="NIFTY",
+        instrument_type=InstrumentType.INDEX,
+        contract_id="NIFTY-SPOT",
+        exchange_timestamp=last_c.exchange_timestamp + timedelta(minutes=3),
+        received_timestamp=last_c.exchange_timestamp + timedelta(minutes=3, milliseconds=10),
+        timeframe="3m",
+        open=Decimal("24100.00"),
+        high=Decimal("24150.00"),
+        low=Decimal("24090.00"),
+        close=Decimal("24120.00"),
+        volume=2000,
+        source="NSE",
+    )
+    candles.append(c1)
+
+    t0 = candles[0].exchange_timestamp
+    t_exp = c1.exchange_timestamp  # Expiry at c1 open when pending entry arrives
+
+    contract = ContractMaster(
+        exchange="NSE",
+        segment="NFO",
+        underlying_symbol="NIFTY",
+        contract_id="NIFTY26SEPFUT",
+        expiry_datetime=t_exp,
+        listing_datetime=t0 - timedelta(days=90),
+        trading_start_datetime=t0 - timedelta(days=90),
+        trading_end_datetime=t_exp,
+        lot_size=1,
+        tick_size=Decimal("0.05"),
+        contract_multiplier=Decimal("1"),
+        data_source="NSE",
+    )
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id="DS_TEST2",
+        start_time=t0,
+        end_time=c1.exchange_timestamp + timedelta(minutes=3),
+        initial_capital=Decimal("1000000"),
+        warmup_bars=15,
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    engine = BacktestEngine(cfg, BacktestDataset("DS_TEST2", candles), contract_master=contract)
+    res = engine.run()
+
+    # Pending entry was rejected due to expiry; zero fills executed
+    assert engine.expired_trade_attempts >= 1
+    assert engine.post_expiry_fills == 0
+    assert len(res.trades) == 0
+    gate_e = next(g for g in res.quant_gates if g.gate_id == "Gate E")
+    assert gate_e.status == QuantGateStatus.PASS
+    assert gate_e.evidence["contract_metadata_valid"] is True
+    assert gate_e.evidence["lifecycle_violation"] is False
+    assert gate_e.evidence["post_expiry_fills"] == 0
+    assert gate_e.evidence["contract_valid"] is True
+
+
+def test_gate_e_test_3_actual_post_expiry_fill() -> None:
+    """Test 3 — Actual post-expiry fill: post_expiry_fills > 0 -> Gate E FAIL."""
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    dataset = BacktestDataset("DS", [_create_candle(t0, Decimal("24000"))])
+    metrics = BacktestMetrics(
+        total_return=Decimal("0"),
+        total_return_pct=Decimal("0"),
+        total_trades=0,
+        winning_trades=0,
+        losing_trades=0,
+        break_even_trades=0,
+        win_rate=Decimal("0"),
+        loss_rate=Decimal("0"),
+        average_win=Decimal("0"),
+        average_loss=Decimal("0"),
+        expectancy=Decimal("0"),
+        max_drawdown=Decimal("0"),
+        max_drawdown_pct=Decimal("0"),
+        max_drawdown_duration_seconds=0,
+        average_exposure=Decimal("0"),
+        max_exposure=Decimal("0"),
+        gross_pnl=Decimal("0"),
+        total_fees=Decimal("0"),
+        total_slippage=Decimal("0"),
+        net_pnl=Decimal("0"),
+    )
+    evidence = {
+        "contract_master_present": True,
+        "contract_id": "NIFTY-SPOT",
+        "contract_metadata_valid": True,
+        "post_expiry_fills": 1,
+        "contract_valid": False,
+        "lifecycle_violation": True,
+    }
+    gates, status, warns, errs = QuantGateEvaluator.evaluate_gates(
+        trades=[],
+        equity_curve=[],
+        metrics=metrics,
+        dataset=dataset,
+        initial_capital=Decimal("1000000"),
+        contract_evidence=evidence,
+    )
+    gate_e = next(g for g in gates if g.gate_id == "Gate E")
+    assert gate_e.status == QuantGateStatus.FAIL
+    assert gate_e.error_count == 1
+    assert any("Gate E Failed" in e for e in errs)
+
+
+def test_gate_e_test_4_invalid_lot_size() -> None:
+    """Test 4 — Invalid lot size: lot_size <= 0 -> Gate E FAIL."""
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    dataset = BacktestDataset("DS", [_create_candle(t0, Decimal("24000"))])
+    metrics = BacktestMetrics(
+        total_return=Decimal("0"),
+        total_return_pct=Decimal("0"),
+        total_trades=0,
+        winning_trades=0,
+        losing_trades=0,
+        break_even_trades=0,
+        win_rate=Decimal("0"),
+        loss_rate=Decimal("0"),
+        average_win=Decimal("0"),
+        average_loss=Decimal("0"),
+        expectancy=Decimal("0"),
+        max_drawdown=Decimal("0"),
+        max_drawdown_pct=Decimal("0"),
+        max_drawdown_duration_seconds=0,
+        average_exposure=Decimal("0"),
+        max_exposure=Decimal("0"),
+        gross_pnl=Decimal("0"),
+        total_fees=Decimal("0"),
+        total_slippage=Decimal("0"),
+        net_pnl=Decimal("0"),
+    )
+    evidence = {
+        "contract_master_present": True,
+        "contract_id": "NIFTY-SPOT",
+        "lot_size": 0,
+        "contract_metadata_valid": False,
+        "post_expiry_fills": 0,
+        "contract_valid": False,
+        "lifecycle_violation": True,
+    }
+    gates, status, warns, errs = QuantGateEvaluator.evaluate_gates(
+        trades=[],
+        equity_curve=[],
+        metrics=metrics,
+        dataset=dataset,
+        initial_capital=Decimal("1000000"),
+        contract_evidence=evidence,
+    )
+    gate_e = next(g for g in gates if g.gate_id == "Gate E")
+    assert gate_e.status == QuantGateStatus.FAIL
+    assert any("Gate E Failed" in e for e in errs)
+
+
+def test_gate_e_test_5_invalid_multiplier() -> None:
+    """Test 5 — Invalid multiplier: multiplier <= 0 -> Gate E FAIL."""
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    dataset = BacktestDataset("DS", [_create_candle(t0, Decimal("24000"))])
+    metrics = BacktestMetrics(
+        total_return=Decimal("0"),
+        total_return_pct=Decimal("0"),
+        total_trades=0,
+        winning_trades=0,
+        losing_trades=0,
+        break_even_trades=0,
+        win_rate=Decimal("0"),
+        loss_rate=Decimal("0"),
+        average_win=Decimal("0"),
+        average_loss=Decimal("0"),
+        expectancy=Decimal("0"),
+        max_drawdown=Decimal("0"),
+        max_drawdown_pct=Decimal("0"),
+        max_drawdown_duration_seconds=0,
+        average_exposure=Decimal("0"),
+        max_exposure=Decimal("0"),
+        gross_pnl=Decimal("0"),
+        total_fees=Decimal("0"),
+        total_slippage=Decimal("0"),
+        net_pnl=Decimal("0"),
+    )
+    evidence = {
+        "contract_master_present": True,
+        "contract_id": "NIFTY-SPOT",
+        "contract_multiplier": Decimal("0"),
+        "contract_metadata_valid": False,
+        "post_expiry_fills": 0,
+        "contract_valid": False,
+        "lifecycle_violation": True,
+    }
+    gates, status, warns, errs = QuantGateEvaluator.evaluate_gates(
+        trades=[],
+        equity_curve=[],
+        metrics=metrics,
+        dataset=dataset,
+        initial_capital=Decimal("1000000"),
+        contract_evidence=evidence,
+    )
+    gate_e = next(g for g in gates if g.gate_id == "Gate E")
+    assert gate_e.status == QuantGateStatus.FAIL
+    assert any("Gate E Failed" in e for e in errs)
+
+
+def test_gate_e_test_6_invalid_contract_metadata() -> None:
+    """Test 6 — Invalid contract metadata: contract_metadata_valid = False -> Gate E FAIL."""
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    dataset = BacktestDataset("DS", [_create_candle(t0, Decimal("24000"))])
+    metrics = BacktestMetrics(
+        total_return=Decimal("0"),
+        total_return_pct=Decimal("0"),
+        total_trades=0,
+        winning_trades=0,
+        losing_trades=0,
+        break_even_trades=0,
+        win_rate=Decimal("0"),
+        loss_rate=Decimal("0"),
+        average_win=Decimal("0"),
+        average_loss=Decimal("0"),
+        expectancy=Decimal("0"),
+        max_drawdown=Decimal("0"),
+        max_drawdown_pct=Decimal("0"),
+        max_drawdown_duration_seconds=0,
+        average_exposure=Decimal("0"),
+        max_exposure=Decimal("0"),
+        gross_pnl=Decimal("0"),
+        total_fees=Decimal("0"),
+        total_slippage=Decimal("0"),
+        net_pnl=Decimal("0"),
+    )
+    evidence = {
+        "contract_master_present": True,
+        "contract_id": "INVALID_METADATA_CONTRACT",
+        "contract_metadata_valid": False,
+        "post_expiry_fills": 0,
+        "contract_valid": False,
+        "lifecycle_violation": True,
+    }
+    gates, status, warns, errs = QuantGateEvaluator.evaluate_gates(
+        trades=[],
+        equity_curve=[],
+        metrics=metrics,
+        dataset=dataset,
+        initial_capital=Decimal("1000000"),
+        contract_evidence=evidence,
+    )
+    gate_e = next(g for g in gates if g.gate_id == "Gate E")
+    assert gate_e.status == QuantGateStatus.FAIL
+    assert any("Gate E Failed" in e for e in errs)
 
 
 def test_quant_gate_i_deliberate_failures() -> None:

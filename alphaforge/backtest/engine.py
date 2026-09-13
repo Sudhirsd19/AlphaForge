@@ -38,6 +38,7 @@ from alphaforge.backtest.models import (
 from alphaforge.backtest.portfolio import PortfolioTracker
 from alphaforge.backtest.validation import OverfittingDiagnostics, QuantGateEvaluator
 from alphaforge.contract.models import ContractMaster
+from alphaforge.contract.validation import validate_contract_master
 from alphaforge.core.enums import (
     FuturesConfirmationStatus,
     SignalDirection,
@@ -182,13 +183,21 @@ class BacktestEngine:
         )
         lot_size = self.contract_master.lot_size if self.contract_master else 1
 
-        contract_valid = True
+        contract_metadata_valid = True
+        lifecycle_violation = False
         if self.contract_master is not None:
             self.contract_checks += 1
             if self.contract_master.lot_size <= 0:
-                contract_valid = False
+                contract_metadata_valid = False
+                lifecycle_violation = True
             if self.contract_master.contract_multiplier <= Decimal("0"):
-                contract_valid = False
+                contract_metadata_valid = False
+                lifecycle_violation = True
+            try:
+                validate_contract_master(self.contract_master)
+            except Exception:
+                contract_metadata_valid = False
+                lifecycle_violation = True
 
         # Record BACKTEST_STARTED audit event
         self.ledger.append(
@@ -268,7 +277,6 @@ class BacktestEngine:
                     if pending_entry is not None:
                         self.expired_trade_attempts += 1
                     pending_entry = None
-                    contract_valid = False
                     self.portfolio.update_bar(candle, multiplier)
                     self.trace.append(
                         TraceEntry(
@@ -290,7 +298,7 @@ class BacktestEngine:
             # -------------------------------------------------------------
             if pending_entry is not None and not self.portfolio.has_open_position:
                 if self.contract_master and ts >= self.contract_master.expiry_datetime:
-                    self.post_expiry_fills += 1
+                    self.expired_trade_attempts += 1
                     pending_entry = None
                 else:
                     self.multiplier_checks += 1
@@ -312,6 +320,9 @@ class BacktestEngine:
                         cost_config=self.config.cost_config,
                         multiplier=multiplier,
                     )
+                    if self.contract_master and ts >= self.contract_master.expiry_datetime:
+                        self.post_expiry_fills += 1
+                        lifecycle_violation = True
 
                     # Initialize FSM and transition to FILLED
                     current_fsm = OrderStateMachine(
@@ -505,7 +516,12 @@ class BacktestEngine:
 
                     self.lot_size_checks += 1
                     if lot_size <= 0:
-                        contract_valid = False
+                        contract_metadata_valid = False
+                        lifecycle_violation = True
+                    self.multiplier_checks += 1
+                    if multiplier <= Decimal("0"):
+                        contract_metadata_valid = False
+                        lifecycle_violation = True
 
                     # Authoritative Phase 5 Pre-Trade Risk Evaluation
                     cid = (
@@ -709,10 +725,20 @@ class BacktestEngine:
         }
         oos_evidence = QuantGateEvaluator.verify_oos_partitioning(self.dataset)
 
+        if self.contract_master is not None and (
+            not contract_metadata_valid or self.post_expiry_fills > 0
+        ):
+            lifecycle_violation = True
+
+        contract_valid = bool(
+            contract_metadata_valid and self.post_expiry_fills == 0 and not lifecycle_violation
+        )
+
         contract_evidence = {
             "verification_executed": self.contract_master is not None,
             "contract_master_present": self.contract_master is not None,
             "contract_id": self.contract_master.contract_id if self.contract_master else "NONE",
+            "contract_metadata_valid": contract_metadata_valid if self.contract_master else False,
             "expiry_datetime": (
                 self.contract_master.expiry_datetime.astimezone(UTC).isoformat()
                 if self.contract_master
@@ -725,6 +751,7 @@ class BacktestEngine:
             "post_expiry_fills": self.post_expiry_fills,
             "lot_size_checks": self.lot_size_checks,
             "multiplier_checks": self.multiplier_checks,
+            "lifecycle_violation": lifecycle_violation,
             "contract_valid": contract_valid,
         }
 

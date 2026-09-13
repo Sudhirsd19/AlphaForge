@@ -776,6 +776,11 @@ def test_p27_post_expiry_execution_rejection() -> None:
     res = engine.run()
     assert engine.post_expiry_fills == 0
     assert len(res.trades) == 0
+    gate_e = next(g for g in res.quant_gates if g.gate_id == "Gate E")
+    assert gate_e.status == QuantGateStatus.PASS
+    assert gate_e.evidence["post_expiry_fills"] == 0
+    assert gate_e.evidence["contract_metadata_valid"] is True
+    assert gate_e.evidence["lifecycle_violation"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -851,3 +856,51 @@ def test_p30_identical_complete_runs_produce_identical_result_hash(price: int) -
     res2 = BacktestEngine(cfg, ds).run()
     assert res1.result_canonical_hash == res2.result_canonical_hash
     assert res1.trace_canonical_hash == res2.trace_canonical_hash
+
+
+# ---------------------------------------------------------------------------
+# P31: Normal contract expiry handling does not cause Gate E failure
+# ---------------------------------------------------------------------------
+@given(
+    st.integers(min_value=1, max_value=8),
+    st.integers(min_value=1, max_value=100),
+)
+@settings(max_examples=15, deadline=None)
+def test_p31_normal_contract_expiry_does_not_cause_gate_e_failure(
+    expiry_offset: int, lot_size: int
+) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles = [_make_candle(t0 + timedelta(minutes=3 * i), Decimal("24000")) for i in range(10)]
+    ds = BacktestDataset("DS_P31", candles)
+    expiry_ts = t0 + timedelta(minutes=3 * expiry_offset)
+    contract = ContractMaster(
+        exchange="NSE",
+        segment="NFO",
+        underlying_symbol="NIFTY",
+        contract_id="NIFTY-SPOT",
+        expiry_datetime=expiry_ts,
+        listing_datetime=t0 - timedelta(days=90),
+        trading_start_datetime=t0 - timedelta(days=90),
+        trading_end_datetime=expiry_ts,
+        lot_size=lot_size,
+        tick_size=Decimal("0.05"),
+        data_source="NSE",
+    )
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(minutes=30),
+        initial_capital=Decimal("1000000"),
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    engine = BacktestEngine(cfg, ds, contract_master=contract)
+    res = engine.run()
+    assert engine.post_expiry_fills == 0
+    gate_e = next(g for g in res.quant_gates if g.gate_id == "Gate E")
+    assert gate_e.status == QuantGateStatus.PASS
+    assert gate_e.evidence["contract_metadata_valid"] is True
+    assert gate_e.evidence["lifecycle_violation"] is False
+    assert gate_e.evidence["post_expiry_fills"] == 0

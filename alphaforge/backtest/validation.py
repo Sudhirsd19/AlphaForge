@@ -249,6 +249,7 @@ class QuantGateEvaluator:
                 "verification_executed": False,
                 "contract_master_present": False,
                 "contract_id": "NONE",
+                "contract_metadata_valid": False,
                 "expiry_datetime": "NONE",
                 "contract_checks": 0,
                 "expiry_checks": 0,
@@ -257,6 +258,7 @@ class QuantGateEvaluator:
                 "post_expiry_fills": 0,
                 "lot_size_checks": 0,
                 "multiplier_checks": 0,
+                "lifecycle_violation": False,
                 "contract_valid": contract_valid,
             }
             warn_e = 1
@@ -271,12 +273,31 @@ class QuantGateEvaluator:
             post_fills = int(contract_evidence.get("post_expiry_fills", 0))
             lot_checks = int(contract_evidence.get("lot_size_checks", 0))
             mult_checks = int(contract_evidence.get("multiplier_checks", 0))
+            metadata_valid = bool(contract_evidence.get("contract_metadata_valid", True))
+            violation = bool(contract_evidence.get("lifecycle_violation", False))
             c_valid = bool(contract_evidence.get("contract_valid", contract_valid))
+
+            # Explicit check for lot_size and multiplier in evidence
+            lot_val = contract_evidence.get("lot_size", None)
+            if lot_val is not None and int(lot_val) <= 0:
+                metadata_valid = False
+                violation = True
+            mult_val = contract_evidence.get(
+                "contract_multiplier", contract_evidence.get("multiplier", None)
+            )
+            if mult_val is not None and Decimal(str(mult_val)) <= Decimal("0"):
+                metadata_valid = False
+                violation = True
+
+            final_contract_valid = bool(
+                c_valid and metadata_valid and post_fills == 0 and not violation
+            )
 
             evidence_e = {
                 "verification_executed": True,
                 "contract_master_present": True,
                 "contract_id": c_id,
+                "contract_metadata_valid": metadata_valid,
                 "expiry_datetime": exp_dt,
                 "contract_checks": c_checks,
                 "expiry_checks": exp_checks,
@@ -285,14 +306,15 @@ class QuantGateEvaluator:
                 "post_expiry_fills": post_fills,
                 "lot_size_checks": lot_checks,
                 "multiplier_checks": mult_checks,
-                "contract_valid": c_valid,
+                "lifecycle_violation": violation,
+                "contract_valid": final_contract_valid,
             }
 
-            if not c_valid or post_fills > 0:
+            if not final_contract_valid or post_fills > 0:
                 status_e = QuantGateStatus.FAIL
                 reason_e = (
                     f"Contract lifecycle violation: post_expiry_fills={post_fills}, "
-                    f"contract_valid={c_valid}, expired_trade_attempts={exp_attempts}"
+                    f"contract_metadata_valid={metadata_valid}, lifecycle_violation={violation}"
                 )
                 errors.append(f"Gate E Failed: {reason_e}")
                 warn_e = 0
