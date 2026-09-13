@@ -102,7 +102,7 @@ def reconcile_and_deduplicate_reservations(
     return tuple(res_by_id.values())
 
 
-def evaluate_trade_risk(
+def _evaluate_trade_risk_internal(
     trade_input: RiskInput,
     portfolio_state: PortfolioRiskState,
     config: RiskConfig | None = None,
@@ -570,6 +570,26 @@ def evaluate_trade_risk(
         calculation_version=cfg.calculation_version,
         timestamp=eval_ts,
     )
+
+
+def _notify_risk_observability(decision: RiskDecision, trade_input: RiskInput) -> None:
+    """Passive risk observability notification; never modifies decision or raises exceptions."""
+    from alphaforge.observability.hub import observe_risk_evaluation
+
+    observe_risk_evaluation(decision, trade_input)
+
+
+def evaluate_trade_risk(
+    trade_input: RiskInput,
+    portfolio_state: PortfolioRiskState,
+    config: RiskConfig | None = None,
+) -> RiskDecision:
+    """
+    Pure deterministic pre-trade risk validation gate with passive observability notification.
+    """
+    decision = _evaluate_trade_risk_internal(trade_input, portfolio_state, config)
+    _notify_risk_observability(decision, trade_input)
+    return decision
 
 
 class RiskEngine:

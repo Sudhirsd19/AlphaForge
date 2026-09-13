@@ -82,6 +82,36 @@ class SecurityAuthorizer:
         cid = request.client_order_id
         mode = self._config.trading_mode_config.effective_mode
 
+        try:
+            self._evaluate_security_guards(cid, mode)
+        except Exception as exc:
+            self._notify_security_rejection(cid, request.symbol, mode.value, exc)
+            raise
+
+        self._notify_security_acceptance(cid, request.symbol, mode.value)
+
+    def _notify_security_rejection(
+        self, cid: str, symbol: str, mode_val: str, exc: Exception
+    ) -> None:
+        from alphaforge.observability.hub import observe_security_evaluation
+
+        observe_security_evaluation(
+            client_order_id=cid,
+            symbol=symbol,
+            mode_val=mode_val,
+            exc=exc,
+        )
+
+    def _notify_security_acceptance(self, cid: str, symbol: str, mode_val: str) -> None:
+        from alphaforge.observability.hub import observe_security_evaluation
+
+        observe_security_evaluation(
+            client_order_id=cid,
+            symbol=symbol,
+            mode_val=mode_val,
+        )
+
+    def _evaluate_security_guards(self, cid: str, mode: TradingMode) -> None:
         # 1. Kill Switch Check (Immediate fail closed)
         if self._kill_switch.is_engaged():
             reason = self._kill_switch.latest_reason
@@ -165,7 +195,30 @@ class SecureBroker(AbstractBroker):
         Authorize order request through security policies before routing to broker.
         """
         self._authorizer.authorize_order(request)
-        return self._delegate.submit_order(request)
+        self._notify_submit(request)
+        try:
+            order = self._delegate.submit_order(request)
+        except Exception as exc:
+            self._notify_submit_failure(request, exc)
+            raise
+
+        self._notify_ack(order)
+        return order
+
+    def _notify_submit(self, request: BrokerOrderRequest) -> None:
+        from alphaforge.observability.hub import observe_order_submission
+
+        observe_order_submission(request)
+
+    def _notify_ack(self, order: BrokerOrder) -> None:
+        from alphaforge.observability.hub import observe_order_ack
+
+        observe_order_ack(order)
+
+    def _notify_submit_failure(self, request: BrokerOrderRequest, exc: Exception) -> None:
+        from alphaforge.observability.hub import observe_order_submit_failure
+
+        observe_order_submit_failure(request, exc)
 
     def get_order(
         self,

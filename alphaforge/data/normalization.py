@@ -254,7 +254,7 @@ class MarketDataNormalizer:
             c.model_copy(update={"quality_status": final_status}) for c in deduped_candles
         ]
 
-        return NormalizationResult(
+        result = NormalizationResult(
             valid_candles=final_valid_candles,
             quarantined_records=quarantined,
             duplicates_count=duplicates_count,
@@ -263,3 +263,18 @@ class MarketDataNormalizer:
             execution_allowed=is_execution_eligible(final_status),
             was_out_of_order=was_out_of_order,
         )
+
+        from alphaforge.observability.hub import observe_data_normalized
+
+        sym = final_valid_candles[0].symbol if final_valid_candles else None
+        observe_data_normalized(
+            symbol=sym,
+            valid_count=len(final_valid_candles),
+            quarantined_count=len(quarantined),
+            duplicates_count=duplicates_count,
+            gap_count=len(detected_gaps),
+            quality_status=final_status.value,
+            was_out_of_order=was_out_of_order,
+        )
+
+        return result

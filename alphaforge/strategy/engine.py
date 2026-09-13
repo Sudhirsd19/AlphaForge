@@ -394,7 +394,7 @@ class DeterministicStrategyEngine:
         self._emitted_signal_ids.add(signal_id)
 
         # 14. Emit ACCEPT Signal
-        return StrategySignal(
+        accept_signal = StrategySignal(
             signal_id=signal_id,
             strategy_id=self.config.strategy_id,
             strategy_version=self.config.strategy_version,
@@ -414,6 +414,8 @@ class DeterministicStrategyEngine:
             config_hash=self.config_hash,
             data_version=1,
         )
+        self._notify_strategy_observability(accept_signal)
+        return accept_signal
 
     def compute_signal_id(self, direction: SignalDirection, signal_timestamp: datetime) -> str:
         """
@@ -442,7 +444,7 @@ class DeterministicStrategyEngine:
     ) -> StrategySignal:
         """Helper to construct rejection signal with deterministic ID."""
         signal_id = self.compute_signal_id(direction, signal_ts)
-        return StrategySignal(
+        rejection_signal = StrategySignal(
             signal_id=signal_id,
             strategy_id=self.config.strategy_id,
             strategy_version=self.config.strategy_version,
@@ -462,3 +464,11 @@ class DeterministicStrategyEngine:
             config_hash=self.config_hash,
             data_version=1,
         )
+        self._notify_strategy_observability(rejection_signal)
+        return rejection_signal
+
+    def _notify_strategy_observability(self, signal: StrategySignal) -> None:
+        """Passive observability notification; never modifies signal or raises exceptions."""
+        from alphaforge.observability.hub import observe_strategy_decision
+
+        observe_strategy_decision(signal)
