@@ -12,10 +12,9 @@ from __future__ import annotations
 import threading
 import time
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from alphaforge.broker.models import BrokerOrderRequest, BrokerOrderType
+from alphaforge.broker.models import BrokerOrderType
 from alphaforge.broker.paper import PaperBroker
 from alphaforge.core.enums import (
     FuturesConfirmationStatus,
@@ -56,7 +55,7 @@ from alphaforge.paper_shadow.reconciler_adapter import PaperShadowReconciler
 from alphaforge.paper_shadow.shadow_comparator import ShadowComparator
 from alphaforge.risk.engine import RiskEngine
 from alphaforge.risk.enums import RiskDecisionState, TradeSide
-from alphaforge.risk.models import PortfolioRiskState, RiskConfig, RiskInput
+from alphaforge.risk.models import RiskConfig, RiskInput
 from alphaforge.security.kill_switch import KillSwitch
 from alphaforge.strategy.engine import DeterministicStrategyEngine
 
@@ -88,7 +87,8 @@ class PaperShadowEngine:
         self._git_commit = git_commit
         self._lock = threading.RLock()
         self._state = ForwardRunState.INITIALIZING
-        self._start_time = datetime.now(UTC)
+        self._start_time: datetime | None = None
+        self._last_processed_timestamp: datetime | None = None
 
         # 1. Market Data Governance
         self._validator = PaperMarketDataValidator(self._config)
@@ -111,10 +111,11 @@ class PaperShadowEngine:
             contract_multiplier=self._config.contract_multiplier,
         )
 
-        # 6. P&L Tracker
+        # 6. P&L Tracker (Initialized with dynamic starting capital)
         self._pnl_tracker = PaperPnLTracker(
             cost_config=self._config.cost_config,
             contract_multiplier=self._config.contract_multiplier,
+            initial_capital=self._config.initial_capital,
         )
 
         # 7. Order Lifecycle Router
@@ -207,6 +208,10 @@ class PaperShadowEngine:
         Enforces strict causal data visibility and fail-closed safety.
         """
         with self._lock:
+            if self._start_time is None:
+                self._start_time = candle.exchange_timestamp
+            self._last_processed_timestamp = candle.exchange_timestamp
+
             if self._state not in (ForwardRunState.RUNNING, ForwardRunState.INITIALIZING):
                 return MarketDataValidationResult(
                     is_valid=False,
@@ -243,7 +248,7 @@ class PaperShadowEngine:
                 self._candle_history[sym] = []
             self._candle_history[sym].append(strat_candle)
 
-            # Step 2: Evaluate Active Positions & Resting Bracket Orders First
+            # Step 2: Evaluate Active Positions & Resting Bracket Orders First (Authoritative SL/TP)
             self._evaluate_active_position_brackets(sym, candle)
 
             # Step 3: Check Kill Switch Safety Gate
@@ -264,7 +269,7 @@ class PaperShadowEngine:
             )
             eval_latency_ns = time.perf_counter_ns() - eval_start
 
-            # Step 5: Risk Engine Evaluation
+            # Step 5: Risk Engine Evaluation (Dynamic Evolving Portfolio State)
             risk_decision = None
             if signal.decision == StrategyDecision.ACCEPT:
                 self._signals_count += 1
@@ -287,6 +292,7 @@ class PaperShadowEngine:
                 trade_side = (
                     TradeSide.LONG if signal.direction == SignalDirection.LONG else TradeSide.SHORT
                 )
+                portfolio_state = self._pnl_tracker.get_portfolio_risk_state(self._current_candles)
                 risk_input = RiskInput(
                     signal_id=signal.signal_id,
                     symbol=sym,
@@ -296,16 +302,10 @@ class PaperShadowEngine:
                     contract_id=f"{sym}-FUT",
                     lot_size=self._config.lot_size,
                     contract_multiplier=self._config.contract_multiplier,
-                    account_equity=Decimal("1000000"),
-                    available_capital=Decimal("1000000"),
+                    account_equity=portfolio_state.account_equity,
+                    available_capital=portfolio_state.available_capital,
                     proposed_quantity=self._config.lot_size,
                     evaluation_timestamp=candle.exchange_timestamp,
-                )
-                portfolio_state = PortfolioRiskState(
-                    account_equity=Decimal("1000000"),
-                    available_capital=Decimal("1000000"),
-                    daily_starting_equity=Decimal("1000000"),
-                    current_equity=Decimal("1000000"),
                 )
                 risk_decision, _ = self._risk_engine.request_risk_reservation(
                     trade_input=risk_input,
@@ -325,7 +325,7 @@ class PaperShadowEngine:
                         )
                     )
 
-                    # Step 6: Order Routing & Execution
+                    # Step 6: Order Routing & Execution (Authoritative Entry Path)
                     if self._mode == PaperShadowMode.PAPER:
                         self._execute_paper_entry(
                             symbol=sym,
@@ -361,8 +361,8 @@ class PaperShadowEngine:
                     evaluation_latency_ns=eval_latency_ns,
                 )
 
-            # Step 8: Continuous Multi-Point Reconciliation
-            rec_result = self._reconciler.reconcile()
+            # Step 8: Continuous Multi-Point Reconciliation (Deterministic timestamp)
+            rec_result = self._reconciler.reconcile(timestamp=candle.exchange_timestamp)
             self._reconciliation_passes += 1
             if rec_result.mismatch_count > 0:
                 self._mismatches_count += rec_result.mismatch_count
@@ -377,7 +377,9 @@ class PaperShadowEngine:
         quantity: int,
         candle: MarketCandle,
     ) -> None:
-        """Route order and simulate paper entry execution."""
+        """
+        Route order and simulate paper entry execution through authoritative FSM & broker guard.
+        """
         # Create and route order through FSM & DeploymentBrokerGuard
         fsm_order, broker_order = self._order_router.create_and_route_order(
             strategy_id=signal.strategy_id,
@@ -388,6 +390,7 @@ class PaperShadowEngine:
             side=side,
             quantity=quantity,
             order_type=BrokerOrderType.MARKET,
+            timestamp=candle.exchange_timestamp,
         )
         self._orders_count += 1
 
@@ -418,8 +421,15 @@ class PaperShadowEngine:
             is_full_fill=True,
         )
 
-        # Update P&L Tracker
-        self._pnl_tracker.record_entry_fill(fill)
+        # Update P&L Tracker with authoritative stop and target levels from signal
+        self._pnl_tracker.record_entry_fill(
+            fill=fill,
+            stop_price=signal.stop_reference,
+            target_price=signal.target_reference,
+            strategy_id=signal.strategy_id,
+            strategy_version=signal.strategy_version,
+            signal_id=signal.signal_id,
+        )
 
         # Log to Authoritative Audit Ledger
         self._ledger.append(
@@ -440,29 +450,24 @@ class PaperShadowEngine:
         )
 
     def _evaluate_active_position_brackets(self, symbol: str, candle: MarketCandle) -> None:
-        """Evaluate resting stop-loss and take-profit orders for open positions."""
+        """
+        Evaluate resting stop-loss and take-profit orders for open positions.
+        Strictly uses authoritative strategy/signal exit levels — ZERO synthetic percentages.
+        Exit orders are routed through authoritative OrderRouter / FSM / DeploymentBrokerGuard.
+        """
         active_pos = self._pnl_tracker.get_active_positions().get(symbol)
         if active_pos is None:
             return
 
-        # Check resting brackets against latest candle
-        history = self._candle_history.get(symbol, [])
-        if not history:
+        # Use authoritative strategy-provided exit levels
+        stop_p = active_pos.stop_price
+        target_p = active_pos.target_price
+        if stop_p is None and target_p is None:
             return
 
-        stop_p = (
-            active_pos.entry_price * Decimal("0.98")
-            if active_pos.side == TradeSide.LONG
-            else active_pos.entry_price * Decimal("1.02")
-        )
-        target_p = (
-            active_pos.entry_price * Decimal("1.04")
-            if active_pos.side == TradeSide.LONG
-            else active_pos.entry_price * Decimal("0.96")
-        )
-
+        exit_signal_id = f"EXIT-{active_pos.entry_order_id}"
         bracket_res = self._fill_sim.evaluate_resting_brackets(
-            order_id=f"EXIT-{active_pos.entry_order_id}",
+            order_id=exit_signal_id,
             symbol=symbol,
             side=active_pos.side,
             quantity=active_pos.quantity,
@@ -473,6 +478,37 @@ class PaperShadowEngine:
 
         if bracket_res.triggered and bracket_res.fill is not None:
             fill = bracket_res.fill
+
+            # Route exit order through authoritative OrderRouter / FSM / DeploymentBrokerGuard
+            exit_side = TradeSide.SHORT if active_pos.side == TradeSide.LONG else TradeSide.LONG
+            fsm_exit_order, broker_exit_order = self._order_router.create_and_route_order(
+                strategy_id=active_pos.strategy_id or "AF_STRAT",
+                strategy_version=active_pos.strategy_version or "1.0.0",
+                symbol=symbol,
+                role=OrderRole.EXIT,
+                signal_id=exit_signal_id,
+                side=exit_side,
+                quantity=fill.filled_qty,
+                order_type=BrokerOrderType.MARKET,
+                timestamp=candle.exchange_timestamp,
+            )
+            self._orders_count += 1
+
+            # Update PaperBroker position if applicable
+            if isinstance(self._raw_broker, PaperBroker):
+                self._raw_broker.simulate_full_fill(
+                    client_order_id=fsm_exit_order.order_id,
+                    fill_price=fill.effective_price,
+                )
+
+            # Update FSM state machine: ACKNOWLEDGED -> FILLED
+            self._order_router.record_fill_transition(
+                client_order_id=fsm_exit_order.order_id,
+                fill_quantity=fill.filled_qty,
+                fill_price=fill.effective_price,
+                is_full_fill=True,
+            )
+
             # Close active position in PnL tracker
             trade = self._pnl_tracker.record_exit_fill(
                 fill=fill,
@@ -480,29 +516,13 @@ class PaperShadowEngine:
             )
             self._fills_count += 1
 
-            # Update PaperBroker position if applicable
-            if isinstance(self._raw_broker, PaperBroker):
-                self._raw_broker.submit_order(
-                    BrokerOrderRequest(
-                        client_order_id=fill.order_id,
-                        symbol=symbol,
-                        side=OrderSide.SELL if active_pos.side == TradeSide.LONG else OrderSide.BUY,
-                        quantity=fill.filled_qty,
-                        role=OrderRole.EXIT,
-                    )
-                )
-                self._raw_broker.simulate_full_fill(
-                    client_order_id=fill.order_id,
-                    fill_price=fill.effective_price,
-                )
-
             # Record in Audit Ledger
             self._ledger.append(
                 event_type=AuditEventType.TRADE_CLOSED,
                 entity_type="POSITION",
                 entity_id=trade.trade_id,
                 correlation_id=active_pos.entry_order_id,
-                causation_id=fill.order_id,
+                causation_id=fsm_exit_order.order_id,
                 payload={
                     "symbol": symbol,
                     "gross_pnl": str(trade.gross_pnl),
@@ -513,17 +533,21 @@ class PaperShadowEngine:
             )
 
     def shutdown(self) -> ForwardRunReport:
-        """Execute clean fail-closed shutdown and generate final ForwardRunReport."""
+        """
+        Execute clean fail-closed shutdown and generate final ForwardRunReport
+        with deterministic timestamps.
+        """
         with self._lock:
             self._state = ForwardRunState.STOPPED
-            end_time = datetime.now(UTC)
+            start_time = self._start_time or datetime(2026, 9, 12, 9, 15, tzinfo=UTC)
+            end_time = self._last_processed_timestamp or start_time
             metrics = self._pnl_tracker.get_metrics(self._current_candles)
             config_hash = self._config.compute_config_hash()
 
             report = ForwardRunReport(
-                run_id=f"RUN-{self._mode.value}-{int(self._start_time.timestamp())}",
+                run_id=f"RUN-{self._mode.value}-{int(start_time.timestamp())}",
                 mode=self._mode,
-                start_time=self._start_time,
+                start_time=start_time,
                 end_time=end_time,
                 total_candles_processed=self._processed_candles_count,
                 total_signals_generated=self._signals_count,

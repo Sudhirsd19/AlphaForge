@@ -106,6 +106,7 @@ class PaperShadowOrderRouter:
         order_type: BrokerOrderType = BrokerOrderType.MARKET,
         limit_price: Decimal | None = None,
         trigger_price: Decimal | None = None,
+        timestamp: datetime | None = None,
     ) -> tuple[Order, BrokerOrder | None]:
         """
         Create, register, and route an order intent through the authoritative FSM.
@@ -137,7 +138,7 @@ class PaperShadowOrderRouter:
 
             # 3. Initialize Order State Machine
             order_side = OrderSide.BUY if side == TradeSide.LONG else OrderSide.SELL
-            now = datetime.now(UTC)
+            now = timestamp or datetime.now(UTC)
             fsm = OrderStateMachine(
                 order_id=client_order_id,
                 symbol=symbol,

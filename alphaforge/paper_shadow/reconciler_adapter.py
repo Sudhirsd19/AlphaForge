@@ -51,14 +51,14 @@ class PaperShadowReconciler:
         self._cycle_counter: int = 0
         self._last_result: ReconciliationResult | None = None
 
-    def reconcile(self) -> ReconciliationResult:
+    def reconcile(self, timestamp: datetime | None = None) -> ReconciliationResult:
         """
         Execute full continuous multi-entity reconciliation cycle.
         Returns ReconciliationResult detailing alignment or detected discrepancies.
         """
         with self._lock:
             self._cycle_counter += 1
-            now = datetime.now(UTC)
+            now = timestamp or datetime.now(UTC)
             order_records: list[OrderReconciliationRecord] = []
             pos_records: list[PositionReconciliationRecord] = []
             mismatches: list[str] = []

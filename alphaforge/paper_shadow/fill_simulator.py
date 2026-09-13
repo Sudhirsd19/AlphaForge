@@ -194,14 +194,17 @@ class DeterministicFillSimulator:
         symbol: str,
         side: TradeSide,
         quantity: int,
-        stop_price: Decimal,
-        target_price: Decimal,
+        stop_price: Decimal | None,
+        target_price: Decimal | None,
         candle: MarketCandle,
     ) -> BracketEvaluationResult:
         """
         Evaluate resting stop-loss and take-profit protection against candle range.
         Enforces conservative same-bar SL/TP ambiguity resolution (SL triggered first).
         """
+        if stop_price is None and target_price is None:
+            return BracketEvaluationResult(triggered=False, fill=None, bracket_type=None)
+
         dec_qty = Decimal(quantity)
         high = candle.high
         low = candle.low
@@ -211,11 +214,15 @@ class DeterministicFillSimulator:
         tp_hit = False
 
         if side == TradeSide.LONG:
-            sl_hit = low <= stop_price
-            tp_hit = high >= target_price
+            if stop_price is not None:
+                sl_hit = low <= stop_price
+            if target_price is not None:
+                tp_hit = high >= target_price
         else:  # SHORT
-            sl_hit = high >= stop_price
-            tp_hit = low <= target_price
+            if stop_price is not None:
+                sl_hit = high >= stop_price
+            if target_price is not None:
+                tp_hit = low <= target_price
 
         if not sl_hit and not tp_hit:
             return BracketEvaluationResult(triggered=False, fill=None, bracket_type=None)
@@ -229,6 +236,7 @@ class DeterministicFillSimulator:
             execute_sl = False
 
         if execute_sl:
+            assert stop_price is not None
             # Conservative Stop-Loss execution with gap handling
             if side == TradeSide.LONG:
                 ref_exit = open_p if open_p < stop_price else stop_price
@@ -266,6 +274,7 @@ class DeterministicFillSimulator:
             return BracketEvaluationResult(triggered=True, fill=fill, bracket_type="STOP_LOSS")
 
         else:
+            assert target_price is not None
             # Take-Profit execution
             ref_exit = target_price
             effective_exit = calculate_effective_price(

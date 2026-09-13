@@ -9,7 +9,6 @@ subsequent market outcomes with ZERO broker order submissions.
 from __future__ import annotations
 
 import threading
-from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -71,7 +70,7 @@ class ShadowComparator:
         with self._lock:
             self._obs_counter += 1
             obs_id = f"SHADOW-OBS-{self._obs_counter:06d}"
-            now = datetime.now(UTC)
+            now = candle.exchange_timestamp
 
             signal_dec = signal.decision.value if signal is not None else "NO_SIGNAL"
             signal_dir = signal.direction.value if signal is not None else "FLAT"

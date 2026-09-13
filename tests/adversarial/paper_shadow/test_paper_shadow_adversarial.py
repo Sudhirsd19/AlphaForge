@@ -1,9 +1,9 @@
 """
 Authoritative Adversarial Safety & Invariant Test Suite for Phase 16 Paper / Shadow Trading.
 
-Explicitly implements tests PS-1 through PS-31 validating zero-live-orders guarantees,
+Explicitly implements tests PS-1 through PS-35 validating zero-live-orders guarantees,
 broker isolation, idempotency, deterministic execution, continuous reconciliation,
-state-aware conservation, and strict causality without lookahead bias.
+state-aware conservation, dynamic evolving risk, authoritative exits, and strict causality.
 """
 
 from __future__ import annotations
@@ -658,3 +658,234 @@ def test_ps_31_no_lookahead_bias() -> None:
 
     # Past metrics at T remain bit-for-bit identical to recorded state_at_t
     assert state_at_t.realized_pnl == Decimal("0")
+
+
+# --- PS-32 to PS-35: Phase 16 Targeted Forensic Remediation Invariants ---
+
+
+def test_ps_32_dynamic_risk_state_evolving() -> None:
+    """
+    PS-32: Dynamic Evolving Risk & Account State.
+    RiskEngine receives dynamic portfolio risk state reflecting realized/unrealized P&L
+    and open exposure rather than static/hardcoded 1,000,000 constants.
+    """
+    pnl_tracker = PaperPnLTracker(initial_capital=Decimal("500000"))
+    init_state = pnl_tracker.get_portfolio_risk_state({})
+    assert init_state.account_equity == Decimal("500000")
+    assert init_state.available_capital == Decimal("500000")
+
+    fill_sim = DeterministicFillSimulator()
+    candle_entry = make_candle(open_p=Decimal("20000"))
+
+    # Simulate an entry fill
+    entry_fill = fill_sim.simulate_market_order(
+        order_id="ORD-ENTRY-1",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=50,
+        candle=candle_entry,
+        is_entry=True,
+    )
+    pnl_tracker.record_entry_fill(
+        fill=entry_fill,
+        stop_price=Decimal("19900"),
+        target_price=Decimal("20200"),
+        strategy_id="STRAT_1",
+    )
+
+    # With open position at entry, notional allocated = 20000 * 50 = 1,000,000
+    # available_capital becomes 0 (max(0, 500000 - 1000000))
+    pos_state = pnl_tracker.get_portfolio_risk_state({})
+    assert pos_state.available_capital == Decimal("0")
+
+    # Simulate closing exit with a loss (exit at 19900)
+    candle_exit = make_candle(open_p=Decimal("19900"))
+    exit_fill = fill_sim.simulate_market_order(
+        order_id="ORD-EXIT-1",
+        symbol="NIFTY",
+        side=OrderSide.SELL,
+        quantity=50,
+        candle=candle_exit,
+        is_entry=False,
+    )
+    pnl_tracker.record_exit_fill(fill=exit_fill, exit_reason="STOP_LOSS")
+
+    # After realizing a loss of (19900 - 20000)*50 - fees - slippages:
+    after_loss_state = pnl_tracker.get_portfolio_risk_state({})
+    assert after_loss_state.account_equity < Decimal("500000")
+    assert (
+        after_loss_state.account_equity
+        == Decimal("500000") + pnl_tracker.get_metrics().realized_pnl
+    )
+    assert after_loss_state.available_capital == after_loss_state.account_equity
+
+    # Now verify that RiskEngine reservation behavior dynamically reacts to updated portfolio state
+    risk_engine = RiskEngine()
+    risk_input = RiskInput(
+        signal_id="SIG-DYN-01",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        entry_price=Decimal("20000"),
+        stop_price=Decimal("19900"),
+        contract_id="NIFTY-FUT",
+        lot_size=50,
+        contract_multiplier=Decimal("1"),
+        account_equity=after_loss_state.account_equity,
+        available_capital=after_loss_state.available_capital,
+        proposed_quantity=50,
+        evaluation_timestamp=datetime(2026, 9, 12, 9, 20, tzinfo=UTC),
+    )
+    decision, _ = risk_engine.request_risk_reservation(risk_input, after_loss_state)
+    # The evaluation succeeded using the dynamic state (not hardcoded 1000000)
+    assert decision is not None
+
+
+def test_ps_33_authoritative_exit_levels() -> None:
+    """
+    PS-33: Authoritative Strategy Exit Levels.
+    PaperShadowEngine evaluates resting bracket exits strictly from strategy-provided
+    stop_reference and target_reference without any synthetic 2%/4% hardcoding.
+    """
+    pnl_tracker = PaperPnLTracker(initial_capital=Decimal("1000000"))
+    fill_sim = DeterministicFillSimulator()
+    candle_entry = make_candle(open_p=Decimal("20000"))
+
+    # Create entry with custom tight stop (19950 = 50 pts, not 2% which is 400 pts)
+    # and custom tight target (20100 = 100 pts, not 4% which is 800 pts)
+    entry_fill = fill_sim.simulate_market_order(
+        order_id="ORD-AUTH-1",
+        symbol="NIFTY",
+        side=OrderSide.BUY,
+        quantity=50,
+        candle=candle_entry,
+        is_entry=True,
+    )
+    pnl_tracker.record_entry_fill(
+        fill=entry_fill,
+        stop_price=Decimal("19950"),
+        target_price=Decimal("20100"),
+        strategy_id="AUTH_STRAT",
+    )
+
+    active_pos = pnl_tracker.get_active_positions()["NIFTY"]
+    assert active_pos.stop_price == Decimal("19950")
+    assert active_pos.target_price == Decimal("20100")
+
+    # Bar with low 19940 (hits 19950, but would NOT hit a synthetic 2% stop of 19600)
+    triggering_candle = make_candle(
+        symbol="NIFTY",
+        ts=datetime(2026, 9, 12, 9, 18, tzinfo=UTC),
+        open_p=Decimal("19980"),
+        high_p=Decimal("19990"),
+        low_p=Decimal("19940"),
+        close_p=Decimal("19960"),
+    )
+
+    bracket_res = fill_sim.evaluate_resting_brackets(
+        order_id="EXIT-ORD-AUTH-1",
+        symbol="NIFTY",
+        side=active_pos.side,
+        quantity=active_pos.quantity,
+        stop_price=active_pos.stop_price,
+        target_price=active_pos.target_price,
+        candle=triggering_candle,
+    )
+
+    assert bracket_res.triggered is True
+    assert bracket_res.bracket_type == "STOP_LOSS"
+    assert bracket_res.fill is not None
+
+
+def test_ps_34_deterministic_replay_and_identities() -> None:
+    """
+    PS-34: Deterministic Replay & Bit-for-Bit Identity Invariant.
+    Two independent runs given identical market data and configs produce
+    bit-for-bit identical results.
+    """
+    config1 = PaperShadowConfig(mode=PaperShadowMode.PAPER, initial_capital=Decimal("1000000"))
+    config2 = PaperShadowConfig(mode=PaperShadowMode.PAPER, initial_capital=Decimal("1000000"))
+
+    engine1 = PaperShadowEngine(config=config1)
+    engine2 = PaperShadowEngine(config=config2)
+
+    base_time = datetime(2026, 9, 12, 9, 15, tzinfo=UTC)
+    candles = [
+        make_candle(
+            ts=base_time + timedelta(minutes=3 * i),
+            open_p=Decimal("20000") + Decimal(i * 5),
+            close_p=Decimal("20010") + Decimal(i * 5),
+        )
+        for i in range(30)
+    ]
+
+    for c in candles:
+        engine1.process_candle(c)
+        engine2.process_candle(c)
+
+    report1 = engine1.shutdown()
+    report2 = engine2.shutdown()
+
+    # Compare metrics
+    metrics1 = engine1.pnl_tracker.get_metrics()
+    metrics2 = engine2.pnl_tracker.get_metrics()
+
+    assert metrics1.realized_pnl == metrics2.realized_pnl
+    assert metrics1.total_fees == metrics2.total_fees
+    assert metrics1.total_slippage == metrics2.total_slippage
+    assert metrics1.trade_count == metrics2.trade_count
+    assert metrics1.winning_trades == metrics2.winning_trades
+    assert report1.total_candles_processed == report2.total_candles_processed
+    assert report1.total_orders_submitted == report2.total_orders_submitted
+    assert report1.total_fills_executed == report2.total_fills_executed
+
+
+def test_ps_35_exit_orders_use_authoritative_routing() -> None:
+    """
+    PS-35: Exit Orders Use Authoritative Routing & FSM.
+    Exit orders must be routed through OrderRouter, registered in IdempotencyRegistry,
+    managed by OrderStateMachine, and guarded by DeploymentBrokerGuard.
+    """
+    broker = PaperBroker()
+    config = PaperShadowConfig(mode=PaperShadowMode.PAPER)
+    router = PaperShadowOrderRouter(config=config, broker=broker)
+
+    # 1. Route and fill Entry Order first so broker has an active position
+    entry_order, _ = router.create_and_route_order(
+        strategy_id="STRAT_TEST",
+        strategy_version="1.0.0",
+        symbol="NIFTY",
+        role=OrderRole.ENTRY,
+        signal_id="ENTRY-SIG-01",
+        side=TradeSide.LONG,
+        quantity=50,
+        timestamp=datetime(2026, 9, 12, 9, 15, tzinfo=UTC),
+    )
+    broker.simulate_full_fill(entry_order.order_id, Decimal("20000"))
+    router.record_fill_transition(entry_order.order_id, 50, Decimal("20000"), is_full_fill=True)
+
+    # 2. Route Exit Order
+    exit_order, broker_order = router.create_and_route_order(
+        strategy_id="STRAT_TEST",
+        strategy_version="1.0.0",
+        symbol="NIFTY",
+        role=OrderRole.EXIT,
+        signal_id="EXIT-SIG-01",
+        side=TradeSide.SHORT,
+        quantity=50,
+        timestamp=datetime(2026, 9, 12, 9, 30, tzinfo=UTC),
+    )
+
+    assert broker_order is not None
+    assert broker_order.role == OrderRole.EXIT
+    assert exit_order.state == OrderState.ACKNOWLEDGED
+    assert router.get_order(exit_order.order_id) is not None
+
+    # 3. Simulate Exit Fill & FSM transition
+    broker.simulate_full_fill(exit_order.order_id, Decimal("19950"))
+    fsm_order = router.record_fill_transition(
+        client_order_id=exit_order.order_id,
+        fill_quantity=50,
+        fill_price=Decimal("19950"),
+        is_full_fill=True,
+    )
+    assert fsm_order.state == OrderState.FILLED

@@ -70,6 +70,11 @@ class PaperShadowConfig(BaseModel):
         gt=0,
         description="Standard trade lot size",
     )
+    initial_capital: Decimal = Field(
+        default=Decimal("1000000"),
+        gt=Decimal("0"),
+        description="Initial paper trading starting capital",
+    )
     simulated_latency_ms: int = Field(
         default=0,
         ge=0,

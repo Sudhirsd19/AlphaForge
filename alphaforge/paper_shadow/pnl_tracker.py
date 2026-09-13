@@ -22,6 +22,7 @@ from alphaforge.paper_shadow.models import (
     PaperPerformanceMetrics,
     PaperTradeRecord,
 )
+from alphaforge.risk.models import PortfolioRiskState
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -43,6 +44,11 @@ class ActivePositionState:
         entry_order_id: str,
         entry_timestamp: datetime,
         multiplier: Decimal = Decimal("1"),
+        stop_price: Decimal | None = None,
+        target_price: Decimal | None = None,
+        strategy_id: str = "",
+        strategy_version: str = "",
+        signal_id: str = "",
     ) -> None:
         self.symbol = symbol
         self.side = side
@@ -51,6 +57,11 @@ class ActivePositionState:
         self.entry_order_id = entry_order_id
         self.entry_timestamp = entry_timestamp
         self.multiplier = multiplier
+        self.stop_price = stop_price
+        self.target_price = target_price
+        self.strategy_id = strategy_id
+        self.strategy_version = strategy_version
+        self.signal_id = signal_id
         self.accumulated_entry_fee = Decimal("0")
         self.accumulated_entry_slippage = Decimal("0")
 
@@ -90,8 +101,16 @@ class PaperPnLTracker:
     def multiplier(self) -> Decimal:
         return self._multiplier
 
-    def record_entry_fill(self, fill: SimulatedFill) -> None:
-        """Record an entry fill and update active position."""
+    def record_entry_fill(
+        self,
+        fill: SimulatedFill,
+        stop_price: Decimal | None = None,
+        target_price: Decimal | None = None,
+        strategy_id: str = "",
+        strategy_version: str = "",
+        signal_id: str = "",
+    ) -> None:
+        """Record an entry fill and update active position with authoritative exit levels."""
         with self._lock:
             sym = fill.symbol
             existing = self._active_positions.get(sym)
@@ -105,6 +124,11 @@ class PaperPnLTracker:
                     entry_order_id=fill.order_id,
                     entry_timestamp=fill.timestamp,
                     multiplier=self._multiplier,
+                    stop_price=stop_price,
+                    target_price=target_price,
+                    strategy_id=strategy_id,
+                    strategy_version=strategy_version,
+                    signal_id=signal_id,
                 )
                 pos.accumulated_entry_fee += fill.fee
                 pos.accumulated_entry_slippage += fill.slippage_loss
@@ -123,6 +147,10 @@ class PaperPnLTracker:
 
                 existing.quantity = total_qty
                 existing.entry_price = avg_price
+                if stop_price is not None:
+                    existing.stop_price = stop_price
+                if target_price is not None:
+                    existing.target_price = target_price
                 existing.accumulated_entry_fee += fill.fee
                 existing.accumulated_entry_slippage += fill.slippage_loss
 
@@ -300,6 +328,35 @@ class PaperPnLTracker:
         """Return shallow copy of active positions."""
         with self._lock:
             return dict(self._active_positions)
+
+    def get_portfolio_risk_state(
+        self, current_candles: dict[str, MarketCandle] | None = None
+    ) -> PortfolioRiskState:
+        """
+        Generate dynamic, authoritative PortfolioRiskState from evolving paper/shadow state.
+        Never returns a static or hardcoded constant equity.
+        """
+        with self._lock:
+            unrealized = (
+                self.compute_unrealized_pnl(current_candles)
+                if current_candles is not None
+                else Decimal("0")
+            )
+            current_equity = self._initial_capital + self._realized_pnl + unrealized
+            notional_allocated = sum(
+                (
+                    pos.entry_price * Decimal(pos.quantity) * pos.multiplier
+                    for pos in self._active_positions.values()
+                ),
+                Decimal("0"),
+            )
+            available_capital = max(Decimal("0"), current_equity - notional_allocated)
+            return PortfolioRiskState(
+                account_equity=current_equity,
+                available_capital=available_capital,
+                daily_starting_equity=self._initial_capital,
+                current_equity=current_equity,
+            )
 
     def reset(self) -> None:
         """Reset P&L tracker state."""
