@@ -224,3 +224,29 @@ class ImpossibleFillError(BacktestError):
     """Raised when an order fill is physically or temporally impossible."""
 
     pass
+
+
+# Phase 11 Replay Engine Exceptions
+class ReplayError(AlphaForgeError):
+    """Base exception for all replay engine operations and failures."""
+
+    pass
+
+
+class ReplayIntegrityError(ReplayError):
+    """Raised when source artifacts or replayed events violate cryptographic, ordering, or schema integrity."""
+
+    pass
+
+
+class ReplayDivergenceError(ReplayError):
+    """Raised when replay state or hash diverges from source artifact."""
+
+    pass
+
+
+class ReplayStateTransitionError(ReplayError):
+    """Raised when an invalid state transition occurs during replay."""
+
+    pass
+
