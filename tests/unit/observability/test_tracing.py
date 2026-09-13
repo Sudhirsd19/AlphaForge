@@ -23,6 +23,7 @@ from alphaforge.observability.events import (
     ObservabilityCategory,
     ObservabilityEvent,
     OrderEventType,
+    StrategyEventType,
 )
 from alphaforge.observability.sinks import InMemoryObservabilitySink, SafeObservabilityDispatcher
 
@@ -300,3 +301,70 @@ def test_adv_obs_5_multiple_partial_fills() -> None:
     assert fill_ids == ["FILL-01", "FILL-02", "FILL-03"]
     # All share the same correlation chain
     assert all(e.correlation_id == corr for e in recorded_fills)
+
+
+def test_same_correlation_concurrent_async_tasks_distinct_event_identities() -> None:
+    """
+    Verify:
+    same correlation_id
+    + parallel child tasks
+    -> distinct event identities.
+
+    Also proves deterministic reconstruction: replaying the identical asynchronous
+    workflow from a clean context state reproduces the exact same sequence ordinals
+    and event identities.
+    """
+    TraceContext.clear()
+    shared_corr = "CORR-ASYNC-SHARED-999"
+
+    async def child_task(task_index: int) -> ObservabilityEvent:
+        # Cooperative yield to interleave execution
+        await asyncio.sleep(0)
+        return ObservabilityEvent(
+            event_type=StrategyEventType.SIGNAL_GENERATED.value,
+            category=ObservabilityCategory.STRATEGY,
+            symbol="NIFTY",
+            message=f"Child task {task_index} evaluating signal",
+        )
+
+    async def run_parallel_workflow() -> list[ObservabilityEvent]:
+        with trace_span("parent_trading_workflow", correlation_id=shared_corr):
+            # Spawn parallel child tasks under the same parent correlation context
+            tasks = [asyncio.create_task(child_task(i)) for i in range(5)]
+            return await asyncio.gather(*tasks)
+
+    # Execution Run 1
+    events_run_1 = asyncio.run(run_parallel_workflow())
+
+    # 1. Verify same correlation_id inherited across all child tasks
+    for ev in events_run_1:
+        assert ev.correlation_id == shared_corr
+
+    # 2. Verify all sequence ordinals are distinct (1, 2, 3, 4, 5)
+    for ev in events_run_1:
+        assert isinstance(ev.sequence, int)
+    seqs_run_1 = [ev.sequence for ev in events_run_1 if ev.sequence is not None]
+    assert len(seqs_run_1) == 5
+    assert len(set(seqs_run_1)) == 5
+    assert sorted(seqs_run_1) == [1, 2, 3, 4, 5]
+
+    # 3. Verify all event IDs are pairwise distinct
+    event_ids_run_1 = [ev.event_id for ev in events_run_1]
+    assert len(set(event_ids_run_1)) == 5
+
+    # 4. Verify deterministic reconstruction:
+    # Reset context and re-run identical parallel workflow
+    TraceContext.clear()
+    events_run_2 = asyncio.run(run_parallel_workflow())
+
+    seqs_run_2 = [ev.sequence for ev in events_run_2]
+    event_ids_run_2 = [ev.event_id for ev in events_run_2]
+
+    assert seqs_run_2 == seqs_run_1
+    assert event_ids_run_2 == event_ids_run_1
+
+    # 5. Verify serialized round-trip reconstruction retains bit-exact IDs
+    for ev in events_run_1:
+        reconstructed = ObservabilityEvent(**ev.to_dict())
+        assert reconstructed.event_id == ev.event_id
+        assert reconstructed.sequence == ev.sequence

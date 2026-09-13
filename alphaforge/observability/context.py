@@ -7,6 +7,7 @@ using contextvars, supporting nested spans, automatic token reset, and cross-tas
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING
@@ -17,9 +18,8 @@ if TYPE_CHECKING:
 _current_correlation_id: ContextVar[str | None] = ContextVar("correlation_id", default=None)
 _current_causation_id: ContextVar[str | None] = ContextVar("causation_id", default=None)
 _current_span_name: ContextVar[str | None] = ContextVar("span_name", default=None)
-_correlation_sequences: ContextVar[dict[str, int] | None] = ContextVar(
-    "correlation_sequences", default=None
-)
+_correlation_lock = threading.Lock()
+_correlation_sequences: dict[str, int] = {}
 
 
 class TraceContext:
@@ -29,7 +29,8 @@ class TraceContext:
     Invariants:
     - correlation_id represents the unbroken end-to-end trading lifecycle (e.g. signal to fill).
     - causation_id represents the immediate preceding causal event identifier.
-    - All storage uses contextvars to ensure thread-safety and async task isolation.
+    - Causal context propagation uses contextvars for async task and thread inheritance.
+    - Intra-correlation sequence counters use a synchronized registry across child tasks.
     """
 
     @classmethod
@@ -51,28 +52,30 @@ class TraceContext:
     def next_sequence(cls, correlation_id: str | None = None) -> int:
         """
         Return the next monotonic sequence ordinal for the given correlation chain.
-        Thread-safe and async-safe via ContextVar.
+        Thread-safe and async-safe across concurrent tasks and threads sharing a correlation.
         Guarantees deterministic, collision-free event ordering.
         """
         cid = correlation_id or cls.get_correlation_id() or "__root__"
-        curr_map = _correlation_sequences.get()
-        curr = dict(curr_map) if curr_map is not None else {}
-        seq = curr.get(cid, 0) + 1
-        curr[cid] = seq
-        _correlation_sequences.set(curr)
-        return seq
+        with _correlation_lock:
+            seq = _correlation_sequences.get(cid, 0) + 1
+            _correlation_sequences[cid] = seq
+            return seq
+
+    @classmethod
+    def get_current_sequence(cls, correlation_id: str | None = None) -> int:
+        """Return the current sequence ordinal for the correlation chain without incrementing."""
+        cid = correlation_id or cls.get_correlation_id() or "__root__"
+        with _correlation_lock:
+            return _correlation_sequences.get(cid, 0)
 
     @classmethod
     def reset_sequence(cls, correlation_id: str | None = None) -> None:
         """Reset sequence ordinal for a specific correlation ID or all correlations if None."""
-        if correlation_id is None:
-            _correlation_sequences.set(None)
-        else:
-            curr_map = _correlation_sequences.get()
-            if curr_map is not None:
-                curr = dict(curr_map)
-                curr.pop(correlation_id, None)
-                _correlation_sequences.set(curr)
+        with _correlation_lock:
+            if correlation_id is None:
+                _correlation_sequences.clear()
+            else:
+                _correlation_sequences.pop(correlation_id, None)
 
     @classmethod
     def set_context(
@@ -95,11 +98,12 @@ class TraceContext:
 
     @classmethod
     def clear(cls) -> None:
-        """Reset all trace context variables to None."""
+        """Reset all trace context variables to None and clear all correlation sequences."""
         _current_correlation_id.set(None)
         _current_causation_id.set(None)
         _current_span_name.set(None)
-        _correlation_sequences.set(None)
+        with _correlation_lock:
+            _correlation_sequences.clear()
 
 
 @contextmanager

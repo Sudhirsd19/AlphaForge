@@ -351,7 +351,7 @@ OBS22 proves the core non-interference invariant:
 
 ## 23. Test Matrix
 
-The Phase 14 test suite consists of 40 dedicated automated tests across 8 test suites:
+The Phase 14 test suite consists of 41 dedicated automated tests across 8 test suites:
 
 | Suite | Test ID | Description | Result |
 | :--- | :--- | :--- | :--- |
@@ -375,6 +375,7 @@ The Phase 14 test suite consists of 40 dedicated automated tests across 8 test s
 | | `ADV-OBS-5` | Individual traceability of multi-step partial fills | PASS |
 | | `ADV-OBS-6` | Order timeout followed by retry without observability triggering action | PASS |
 | | `ContextVars` | Concurrency isolation across asynchronous tasks and threads | PASS |
+| | `Concurrent Async` | Same-correlation parallel child tasks yield distinct event identities | PASS |
 | `test_diagnostics.py`| `OBS9` | Risk rejection diagnostic logging with precise rule reasons | PASS |
 | | `OBS10` | Strategy signal decision diagnostic explainability | PASS |
 | | `OBS11` | Market data gap and anomaly event recording | PASS |
