@@ -4,7 +4,9 @@ Defines immutable Pydantic models for configuration, trade records, equity snaps
 performance metrics, quant gates, and comprehensive backtest results.
 """
 
-from collections.abc import Mapping
+import hashlib
+import json
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -16,6 +18,51 @@ from alphaforge.backtest.datasets import DatasetMetadata
 from alphaforge.core.exceptions import BacktestValidationError
 from alphaforge.cost.models import CostConfig
 from alphaforge.risk.enums import TradeSide
+
+
+class TraceEventType(StrEnum):
+    """Authoritative discrete simulation event types for execution tracing."""
+
+    BAR_PROCESSED = "BAR_PROCESSED"
+    SIGNAL_GENERATED = "SIGNAL_GENERATED"
+    RISK_EVALUATED = "RISK_EVALUATED"
+    ORDER_SIMULATED = "ORDER_SIMULATED"
+    FILL_SIMULATED = "FILL_SIMULATED"
+    TRADE_CLOSED = "TRADE_CLOSED"
+    EQUITY_SNAPSHOT = "EQUITY_SNAPSHOT"
+
+
+class TraceEntry(BaseModel):
+    """
+    Immutable historical execution trace entry capturing real discrete simulation events.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    timestamp: datetime = Field(description="Timezone-aware UTC timestamp of event")
+    event_type: TraceEventType = Field(description="Discrete simulation event type")
+    entity_id: str = Field(description="Causal domain entity identifier")
+    symbol: str | None = Field(default=None, description="Market symbol if applicable")
+    side: TradeSide | None = Field(default=None, description="TradeSide if applicable")
+    quantity: int | None = Field(default=None, description="Order/fill quantity if applicable")
+    price: Decimal | None = Field(
+        default=None, description="Reference or trigger price if applicable"
+    )
+    effective_price: Decimal | None = Field(
+        default=None, description="Effective execution fill price"
+    )
+    reason: str | None = Field(default=None, description="Decision or execution reason")
+    state: str | None = Field(default=None, description="Order, risk, or validation state")
+    metadata: Mapping[str, Any] = Field(
+        default_factory=dict, description="Deterministic event telemetry"
+    )
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_utc(cls, v: datetime) -> datetime:
+        if v.tzinfo is None or v.utcoffset() != UTC.utcoffset(v):
+            raise BacktestValidationError(f"Timestamp must be UTC timezone-aware: {v}")
+        return v
 
 
 class FinalPositionPolicy(StrEnum):
@@ -346,3 +393,181 @@ class BacktestResult(BaseModel):
     completion_status: str = Field(
         default="COMPLETED", description="Run status: COMPLETED or FAILED"
     )
+    result_canonical_hash: str | None = Field(
+        default=None, description="Deterministic SHA-256 fingerprint of complete result"
+    )
+    trace_canonical_hash: str | None = Field(
+        default=None, description="Deterministic SHA-256 fingerprint of execution trace"
+    )
+    execution_trace: tuple[TraceEntry, ...] = Field(
+        default_factory=tuple, description="Deterministic execution event trace"
+    )
+
+    @property
+    def trace(self) -> tuple[TraceEntry, ...]:
+        return self.execution_trace
+
+
+def _canonicalize_value(val: Any) -> Any:
+    """Helper to convert nested values into deterministic JSON-serializable primitives."""
+    if isinstance(val, datetime):
+        return val.astimezone(UTC).isoformat()
+    if isinstance(val, Decimal):
+        return str(val)
+    if isinstance(val, StrEnum):
+        return val.value
+    if isinstance(val, Mapping):
+        return {str(k): _canonicalize_value(v) for k, v in sorted(val.items())}
+    if isinstance(val, (list, tuple)):
+        return [_canonicalize_value(x) for x in val]
+    return val
+
+
+def canonicalize_execution_trace(trace: Sequence[TraceEntry]) -> str:
+    """
+    Produce stable, deterministic JSON string representation of an execution trace.
+    Guarantees stable event ordering, deterministic field ordering, UTC ISO timestamps,
+    and stringified Decimals.
+    """
+    items: list[dict[str, Any]] = []
+    for e in trace:
+        entry_dict = {
+            "timestamp": e.timestamp.astimezone(UTC).isoformat(),
+            "event_type": e.event_type.value,
+            "entity_id": e.entity_id,
+            "symbol": e.symbol,
+            "side": e.side.value if e.side is not None else None,
+            "quantity": e.quantity,
+            "price": str(e.price) if e.price is not None else None,
+            "effective_price": str(e.effective_price) if e.effective_price is not None else None,
+            "reason": e.reason,
+            "state": e.state,
+            "metadata": {str(k): _canonicalize_value(v) for k, v in sorted(e.metadata.items())},
+        }
+        items.append(entry_dict)
+    return json.dumps(items, sort_keys=True, separators=(",", ":"))
+
+
+def compute_trace_canonical_hash(trace: Sequence[TraceEntry]) -> str:
+    """Compute deterministic SHA-256 fingerprint of canonical execution trace."""
+    canonical = canonicalize_execution_trace(trace)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def canonicalize_backtest_result(result: BacktestResult) -> str:
+    """
+    Produce stable, deterministic JSON string representation of the complete BacktestResult,
+    strictly excluding self-referential hash fields (result_canonical_hash, trace_canonical_hash)
+    to prevent circular hashing.
+    """
+    payload: dict[str, Any] = {
+        "backtest_run_id": result.backtest_run_id,
+        "config": {
+            "strategy_id": result.config.strategy_id,
+            "strategy_version": result.config.strategy_version,
+            "dataset_id": result.config.dataset_id,
+            "start_time": result.config.start_time.astimezone(UTC).isoformat(),
+            "end_time": result.config.end_time.astimezone(UTC).isoformat(),
+            "initial_capital": str(result.config.initial_capital),
+            "base_currency": result.config.base_currency,
+            "cost_config": {
+                k: _canonicalize_value(v)
+                for k, v in sorted(result.config.cost_config.model_dump(mode="json").items())
+            },
+            "final_position_policy": result.config.final_position_policy.value,
+            "conservative_same_bar_sl_first": result.config.conservative_same_bar_sl_first,
+            "warmup_bars": result.config.warmup_bars,
+            "seed": result.config.seed,
+            "engine_version": result.config.engine_version,
+            "accounting_schema_version": result.config.accounting_schema_version,
+            "fill_policy_version": result.config.fill_policy_version,
+            "verify_look_ahead": result.config.verify_look_ahead,
+            "verify_reproducibility": result.config.verify_reproducibility,
+        },
+        "dataset_metadata": {
+            "dataset_id": result.dataset_metadata.dataset_id,
+            "checksum": result.dataset_metadata.checksum,
+            "record_count": result.dataset_metadata.record_count,
+            "start_timestamp": result.dataset_metadata.start_timestamp.astimezone(UTC).isoformat(),
+            "end_timestamp": result.dataset_metadata.end_timestamp.astimezone(UTC).isoformat(),
+            "timeframe": result.dataset_metadata.timeframe,
+            "symbol": result.dataset_metadata.symbol,
+            "data_source": result.dataset_metadata.data_source,
+        },
+        "trades": [
+            {
+                "trade_id": t.trade_id,
+                "symbol": t.symbol,
+                "side": t.side.value,
+                "entry_timestamp": t.entry_timestamp.astimezone(UTC).isoformat(),
+                "entry_price": str(t.entry_price),
+                "entry_quantity": t.entry_quantity,
+                "exit_timestamp": t.exit_timestamp.astimezone(UTC).isoformat(),
+                "exit_price": str(t.exit_price),
+                "exit_quantity": t.exit_quantity,
+                "gross_pnl": str(t.gross_pnl),
+                "fees": str(t.fees),
+                "slippage": str(t.slippage),
+                "other_costs": str(t.other_costs),
+                "net_pnl": str(t.net_pnl),
+                "return_pct": str(t.return_pct),
+                "holding_duration_seconds": t.holding_duration_seconds,
+                "max_favorable_excursion": str(t.max_favorable_excursion),
+                "max_adverse_excursion": str(t.max_adverse_excursion),
+                "entry_signal_id": t.entry_signal_id,
+                "strategy_version": t.strategy_version,
+                "exit_reason": t.exit_reason,
+                "is_forced_close": t.is_forced_close,
+            }
+            for t in result.trades
+        ],
+        "equity_curve": [
+            {
+                "timestamp": s.timestamp.astimezone(UTC).isoformat(),
+                "equity": str(s.equity),
+                "cash": str(s.cash),
+                "margin_used": str(s.margin_used),
+                "realized_pnl": str(s.realized_pnl),
+                "unrealized_pnl": str(s.unrealized_pnl),
+                "cumulative_fees": str(s.cumulative_fees),
+                "cumulative_slippage": str(s.cumulative_slippage),
+                "notional_exposure": str(s.notional_exposure),
+                "drawdown": str(s.drawdown),
+                "drawdown_pct": str(s.drawdown_pct),
+            }
+            for s in result.equity_curve
+        ],
+        "metrics": {
+            k: _canonicalize_value(v)
+            for k, v in sorted(result.metrics.model_dump(mode="json").items())
+        },
+        "validation_status": result.validation_status.value,
+        "quant_gates": [
+            {
+                "gate_id": g.gate_id,
+                "gate_name": g.gate_name,
+                "status": g.status.value,
+                "reason": g.reason,
+                "evidence": {str(k): _canonicalize_value(v) for k, v in sorted(g.evidence.items())},
+                "warning_count": g.warning_count,
+                "error_count": g.error_count,
+            }
+            for g in result.quant_gates
+        ],
+        "diagnostics": {
+            str(k): _canonicalize_value(v) for k, v in sorted(result.diagnostics.items())
+        },
+        "warnings": list(result.warnings),
+        "errors": list(result.errors),
+        "completion_status": result.completion_status,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def compute_result_canonical_hash(result: BacktestResult) -> str:
+    """
+    Compute deterministic SHA-256 fingerprint of complete canonical backtest result
+    strictly excluding self-referential hash fields.
+    """
+    canonical = canonicalize_backtest_result(result)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

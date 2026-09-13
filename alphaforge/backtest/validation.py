@@ -4,8 +4,11 @@ Implements Quant Gates A through J, overfitting diagnostics, out-of-sample (OOS)
 walk-forward evaluation windows, and market regime analysis.
 """
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
+from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
@@ -21,6 +24,7 @@ from alphaforge.backtest.models import (
 )
 from alphaforge.core.exceptions import BacktestValidationError
 from alphaforge.data.models import MarketCandle
+from alphaforge.ledger.models import FrozenDict
 
 
 class QuantGateEvaluator:
@@ -41,6 +45,7 @@ class QuantGateEvaluator:
         risk_integration_evidence: Mapping[str, Any] | None = None,
         reproducibility_evidence: Mapping[str, Any] | None = None,
         oos_evidence: Mapping[str, Any] | None = None,
+        contract_evidence: Mapping[str, Any] | None = None,
     ) -> tuple[tuple[QuantGateResult, ...], ValidationStatus, list[str], list[str]]:
         """
         Evaluate all 10 quant gates and determine overall validation verdict.
@@ -58,10 +63,26 @@ class QuantGateEvaluator:
         historical_orders_compared = 0
         historical_fills_compared = 0
         historical_equity_snapshots_compared = 0
+        verification_executed = False
+        future_mutation_test_passed = False
+        historical_trace_comparison_passed = False
+        future_append_invariance_passed = False
 
         if look_ahead_evidence is not None:
+            verification_executed = bool(look_ahead_evidence.get("verification_executed", True))
+            future_mutation_test_passed = bool(
+                look_ahead_evidence.get("future_mutation_test_passed", True)
+            )
+            historical_trace_comparison_passed = bool(
+                look_ahead_evidence.get("historical_trace_comparison_passed", True)
+            )
+            future_append_invariance_passed = bool(
+                look_ahead_evidence.get("future_append_invariance_passed", True)
+            )
             causality_violations = int(look_ahead_evidence.get("causality_violations", 0))
-            future_mutation_tests = int(look_ahead_evidence.get("future_mutation_tests", 0))
+            future_mutation_tests = int(
+                look_ahead_evidence.get("future_mutation_tests", 1 if verification_executed else 0)
+            )
             historical_decisions_compared = int(
                 look_ahead_evidence.get("historical_decisions_compared", 0)
             )
@@ -75,36 +96,62 @@ class QuantGateEvaluator:
 
         total_look_ahead_faults = temporal_inversions + causality_violations
 
-        if total_look_ahead_faults > 0:
+        if not verification_executed:
+            status_a = QuantGateStatus.WARNING
+            reason_a = "Look-ahead verification disabled by configuration"
+            warnings.append(reason_a)
+            warn_count_a = 1
+            err_count_a = 0
+        elif total_look_ahead_faults > 0 or not (
+            future_mutation_test_passed
+            and historical_trace_comparison_passed
+            and future_append_invariance_passed
+        ):
             status_a = QuantGateStatus.FAIL
             reason_a = (
                 f"Look-ahead causality violation: {temporal_inversions} temporal inversions, "
                 f"{causality_violations} future mutation discrepancies"
             )
             errors.append(f"Gate A Failed: {reason_a}")
+            warn_count_a = 0
+            err_count_a = total_look_ahead_faults if total_look_ahead_faults > 0 else 1
         else:
             status_a = QuantGateStatus.PASS
             reason_a = (
-                f"Causal temporal barrier verified: 0 temporal inversions, "
-                f"{future_mutation_tests} future mutation passes verified across "
-                f"{historical_equity_snapshots_compared} snapshots"
+                "Causal temporal barrier verified: 0 temporal inversions, "
+                "future mutation test passed, historical trace comparison passed, "
+                "future append invariance passed"
             )
+            warn_count_a = 0
+            err_count_a = 0
+
+        evidence_a: dict[str, Any] = {
+            "verification_executed": verification_executed,
+            "future_mutation_test_passed": future_mutation_test_passed,
+            "historical_trace_comparison_passed": historical_trace_comparison_passed,
+            "future_append_invariance_passed": future_append_invariance_passed,
+            "future_mutation_tests": future_mutation_tests,
+            "historical_decisions_compared": historical_decisions_compared,
+            "historical_orders_compared": historical_orders_compared,
+            "historical_fills_compared": historical_fills_compared,
+            "historical_equity_snapshots_compared": historical_equity_snapshots_compared,
+            "causality_violations": causality_violations,
+            "temporal_inversions": temporal_inversions,
+        }
+        if look_ahead_evidence is not None:
+            for k, v in look_ahead_evidence.items():
+                if k not in evidence_a:
+                    evidence_a[k] = v
+
         gates.append(
             QuantGateResult(
                 gate_id="Gate A",
                 gate_name="No Look-Ahead Bias",
                 status=status_a,
                 reason=reason_a,
-                evidence={
-                    "future_mutation_tests": future_mutation_tests,
-                    "historical_decisions_compared": historical_decisions_compared,
-                    "historical_orders_compared": historical_orders_compared,
-                    "historical_fills_compared": historical_fills_compared,
-                    "historical_equity_snapshots_compared": historical_equity_snapshots_compared,
-                    "causality_violations": causality_violations,
-                    "temporal_inversions": temporal_inversions,
-                },
-                error_count=total_look_ahead_faults,
+                evidence=evidence_a,
+                warning_count=warn_count_a,
+                error_count=err_count_a,
             )
         )
 
@@ -194,21 +241,81 @@ class QuantGateEvaluator:
         )
 
         # --- Gate E: Correct Contract Lifecycle ---
-        if not contract_valid:
-            status_e = QuantGateStatus.FAIL
-            reason_e = "Contract lifecycle violation: traded expired or invalid contract"
-            errors.append(f"Gate E Failed: {reason_e}")
+        if contract_evidence is None or not contract_evidence.get("contract_master_present", False):
+            status_e = QuantGateStatus.WARNING
+            reason_e = "Contract master omitted; contract lifecycle cannot be fully verified"
+            warnings.append(reason_e)
+            evidence_e: dict[str, Any] = {
+                "verification_executed": False,
+                "contract_master_present": False,
+                "contract_id": "NONE",
+                "expiry_datetime": "NONE",
+                "contract_checks": 0,
+                "expiry_checks": 0,
+                "active_contract_checks": 0,
+                "expired_trade_attempts": 0,
+                "post_expiry_fills": 0,
+                "lot_size_checks": 0,
+                "multiplier_checks": 0,
+                "contract_valid": contract_valid,
+            }
+            warn_e = 1
+            err_e = 0
         else:
-            status_e = QuantGateStatus.PASS
-            reason_e = "Contract lifecycle, lot sizing, and expiration boundaries verified"
+            c_id = str(contract_evidence.get("contract_id", "UNKNOWN"))
+            exp_dt = str(contract_evidence.get("expiry_datetime", "UNKNOWN"))
+            c_checks = int(contract_evidence.get("contract_checks", 0))
+            exp_checks = int(contract_evidence.get("expiry_checks", 0))
+            act_checks = int(contract_evidence.get("active_contract_checks", 0))
+            exp_attempts = int(contract_evidence.get("expired_trade_attempts", 0))
+            post_fills = int(contract_evidence.get("post_expiry_fills", 0))
+            lot_checks = int(contract_evidence.get("lot_size_checks", 0))
+            mult_checks = int(contract_evidence.get("multiplier_checks", 0))
+            c_valid = bool(contract_evidence.get("contract_valid", contract_valid))
+
+            evidence_e = {
+                "verification_executed": True,
+                "contract_master_present": True,
+                "contract_id": c_id,
+                "expiry_datetime": exp_dt,
+                "contract_checks": c_checks,
+                "expiry_checks": exp_checks,
+                "active_contract_checks": act_checks,
+                "expired_trade_attempts": exp_attempts,
+                "post_expiry_fills": post_fills,
+                "lot_size_checks": lot_checks,
+                "multiplier_checks": mult_checks,
+                "contract_valid": c_valid,
+            }
+
+            if not c_valid or post_fills > 0:
+                status_e = QuantGateStatus.FAIL
+                reason_e = (
+                    f"Contract lifecycle violation: post_expiry_fills={post_fills}, "
+                    f"contract_valid={c_valid}, expired_trade_attempts={exp_attempts}"
+                )
+                errors.append(f"Gate E Failed: {reason_e}")
+                warn_e = 0
+                err_e = post_fills if post_fills > 0 else 1
+            else:
+                status_e = QuantGateStatus.PASS
+                reason_e = (
+                    f"Contract lifecycle verified for {c_id} (Expiry: {exp_dt}): "
+                    f"{exp_checks} expiry checks, {act_checks} active checks, "
+                    f"{lot_checks} lot size checks, 0 post-expiry fills"
+                )
+                warn_e = 0
+                err_e = 0
+
         gates.append(
             QuantGateResult(
                 gate_id="Gate E",
                 gate_name="Correct Contract Lifecycle",
                 status=status_e,
                 reason=reason_e,
-                evidence={"contract_valid": contract_valid},
-                error_count=0 if contract_valid else 1,
+                evidence=evidence_e,
+                warning_count=warn_e,
+                error_count=err_e,
             )
         )
 
@@ -218,6 +325,7 @@ class QuantGateEvaluator:
         rejected = risk_rejections_recorded
         risk_fp = "NONE"
         assertions_passed = True
+        integration_test_passed = True
 
         if risk_integration_evidence is not None:
             risk_calls = int(risk_integration_evidence.get("risk_calls", 0))
@@ -229,20 +337,27 @@ class QuantGateEvaluator:
             assertions_passed = bool(
                 risk_integration_evidence.get("integration_assertions_passed", True)
             )
+            integration_test_passed = bool(
+                risk_integration_evidence.get("integration_test_passed", True)
+            )
 
-        if not assertions_passed or (risk_calls > 0 and risk_calls != (approved + rejected)):
+        risk_calls_valid = (risk_calls == 0) or (risk_calls == (approved + rejected))
+        if not assertions_passed or not integration_test_passed or not risk_calls_valid:
             status_f = QuantGateStatus.FAIL
             reason_f = (
                 f"Risk engine integration failed: calls={risk_calls}, approved={approved}, "
-                f"rejected={rejected}"
+                f"rejected={rejected}, integration_test_passed={integration_test_passed}"
             )
             errors.append(f"Gate F Failed: {reason_f}")
+            err_f = 1
         else:
             status_f = QuantGateStatus.PASS
             reason_f = (
                 f"Phase 5 Risk Engine verified: {risk_calls} evaluations, "
                 f"{approved} approved, {rejected} rejected (FP: {risk_fp})"
             )
+            err_f = 0
+
         gates.append(
             QuantGateResult(
                 gate_id="Gate F",
@@ -256,40 +371,67 @@ class QuantGateEvaluator:
                     "risk_rejections_recorded": rejected,
                     "risk_config_fingerprint": risk_fp,
                     "integration_assertions_passed": assertions_passed,
+                    "integration_test_passed": integration_test_passed,
                 },
-                error_count=0 if assertions_passed else 1,
+                error_count=err_f,
             )
         )
 
         # --- Gate G: Deterministic Reproducibility ---
-        rerun_matched = True
-        run1_hash = "GENESIS"
-        run2_hash = "GENESIS"
+        verification_executed = False
+        rerun_matched = False
+        run1_hash = "NONE"
+        run2_hash = "NONE"
+        trace1_hash = "NONE"
+        trace2_hash = "NONE"
         trades_comp = len(trades)
         snaps_comp = len(equity_curve)
+        trace_entries_comp = 0
         mismatches = 0
 
         if reproducibility_evidence is not None:
+            verification_executed = bool(
+                reproducibility_evidence.get("verification_executed", True)
+            )
             rerun_matched = bool(reproducibility_evidence.get("rerun_matched", False))
             run1_hash = str(reproducibility_evidence.get("run_1_canonical_hash", "NONE"))
             run2_hash = str(reproducibility_evidence.get("run_2_canonical_hash", "NONE"))
+            trace1_hash = str(reproducibility_evidence.get("trace_1_canonical_hash", "NONE"))
+            trace2_hash = str(reproducibility_evidence.get("trace_2_canonical_hash", "NONE"))
             trades_comp = int(reproducibility_evidence.get("trades_compared", len(trades)))
             snaps_comp = int(reproducibility_evidence.get("snapshots_compared", len(equity_curve)))
+            trace_entries_comp = int(reproducibility_evidence.get("trace_entries_compared", 0))
             mismatches = int(reproducibility_evidence.get("mismatches", 0 if rerun_matched else 1))
 
-        if not rerun_matched or mismatches > 0:
+        if not verification_executed:
+            status_g = QuantGateStatus.WARNING
+            reason_g = "Deterministic reproducibility verification disabled by configuration"
+            warnings.append(reason_g)
+            warn_g = 1
+            err_g = 0
+        elif (
+            not rerun_matched
+            or mismatches > 0
+            or run1_hash != run2_hash
+            or trace1_hash != trace2_hash
+        ):
             status_g = QuantGateStatus.FAIL
             reason_g = (
                 f"Deterministic reproducibility failure: "
                 f"{mismatches} state mismatches between dual runs"
             )
             errors.append(f"Gate G Failed: {reason_g}")
+            warn_g = 0
+            err_g = mismatches if mismatches > 0 else 1
         else:
             status_g = QuantGateStatus.PASS
             reason_g = (
                 f"Deterministic rerun comparison verified identical output: "
-                f"{trades_comp} trades, {snaps_comp} snapshots"
+                f"{trades_comp} trades, {snaps_comp} snapshots, {trace_entries_comp} trace entries"
             )
+            warn_g = 0
+            err_g = 0
+
         gates.append(
             QuantGateResult(
                 gate_id="Gate G",
@@ -297,14 +439,20 @@ class QuantGateEvaluator:
                 status=status_g,
                 reason=reason_g,
                 evidence={
+                    "verification_executed": verification_executed,
+                    "dual_run_executed": verification_executed,
                     "rerun_matched": rerun_matched,
                     "run_1_canonical_hash": run1_hash,
                     "run_2_canonical_hash": run2_hash,
+                    "trace_1_canonical_hash": trace1_hash,
+                    "trace_2_canonical_hash": trace2_hash,
                     "trades_compared": trades_comp,
                     "snapshots_compared": snaps_comp,
+                    "trace_entries_compared": trace_entries_comp,
                     "mismatches": mismatches,
                 },
-                error_count=mismatches,
+                warning_count=warn_g,
+                error_count=err_g,
             )
         )
 
@@ -352,18 +500,26 @@ class QuantGateEvaluator:
                 f"param_mutations={param_mutations}, chronology_violations={chronology_violations}"
             )
             errors.append(f"Gate I Failed: {reason_i}")
+            warn_i = 0
+            err_i = total_oos_faults
         elif fold_count == 0:
-            status_i = QuantGateStatus.PASS
+            status_i = QuantGateStatus.WARNING
             reason_i = (
-                "OOS partitioning verified: dataset size below minimum fold requirement; "
-                "0 violations"
+                "OOS partitioning skipped: dataset size below minimum fold requirement "
+                "of 15 candles"
             )
+            warnings.append(reason_i)
+            warn_i = 1
+            err_i = 0
         else:
             status_i = QuantGateStatus.PASS
             reason_i = (
                 f"OOS chronological isolation & parameter immutability verified across "
                 f"{fold_count} folds"
             )
+            warn_i = 0
+            err_i = 0
+
         gates.append(
             QuantGateResult(
                 gate_id="Gate I",
@@ -379,7 +535,8 @@ class QuantGateEvaluator:
                     "oos_parameter_mutations": param_mutations,
                     "chronology_violations": chronology_violations,
                 },
-                error_count=total_oos_faults,
+                warning_count=warn_i,
+                error_count=err_i,
             )
         )
 
@@ -677,7 +834,105 @@ class WalkForwardFold:
                 )
 
         # Immutable parameter snapshot
-        self.frozen_parameters: Mapping[str, Any] = MappingProxyType(dict(frozen_parameters or {}))
+        self.frozen_parameters: Mapping[str, Any] = MappingProxyType(
+            FrozenDict(dict(frozen_parameters or {}))
+        )
+
+
+class ParameterSelectionMode(StrEnum):
+    """Execution mode for out-of-sample parameter determination."""
+
+    FITTING = "FITTING"
+    NO_FITTING = "NO_FITTING"
+
+
+class ParameterIsolationWorkflow:
+    """
+    Authoritative workflow enforcing strict isolation between parameter determination
+    and out-of-sample evaluation:
+    TRAIN -> parameter selection / supplied frozen parameters -> VALIDATION -> freeze -> OOS TEST.
+    Guarantees that test / OOS data and outcomes cannot contaminate or mutate parameters.
+    """
+
+    @staticmethod
+    def freeze_parameters(params: Mapping[str, Any]) -> MappingProxyType[str, Any]:
+        """Deeply freeze parameter mapping into an immutable structure."""
+        frozen_dict = FrozenDict(dict(params))
+        return MappingProxyType(frozen_dict)
+
+    @classmethod
+    def execute_workflow(
+        cls,
+        train_dataset: BacktestDataset,
+        validation_dataset: BacktestDataset,
+        test_dataset: BacktestDataset,
+        supplied_parameters: Mapping[str, Any] | None = None,
+        selection_api: Any = None,
+    ) -> tuple[MappingProxyType[str, Any], dict[str, Any]]:
+        """
+        Execute parameter isolation lifecycle:
+        1. Train & Validation phase: determine parameters either via authoritative selection_api
+           (Mode A: FITTING) or explicit configuration (Mode B: NO_FITTING).
+        2. Freeze parameter snapshot into immutable mapping before test execution.
+        3. Return frozen parameters and audit telemetry.
+        """
+        if len(train_dataset) == 0 or len(test_dataset) == 0:
+            raise BacktestValidationError("Train and Test datasets must be non-empty")
+
+        # Step 1: Selection Phase (strictly from train + validation)
+        if selection_api is not None and callable(selection_api):
+            selected = selection_api(train_dataset, validation_dataset)
+            mode = ParameterSelectionMode.FITTING
+        else:
+            selected = dict(supplied_parameters or {})
+            mode = ParameterSelectionMode.NO_FITTING
+
+        # Step 2: Validation & Freeze Phase
+        frozen = cls.freeze_parameters(selected)
+
+        # Compute parameter fingerprint
+        param_canonical = json.dumps(dict(frozen), sort_keys=True, default=str)
+        param_hash = hashlib.sha256(param_canonical.encode("utf-8")).hexdigest()
+
+        telemetry = {
+            "parameter_selection_mode": mode.value,
+            "parameter_hash": param_hash,
+            "train_record_count": len(train_dataset),
+            "validation_record_count": len(validation_dataset),
+            "test_record_count": len(test_dataset),
+            "parameters_frozen": True,
+        }
+        return frozen, telemetry
+
+    @classmethod
+    def verify_oos_non_contamination(
+        cls,
+        train_dataset: BacktestDataset,
+        validation_dataset: BacktestDataset,
+        test_dataset: BacktestDataset,
+        mutated_test_dataset: BacktestDataset,
+        supplied_parameters: Mapping[str, Any] | None = None,
+        selection_api: Any = None,
+    ) -> bool:
+        """
+        Forensic test proving mutating the test/OOS dataset has zero effect on
+        the parameters selected from train and validation.
+        """
+        frozen_1, tele_1 = cls.execute_workflow(
+            train_dataset=train_dataset,
+            validation_dataset=validation_dataset,
+            test_dataset=test_dataset,
+            supplied_parameters=supplied_parameters,
+            selection_api=selection_api,
+        )
+        frozen_2, tele_2 = cls.execute_workflow(
+            train_dataset=train_dataset,
+            validation_dataset=validation_dataset,
+            test_dataset=mutated_test_dataset,
+            supplied_parameters=supplied_parameters,
+            selection_api=selection_api,
+        )
+        return bool(tele_1["parameter_hash"] == tele_2["parameter_hash"])
 
 
 class WalkForwardEngine:

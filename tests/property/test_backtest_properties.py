@@ -25,13 +25,23 @@ from hypothesis import strategies as st
 from alphaforge.backtest.datasets import SENTINEL_EMPTY_DATETIME, BacktestDataset
 from alphaforge.backtest.engine import BacktestEngine, compute_backtest_run_id
 from alphaforge.backtest.metrics import calculate_backtest_metrics
-from alphaforge.backtest.models import BacktestConfig
+from alphaforge.backtest.models import (
+    BacktestConfig,
+    QuantGateStatus,
+    ValidationStatus,
+)
 from alphaforge.backtest.portfolio import PortfolioTracker
-from alphaforge.backtest.validation import WalkForwardEngine
+from alphaforge.backtest.validation import (
+    ParameterIsolationWorkflow,
+    WalkForwardEngine,
+)
 from alphaforge.contract.models import ContractMaster
 from alphaforge.cost.models import CostConfig
 from alphaforge.data.enums import InstrumentType
 from alphaforge.data.models import MarketCandle
+from alphaforge.ledger.ledger import AuditLedger
+from alphaforge.ledger.models import AuditEventType
+from alphaforge.ledger.storage import InMemoryLedgerStorage
 from alphaforge.risk.enums import TradeSide
 from alphaforge.risk.models import RiskConfig
 from alphaforge.strategy.config import StrategyConfig
@@ -529,3 +539,315 @@ def test_p20_oos_parameter_immutability() -> None:
     f = folds[0]
     with pytest.raises(TypeError):
         f.frozen_parameters["mutated"] = True  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
+# P21: Future trace mutation invariance
+# ---------------------------------------------------------------------------
+@settings(max_examples=5, deadline=None)
+@given(
+    base_price=st.integers(min_value=23000, max_value=25000),
+    mutated_future_price=st.integers(min_value=26000, max_value=30000),
+)
+def test_p21_future_trace_mutation_invariance(base_price: int, mutated_future_price: int) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    prefix_candles = [
+        _make_candle(t0 + timedelta(minutes=3 * i), Decimal(base_price)) for i in range(10)
+    ]
+    cutoff_ts = prefix_candles[-1].exchange_timestamp
+
+    d1_candles = list(prefix_candles) + [
+        _make_candle(t0 + timedelta(minutes=3 * (10 + j)), Decimal(base_price)) for j in range(5)
+    ]
+    d2_candles = list(prefix_candles) + [
+        _make_candle(t0 + timedelta(minutes=3 * (10 + j)), Decimal(mutated_future_price))
+        for j in range(5)
+    ]
+
+    ds1 = BacktestDataset("DS1", d1_candles)
+    ds2 = BacktestDataset("DS2", d2_candles)
+
+    cfg1 = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds1.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(hours=2),
+        initial_capital=Decimal("1000000"),
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    cfg2 = cfg1.model_copy(update={"dataset_id": ds2.dataset_id})
+
+    eng1 = BacktestEngine(cfg1, ds1)
+    eng1.run()
+
+    eng2 = BacktestEngine(cfg2, ds2)
+    eng2.run()
+
+    trace1_cutoff = [e for e in eng1.trace if e.timestamp <= cutoff_ts]
+    trace2_cutoff = [e for e in eng2.trace if e.timestamp <= cutoff_ts]
+
+    assert len(trace1_cutoff) == len(trace2_cutoff)
+    for e1, e2 in zip(trace1_cutoff, trace2_cutoff, strict=True):
+        assert e1.timestamp == e2.timestamp
+        assert e1.event_type == e2.event_type
+        assert e1.price == e2.price
+        assert e1.entity_id == e2.entity_id
+
+
+# ---------------------------------------------------------------------------
+# P22: Result canonical hash determinism
+# ---------------------------------------------------------------------------
+@settings(max_examples=5, deadline=None)
+@given(price=st.integers(min_value=22000, max_value=26000))
+def test_p22_result_canonical_hash_determinism(price: int) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles = [_make_candle(t0 + timedelta(minutes=3 * i), Decimal(price)) for i in range(10)]
+    ds = BacktestDataset("DS_P22", candles)
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(minutes=30),
+        initial_capital=Decimal("1000000"),
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    res1 = BacktestEngine(cfg, ds).run()
+    res2 = BacktestEngine(cfg, ds).run()
+    assert res1.result_canonical_hash is not None
+    assert res1.result_canonical_hash == res2.result_canonical_hash
+
+
+# ---------------------------------------------------------------------------
+# P23: Trace canonical hash determinism
+# ---------------------------------------------------------------------------
+@settings(max_examples=5, deadline=None)
+@given(price=st.integers(min_value=22000, max_value=26000))
+def test_p23_trace_canonical_hash_determinism(price: int) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles = [_make_candle(t0 + timedelta(minutes=3 * i), Decimal(price)) for i in range(10)]
+    ds = BacktestDataset("DS_P23", candles)
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(minutes=30),
+        initial_capital=Decimal("1000000"),
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    res1 = BacktestEngine(cfg, ds).run()
+    res2 = BacktestEngine(cfg, ds).run()
+    assert res1.trace_canonical_hash is not None
+    assert res1.trace_canonical_hash == res2.trace_canonical_hash
+
+
+# ---------------------------------------------------------------------------
+# P24: Validation warning event emission
+# ---------------------------------------------------------------------------
+def test_p24_validation_warning_event_emission() -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles = [_make_candle(t0 + timedelta(minutes=3 * i), Decimal("24000")) for i in range(10)]
+    ds = BacktestDataset("DS_P24", candles)
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(minutes=30),
+        initial_capital=Decimal("1000000"),
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    ledger = AuditLedger(storage=InMemoryLedgerStorage())
+    engine = BacktestEngine(cfg, ds, ledger=ledger)
+    res = engine.run()
+
+    events = ledger.get_events_by_correlation_id(res.backtest_run_id)
+    types = [e.event_type for e in events]
+    assert AuditEventType.VALIDATION_WARNING in types
+    assert AuditEventType.BACKTEST_COMPLETED in types
+    assert types.index(AuditEventType.VALIDATION_WARNING) < types.index(
+        AuditEventType.BACKTEST_COMPLETED
+    )
+
+
+# ---------------------------------------------------------------------------
+# P25: Validation failure event emission
+# ---------------------------------------------------------------------------
+def test_p25_validation_failure_event_emission() -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles = [_make_candle(t0 + timedelta(minutes=3 * i), Decimal("24000")) for i in range(5)]
+    ds = BacktestDataset("DS_P25", candles)
+    object.__setattr__(ds, "_candles", (candles[2], candles[1], candles[0]))
+
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(minutes=30),
+        initial_capital=Decimal("1000000"),
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    ledger = AuditLedger(storage=InMemoryLedgerStorage())
+    engine = BacktestEngine(cfg, ds, ledger=ledger)
+    res = engine.run()
+
+    events = ledger.get_events_by_correlation_id(res.backtest_run_id)
+    types = [e.event_type for e in events]
+    assert AuditEventType.VALIDATION_FAILED in types
+    assert AuditEventType.BACKTEST_COMPLETED in types
+    assert types.index(AuditEventType.VALIDATION_FAILED) < types.index(
+        AuditEventType.BACKTEST_COMPLETED
+    )
+
+
+# ---------------------------------------------------------------------------
+# P26: OOS parameter isolation
+# ---------------------------------------------------------------------------
+@settings(max_examples=5, deadline=None)
+@given(mutated_price=st.integers(min_value=30000, max_value=50000))
+def test_p26_oos_parameter_isolation(mutated_price: int) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    train_c = [_make_candle(t0 + timedelta(minutes=3 * i), Decimal("24000")) for i in range(20)]
+    val_c = [
+        _make_candle(t0 + timedelta(minutes=3 * (20 + i)), Decimal("24050")) for i in range(10)
+    ]
+    test_c = [
+        _make_candle(t0 + timedelta(minutes=3 * (30 + i)), Decimal("24100")) for i in range(10)
+    ]
+    mutated_test_c = [
+        _make_candle(t0 + timedelta(minutes=3 * (30 + i)), Decimal(mutated_price))
+        for i in range(10)
+    ]
+
+    train_ds = BacktestDataset("TRAIN", train_c)
+    val_ds = BacktestDataset("VAL", val_c)
+    test_ds = BacktestDataset("TEST", test_c)
+    mut_test_ds = BacktestDataset("MUT_TEST", mutated_test_c)
+
+    clean = ParameterIsolationWorkflow.verify_oos_non_contamination(
+        train_dataset=train_ds,
+        validation_dataset=val_ds,
+        test_dataset=test_ds,
+        mutated_test_dataset=mut_test_ds,
+        supplied_parameters={"param1": 100},
+    )
+    assert clean is True
+
+
+# ---------------------------------------------------------------------------
+# P27: Post-expiry execution rejection
+# ---------------------------------------------------------------------------
+def test_p27_post_expiry_execution_rejection() -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles = [_make_candle(t0 + timedelta(minutes=3 * i), Decimal("24000")) for i in range(10)]
+    ds = BacktestDataset("DS_P27", candles)
+    contract = ContractMaster(
+        exchange="NSE",
+        segment="NFO",
+        underlying_symbol="NIFTY",
+        contract_id="NIFTY-SPOT",
+        expiry_datetime=t0,
+        listing_datetime=t0 - timedelta(days=90),
+        trading_start_datetime=t0 - timedelta(days=90),
+        trading_end_datetime=t0,
+        lot_size=50,
+        tick_size=Decimal("0.05"),
+        data_source="NSE",
+    )
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(minutes=30),
+        initial_capital=Decimal("1000000"),
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    engine = BacktestEngine(cfg, ds, contract_master=contract)
+    res = engine.run()
+    assert engine.post_expiry_fills == 0
+    assert len(res.trades) == 0
+
+
+# ---------------------------------------------------------------------------
+# P28: Disabled verification cannot silently pass
+# ---------------------------------------------------------------------------
+def test_p28_disabled_verification_cannot_silently_pass() -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles = [_make_candle(t0 + timedelta(minutes=3 * i), Decimal("24000")) for i in range(10)]
+    ds = BacktestDataset("DS_P28", candles)
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(minutes=30),
+        initial_capital=Decimal("1000000"),
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    res = BacktestEngine(cfg, ds).run()
+    gate_a = next(g for g in res.quant_gates if g.gate_id == "Gate A")
+    gate_g = next(g for g in res.quant_gates if g.gate_id == "Gate G")
+    assert gate_a.status == QuantGateStatus.WARNING
+    assert gate_g.status == QuantGateStatus.WARNING
+    assert res.validation_status != ValidationStatus.VALID
+
+
+# ---------------------------------------------------------------------------
+# P29: Configuration fingerprint changes run_id
+# ---------------------------------------------------------------------------
+@settings(max_examples=5, deadline=None)
+@given(extra_bars=st.integers(min_value=1, max_value=10))
+def test_p29_config_fingerprint_changes_run_id(extra_bars: int) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    ds = BacktestDataset("DS_P29", [_make_candle(t0, Decimal("24000"))])
+    base_cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(hours=1),
+        initial_capital=Decimal("1000000"),
+        warmup_bars=15,
+    )
+    base_id = compute_backtest_run_id(base_cfg, ds.metadata)
+
+    modified_cfg = base_cfg.model_copy(update={"warmup_bars": 15 + extra_bars})
+    modified_id = compute_backtest_run_id(modified_cfg, ds.metadata)
+    assert base_id != modified_id
+
+
+# ---------------------------------------------------------------------------
+# P30: Identical complete runs produce identical result hash
+# ---------------------------------------------------------------------------
+@settings(max_examples=5, deadline=None)
+@given(price=st.integers(min_value=23000, max_value=25000))
+def test_p30_identical_complete_runs_produce_identical_result_hash(price: int) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles = [_make_candle(t0 + timedelta(minutes=3 * i), Decimal(price)) for i in range(10)]
+    ds = BacktestDataset("DS_P30", candles)
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(minutes=30),
+        initial_capital=Decimal("1000000"),
+        warmup_bars=5,
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    res1 = BacktestEngine(cfg, ds).run()
+    res2 = BacktestEngine(cfg, ds).run()
+    assert res1.result_canonical_hash == res2.result_canonical_hash
+    assert res1.trace_canonical_hash == res2.trace_canonical_hash

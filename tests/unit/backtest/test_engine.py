@@ -11,7 +11,16 @@ from pathlib import Path
 
 from alphaforge.backtest.datasets import BacktestDataset
 from alphaforge.backtest.engine import BacktestEngine, compute_backtest_run_id
-from alphaforge.backtest.models import BacktestConfig, FinalPositionPolicy
+from alphaforge.backtest.models import (
+    BacktestConfig,
+    FinalPositionPolicy,
+    QuantGateStatus,
+    TraceEntry,
+    TraceEventType,
+    ValidationStatus,
+    compute_result_canonical_hash,
+    compute_trace_canonical_hash,
+)
 from alphaforge.contract.models import ContractMaster
 from alphaforge.cost.models import CostConfig
 from alphaforge.data.enums import InstrumentType
@@ -318,3 +327,237 @@ def test_closed_candle_proof_bar_t_close_ne_bar_t_plus_1_open() -> None:
     assert trade.entry_price == bar_t_plus_1.open
     assert trade.entry_price != bar_t.close
     assert trade.entry_price == gap_open
+
+
+def test_trace_completeness_and_canonical_hash_stability() -> None:
+    """Verify discrete event trace recording, completeness, and canonical SHA-256 hash stability."""
+    candles = _load_fixture_candles()
+    last_c = candles[-1]
+    next_c = MarketCandle(
+        symbol="NIFTY",
+        instrument_type=InstrumentType.INDEX,
+        contract_id="NIFTY-SPOT",
+        exchange_timestamp=last_c.exchange_timestamp + timedelta(minutes=3),
+        received_timestamp=last_c.exchange_timestamp + timedelta(minutes=3, milliseconds=10),
+        timeframe="3m",
+        open=Decimal("24100.00"),
+        high=Decimal("24150.00"),
+        low=Decimal("24090.00"),
+        close=Decimal("24120.00"),
+        volume=2000,
+        source="NSE",
+    )
+    candles.append(next_c)
+    dataset = BacktestDataset("TRACE_DS", candles)
+    t_start = candles[0].exchange_timestamp
+    t_end = candles[-1].exchange_timestamp + timedelta(minutes=3)
+
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=dataset.dataset_id,
+        start_time=t_start,
+        end_time=t_end,
+        initial_capital=Decimal("1000000"),
+        warmup_bars=15,
+        final_position_policy=FinalPositionPolicy.FORCE_CLOSE,
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    engine = BacktestEngine(config=cfg, dataset=dataset)
+    res = engine.run()
+
+    assert len(res.trace) > 0
+    event_types = {e.event_type for e in res.trace}
+    assert TraceEventType.BAR_PROCESSED in event_types
+    assert TraceEventType.SIGNAL_GENERATED in event_types
+    assert TraceEventType.RISK_EVALUATED in event_types
+    assert TraceEventType.ORDER_SIMULATED in event_types
+    assert TraceEventType.FILL_SIMULATED in event_types
+    assert TraceEventType.TRADE_CLOSED in event_types
+    assert TraceEventType.EQUITY_SNAPSHOT in event_types
+
+    # Hash determinism
+    expected_hash = compute_trace_canonical_hash(res.trace)
+    assert res.trace_canonical_hash == expected_hash
+
+    # Hash sensitivity to event modification
+    tampered_trace = list(res.trace)
+    tampered_entry = TraceEntry(
+        timestamp=res.trace[0].timestamp,
+        event_type=TraceEventType.BAR_PROCESSED,
+        entity_id="TAMPERED-1",
+        metadata={"tampered": True},
+    )
+    tampered_trace.append(tampered_entry)
+    assert compute_trace_canonical_hash(tampered_trace) != expected_hash
+
+
+def test_result_canonical_hash_stability_and_non_circularity() -> None:
+    """Verify non-circular result canonical hashing and sensitivity to mutations."""
+    candles = _load_fixture_candles()
+    dataset = BacktestDataset("RESULT_HASH_DS", candles)
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=dataset.dataset_id,
+        start_time=candles[0].exchange_timestamp,
+        end_time=candles[-1].exchange_timestamp + timedelta(minutes=3),
+        initial_capital=Decimal("1000000"),
+        warmup_bars=15,
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    engine = BacktestEngine(config=cfg, dataset=dataset)
+    res = engine.run()
+
+    assert res.result_canonical_hash is not None
+    assert len(res.result_canonical_hash) == 64
+
+    # Direct computation matches
+    direct_hash = compute_result_canonical_hash(res)
+    assert res.result_canonical_hash == direct_hash
+
+    # Non-circularity: setting result_canonical_hash to None or dummy string does not change hash
+    res_copy = res.model_copy(update={"result_canonical_hash": None, "trace_canonical_hash": None})
+    assert compute_result_canonical_hash(res_copy) == direct_hash
+
+    res_tampered_hash = res.model_copy(update={"result_canonical_hash": "DUMMY_HASH_VAL"})
+    assert compute_result_canonical_hash(res_tampered_hash) == direct_hash
+
+    # Sensitivity: altering any domain field changes the result canonical hash
+    res_tampered_return = res.model_copy(
+        update={"metrics": res.metrics.model_copy(update={"total_return": Decimal("999999")})}
+    )
+    assert compute_result_canonical_hash(res_tampered_return) != direct_hash
+
+
+def test_audit_validation_event_emission_order() -> None:
+    """
+    Verify VALIDATION_WARNING and VALIDATION_FAILED events emitted strictly
+    before BACKTEST_COMPLETED.
+    """
+    candles = _load_fixture_candles()
+    dataset = BacktestDataset("AUDIT_DS", candles)
+
+    # 1. Warning case: verify_look_ahead=False produces validation warnings
+    cfg_warn = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=dataset.dataset_id,
+        start_time=candles[0].exchange_timestamp,
+        end_time=candles[-1].exchange_timestamp + timedelta(minutes=3),
+        initial_capital=Decimal("1000000"),
+        warmup_bars=15,
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    ledger_warn = AuditLedger(storage=InMemoryLedgerStorage())
+    engine_warn = BacktestEngine(config=cfg_warn, dataset=dataset, ledger=ledger_warn)
+    res_warn = engine_warn.run()
+
+    events_warn = ledger_warn.get_events_by_correlation_id(res_warn.backtest_run_id)
+    event_types_warn = [e.event_type for e in events_warn]
+
+    assert AuditEventType.VALIDATION_WARNING in event_types_warn
+    assert AuditEventType.BACKTEST_COMPLETED in event_types_warn
+    warn_idx = event_types_warn.index(AuditEventType.VALIDATION_WARNING)
+    completed_idx = event_types_warn.index(AuditEventType.BACKTEST_COMPLETED)
+    assert warn_idx < completed_idx
+
+    # 2. Failure case: out-of-order candles trigger Gate B failure
+    dataset_fail = BacktestDataset("FAIL_DS", candles)
+    object.__setattr__(dataset_fail, "_candles", (candles[2], candles[1], candles[0]))
+
+    cfg_fail = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=dataset_fail.dataset_id,
+        start_time=candles[0].exchange_timestamp,
+        end_time=candles[-1].exchange_timestamp + timedelta(minutes=3),
+        initial_capital=Decimal("1000000"),
+        warmup_bars=15,
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    ledger_fail = AuditLedger(storage=InMemoryLedgerStorage())
+    engine_fail = BacktestEngine(config=cfg_fail, dataset=dataset_fail, ledger=ledger_fail)
+    res_fail = engine_fail.run()
+
+    events_fail = ledger_fail.get_events_by_correlation_id(res_fail.backtest_run_id)
+    event_types_fail = [e.event_type for e in events_fail]
+
+    assert AuditEventType.VALIDATION_FAILED in event_types_fail
+    assert AuditEventType.BACKTEST_COMPLETED in event_types_fail
+    fail_idx = event_types_fail.index(AuditEventType.VALIDATION_FAILED)
+    comp_fail_idx = event_types_fail.index(AuditEventType.BACKTEST_COMPLETED)
+    assert fail_idx < comp_fail_idx
+
+
+def test_contract_lifecycle_counters_and_post_expiry_rejection() -> None:
+    """Verify runtime contract lifecycle counters and post-expiry execution rejection."""
+    candles = _load_fixture_candles()
+    # Contract expired before dataset start
+    mid_ts = candles[0].exchange_timestamp - timedelta(days=1)
+    contract = ContractMaster(
+        exchange="NSE",
+        segment="NFO",
+        underlying_symbol="NIFTY",
+        contract_id="NIFTY-SPOT",
+        expiry_datetime=mid_ts,
+        listing_datetime=mid_ts - timedelta(days=90),
+        trading_start_datetime=mid_ts - timedelta(days=90),
+        trading_end_datetime=mid_ts,
+        lot_size=50,
+        tick_size=Decimal("0.05"),
+        data_source="NSE",
+    )
+    dataset = BacktestDataset("EXPIRED_DS", candles)
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=dataset.dataset_id,
+        start_time=candles[0].exchange_timestamp,
+        end_time=candles[-1].exchange_timestamp + timedelta(minutes=3),
+        initial_capital=Decimal("1000000"),
+        warmup_bars=15,
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    engine = BacktestEngine(config=cfg, dataset=dataset, contract_master=contract)
+    res = engine.run()
+
+    # Lifecycle telemetry counters incremented
+    assert engine.contract_checks > 0
+    assert engine.expiry_checks > 0
+    assert engine.post_expiry_fills == 0
+    assert len(res.trades) == 0
+
+
+def test_disabled_verification_behavior_produces_warning() -> None:
+    """
+    Verify that disabled look-ahead and reproducibility verifications produce
+    WARNING, never silent PASS.
+    """
+    candles = _load_fixture_candles()
+    dataset = BacktestDataset("DISABLED_VERIF_DS", candles)
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=dataset.dataset_id,
+        start_time=candles[0].exchange_timestamp,
+        end_time=candles[-1].exchange_timestamp + timedelta(minutes=3),
+        initial_capital=Decimal("1000000"),
+        warmup_bars=15,
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    engine = BacktestEngine(config=cfg, dataset=dataset)
+    res = engine.run()
+
+    gate_a = next(g for g in res.quant_gates if g.gate_id == "Gate A")
+    gate_g = next(g for g in res.quant_gates if g.gate_id == "Gate G")
+
+    assert gate_a.status == QuantGateStatus.WARNING
+    assert gate_g.status == QuantGateStatus.WARNING
+    assert res.validation_status != ValidationStatus.VALID
