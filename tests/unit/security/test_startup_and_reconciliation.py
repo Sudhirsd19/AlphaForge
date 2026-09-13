@@ -1,7 +1,7 @@
 """
 AlphaForge Phase 13 Security Tests: Startup Verification & Reconciliation Gate.
 
-Verifies SEC10 and ADV-SEC-7.
+Verifies SEC10, ADV-SEC-7, and regression tests for missing startup/reconciliation gates.
 """
 
 import contextlib
@@ -24,6 +24,7 @@ from alphaforge.security.credentials import BrokerCredentials, CredentialStore, 
 from alphaforge.security.enums import TradingMode
 from alphaforge.security.exceptions import (
     ReconciliationGateClosedError,
+    SecurityAuthorizationError,
 )
 from alphaforge.security.invariants import assert_reconciliation_gate_required
 from alphaforge.security.startup import SecurityStartupGate
@@ -150,10 +151,18 @@ def test_adv_sec7_restart_live_with_incomplete_reconciliation_blocks_trading() -
 
     # On restart, gate starts closed
     gate = ReconciliationGate(initially_open=False)
+    startup_gate = SecurityStartupGate(
+        security_config=cfg,
+        credential_store=store,
+        reconciliation_gate=gate,
+    )
+    startup_gate.verify_startup()
+
     authorizer = SecurityAuthorizer(
         security_config=cfg,
         credential_store=store,
         reconciliation_gate=gate,
+        startup_gate=startup_gate,
     )
 
     req = _make_order_request()
@@ -171,3 +180,101 @@ def test_adv_sec7_restart_live_with_incomplete_reconciliation_blocks_trading() -
     # Trade submission STILL BLOCKED
     with pytest.raises(ReconciliationGateClosedError):
         authorizer.authorize_order(req)
+
+
+def test_missing_startup_gate_fails_closed_in_live_mode() -> None:
+    """Regression: Live mode order rejected when startup_gate is missing."""
+    cfg = SecurityConfig(
+        trading_mode_config=TradingModeConfig(
+            trading_mode=TradingMode.LIVE,
+            live_trading_enabled=True,
+        )
+    )
+    store = CredentialStore()
+    store.set_live_credentials(
+        BrokerCredentials(
+            broker_id="zerodha",
+            api_key=SecretValue("ProductionKeyABC987"),
+            api_secret=SecretValue("ProductionSecretXYZ987"),
+            account_id="ACC_PROD_1",
+            is_live=True,
+        )
+    )
+    gate = ReconciliationGate(initially_open=True)
+
+    # No startup gate provided
+    authorizer = SecurityAuthorizer(
+        security_config=cfg,
+        credential_store=store,
+        reconciliation_gate=gate,
+        startup_gate=None,
+    )
+    req = _make_order_request()
+    with pytest.raises(SecurityAuthorizationError) as exc_info:
+        authorizer.authorize_order(req)
+    assert "Startup gate is required for LIVE mode but is missing" in str(exc_info.value)
+
+
+def test_missing_reconciliation_gate_fails_closed_in_live_mode() -> None:
+    """Regression: Live mode order rejected when reconciliation_gate is missing."""
+    cfg = SecurityConfig(
+        trading_mode_config=TradingModeConfig(
+            trading_mode=TradingMode.LIVE,
+            live_trading_enabled=True,
+        )
+    )
+    store = CredentialStore()
+    store.set_live_credentials(
+        BrokerCredentials(
+            broker_id="zerodha",
+            api_key=SecretValue("ProductionKeyABC987"),
+            api_secret=SecretValue("ProductionSecretXYZ987"),
+            account_id="ACC_PROD_1",
+            is_live=True,
+        )
+    )
+    temp_gate = ReconciliationGate(initially_open=True)
+    startup_gate = SecurityStartupGate(
+        security_config=cfg,
+        credential_store=store,
+        reconciliation_gate=temp_gate,
+    )
+    startup_gate.verify_startup()
+
+    # No reconciliation gate provided to authorizer
+    authorizer = SecurityAuthorizer(
+        security_config=cfg,
+        credential_store=store,
+        reconciliation_gate=None,
+        startup_gate=startup_gate,
+    )
+    req = _make_order_request()
+    with pytest.raises(SecurityAuthorizationError) as exc_info:
+        authorizer.authorize_order(req)
+    assert "Reconciliation gate is required for LIVE mode but is missing" in str(exc_info.value)
+
+
+def test_missing_gates_fail_closed_in_paper_mode() -> None:
+    """Regression: Paper mode order rejected when required gates are missing."""
+    cfg = SecurityConfig()  # enforce_startup_gate=True, enforce_reconciliation_gate=True
+    req = _make_order_request()
+
+    # 1. Missing reconciliation gate
+    auth_no_rec = SecurityAuthorizer(
+        security_config=cfg,
+        reconciliation_gate=None,
+    )
+    with pytest.raises(SecurityAuthorizationError) as exc_info:
+        auth_no_rec.authorize_order(req)
+    assert "Reconciliation gate is required by configuration but is missing" in str(exc_info.value)
+
+    # 2. Missing startup gate (with open reconciliation gate)
+    rec_gate = ReconciliationGate(initially_open=True)
+    auth_no_start = SecurityAuthorizer(
+        security_config=cfg,
+        reconciliation_gate=rec_gate,
+        startup_gate=None,
+    )
+    with pytest.raises(SecurityAuthorizationError) as exc_info:
+        auth_no_start.authorize_order(req)
+    assert "Startup gate is required by configuration but is missing" in str(exc_info.value)

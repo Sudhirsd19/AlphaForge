@@ -139,19 +139,31 @@ class SecurityConfig(BaseModel):
     kill_switch_initial_status: KillSwitchStatus = Field(default=KillSwitchStatus.DISARMED)
     enforce_risk_controls: bool = Field(default=True)
     enforce_reconciliation_gate: bool = Field(default=True)
+    enforce_startup_gate: bool = Field(default=True)
     redact_logs: bool = Field(default=True)
     max_daily_loss_limit: Decimal | None = Field(default=None)
 
     @field_validator(
-        "kill_switch_enabled",
         "enforce_risk_controls",
         "enforce_reconciliation_gate",
+        "enforce_startup_gate",
         "redact_logs",
         mode="before",
     )
     @classmethod
     def validate_security_booleans(cls, val: Any) -> bool:
         return parse_strict_bool(val)
+
+    @field_validator("kill_switch_enabled", mode="before")
+    @classmethod
+    def validate_kill_switch_enabled(cls, val: Any) -> bool:
+        parsed = parse_strict_bool(val)
+        if not parsed:
+            raise SecurityConfigurationError(
+                "Security violation: kill_switch_enabled cannot be False. "
+                "Kill switch protection cannot be disabled."
+            )
+        return True
 
     @field_validator("kill_switch_initial_status", mode="before")
     @classmethod
@@ -169,6 +181,11 @@ class SecurityConfig(BaseModel):
             raise SecurityConfigurationError(
                 "Security violation: enforce_reconciliation_gate cannot be set to False. "
                 "Reconciliation gate is mandatory and cannot be disabled."
+            )
+        if not self.enforce_startup_gate:
+            raise SecurityConfigurationError(
+                "Security violation: enforce_startup_gate cannot be set to False. "
+                "Startup gate is mandatory and cannot be disabled."
             )
         if not self.kill_switch_enabled:
             raise SecurityConfigurationError(
@@ -207,12 +224,16 @@ class SecurityConfig(BaseModel):
         if mode_data:
             data["trading_mode_config"] = TradingModeConfig(**mode_data)
 
+        if "KILL_SWITCH_ENABLED" in env:
+            data["kill_switch_enabled"] = env["KILL_SWITCH_ENABLED"]
         if "KILL_SWITCH_STATUS" in env:
             data["kill_switch_initial_status"] = env["KILL_SWITCH_STATUS"]
         if "ENFORCE_RISK_CONTROLS" in env:
             data["enforce_risk_controls"] = env["ENFORCE_RISK_CONTROLS"]
         if "ENFORCE_RECONCILIATION_GATE" in env:
             data["enforce_reconciliation_gate"] = env["ENFORCE_RECONCILIATION_GATE"]
+        if "ENFORCE_STARTUP_GATE" in env:
+            data["enforce_startup_gate"] = env["ENFORCE_STARTUP_GATE"]
         if "REDACT_LOGS" in env:
             data["redact_logs"] = env["REDACT_LOGS"]
         if "MAX_DAILY_LOSS_LIMIT" in env:

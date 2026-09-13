@@ -207,7 +207,7 @@ The `alphaforge.security.invariants` module provides 7 reusable forensic asserti
 
 ## 13. Test Matrix & Validation Results
 
-### Security Test Suite (`tests/unit/security/`) — 32 Tests (100% Pass)
+### Security Test Suite (`tests/unit/security/`) — 38 Tests (100% Pass)
 
 | Test File | Test ID | Description | Result |
 | :--- | :--- | :--- | :--- |
@@ -232,6 +232,9 @@ The `alphaforge.security.invariants` module provides 7 reusable forensic asserti
 | `test_kill_switch_and_risk.py` | `ADV-SEC-6` | Enable kill switch immediately before order -> blocked | **PASS** |
 | `test_startup_and_reconciliation.py` | `SEC10` | Reconciliation gate blocks trading until complete | **PASS** |
 | `test_startup_and_reconciliation.py` | `ADV-SEC-7` | Restart in LIVE mode with incomplete reconciliation blocks orders | **PASS** |
+| `test_startup_and_reconciliation.py` | `REG-1` | Missing startup gate in LIVE mode fails closed | **PASS** |
+| `test_startup_and_reconciliation.py` | `REG-2` | Missing reconciliation gate in LIVE mode fails closed | **PASS** |
+| `test_startup_and_reconciliation.py` | `REG-3` | Missing required gates in PAPER mode fails closed | **PASS** |
 | `test_security_invariants.py` | `INV1` | Invariant 1: Live trading disabled by default | **PASS** |
 | `test_security_invariants.py` | `INV2` | Invariant 2: Invalid mode fails closed | **PASS** |
 | `test_security_invariants.py` | `INV3` | Invariant 3: Secrets never leak in text | **PASS** |
@@ -243,10 +246,13 @@ The `alphaforge.security.invariants` module provides 7 reusable forensic asserti
 | `test_e2e_authorization.py` | `SEC15-2` | Kill switch blocks submission in `SecureBroker`; cancel allowed | **PASS** |
 | `test_e2e_authorization.py` | `SEC15-3` | Reconciliation gate blocks submission in `SecureBroker` | **PASS** |
 | `test_e2e_authorization.py` | `SEC15-4` | Live mode dual opt-in and credential validation enforced | **PASS** |
+| `test_e2e_authorization.py` | `SEC15-5` | Missing startup gate in LIVE mode blocks `SecureBroker` order | **PASS** |
+| `test_e2e_authorization.py` | `SEC15-6` | Missing reconciliation gate in LIVE mode blocks `SecureBroker` order | **PASS** |
+| `test_e2e_authorization.py` | `SEC15-7` | Missing required gates in PAPER mode blocks `SecureBroker` order | **PASS** |
 
 ### Full Repository Regression Status
-- Total Collected & Executed Tests: **742**
-- Total Passed: **742**
+- Total Collected & Executed Tests: **748**
+- Total Passed: **748**
 - Total Failed: **0**
 - Execution Duration: **~58s**
 
@@ -307,8 +313,8 @@ Automated static analysis verifies that no dangerous patterns exist in the repos
 ## 17. Phase 13 Freeze Criteria & Verdict
 
 ### Final Verification Criteria
-1. Full test suite: **742/742 passed (100%)**.
-2. Security tests: **32/32 passed (100%)**.
+1. Full test suite: **748/748 passed (100%)**.
+2. Security tests: **38/38 passed (100%)**.
 3. Zero diff against Phase 0–12 frozen baseline: **VERIFIED (EMPTY DIFF)**.
 4. Static scans for endpoints, leaks, and sleeps: **PASSED (0 VIOLATIONS)**.
 5. Strict typing (`mypy --strict alphaforge/security`): **PASSED (0 ERRORS)**.

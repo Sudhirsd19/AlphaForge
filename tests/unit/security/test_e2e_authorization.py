@@ -1,7 +1,8 @@
 """
 AlphaForge Phase 13 Security Tests: End-to-End Secure Broker & Order Authorization.
 
-Verifies SEC15: Full order authorization pipeline with SecureBroker wrapping PaperBroker.
+Verifies SEC15: Full order authorization pipeline with SecureBroker wrapping PaperBroker,
+including comprehensive missing-gate fail-closed scenarios.
 """
 
 from datetime import UTC, datetime
@@ -199,7 +200,7 @@ def test_sec15_live_mode_dual_opt_in_and_credential_enforcement() -> None:
     assert "Live credentials are not configured" in str(exc_info.value)
     assert paper_broker.get_order(client_order_id="ORD-LIVE-E2E-001") is None
 
-    # Now provide authentic live credentials
+    # Now provide authentic live credentials and verified startup gate
     live_store = CredentialStore()
     live_store.set_live_credentials(
         BrokerCredentials(
@@ -211,14 +212,128 @@ def test_sec15_live_mode_dual_opt_in_and_credential_enforcement() -> None:
         )
     )
 
+    startup_gate = SecurityStartupGate(
+        security_config=cfg_live,
+        credential_store=live_store,
+        kill_switch=kill_switch,
+        reconciliation_gate=rec_gate,
+    )
+    startup_gate.verify_startup()
+
     live_authorizer = SecurityAuthorizer(
         security_config=cfg_live,
         credential_store=live_store,
         kill_switch=kill_switch,
         reconciliation_gate=rec_gate,
+        startup_gate=startup_gate,
     )
     live_secure_broker = SecureBroker(delegate=paper_broker, authorizer=live_authorizer)
 
     # Now order is authorized and routes to broker
     order = live_secure_broker.submit_order(req)
     assert order.client_order_id == "ORD-LIVE-E2E-001"
+
+
+def test_sec15_live_mode_missing_startup_gate_blocks_order() -> None:
+    """SEC15: SecureBroker rejects live order when startup_gate is missing."""
+    cfg_live = SecurityConfig(
+        trading_mode_config=TradingModeConfig(
+            trading_mode=TradingMode.LIVE,
+            live_trading_enabled=True,
+        )
+    )
+    live_store = CredentialStore()
+    live_store.set_live_credentials(
+        BrokerCredentials(
+            broker_id="zerodha",
+            api_key=SecretValue("ProductionKeyABC987"),
+            api_secret=SecretValue("ProductionSecretXYZ987"),
+            account_id="PROD_ACC_100",
+            is_live=True,
+        )
+    )
+    paper_broker = PaperBroker()
+    rec_gate = ReconciliationGate(initially_open=True)
+
+    authorizer = SecurityAuthorizer(
+        security_config=cfg_live,
+        credential_store=live_store,
+        reconciliation_gate=rec_gate,
+        startup_gate=None,
+    )
+    secure_broker = SecureBroker(delegate=paper_broker, authorizer=authorizer)
+
+    req = _make_order_request("ORD-LIVE-NO-STARTUP")
+    with pytest.raises(SecurityAuthorizationError) as exc_info:
+        secure_broker.submit_order(req)
+    assert "Startup gate is required for LIVE mode but is missing" in str(exc_info.value)
+    assert paper_broker.get_order(client_order_id="ORD-LIVE-NO-STARTUP") is None
+
+
+def test_sec15_live_mode_missing_reconciliation_gate_blocks_order() -> None:
+    """SEC15: SecureBroker rejects live order when reconciliation_gate is missing."""
+    cfg_live = SecurityConfig(
+        trading_mode_config=TradingModeConfig(
+            trading_mode=TradingMode.LIVE,
+            live_trading_enabled=True,
+        )
+    )
+    live_store = CredentialStore()
+    live_store.set_live_credentials(
+        BrokerCredentials(
+            broker_id="zerodha",
+            api_key=SecretValue("ProductionKeyABC987"),
+            api_secret=SecretValue("ProductionSecretXYZ987"),
+            account_id="PROD_ACC_100",
+            is_live=True,
+        )
+    )
+    paper_broker = PaperBroker()
+    temp_gate = ReconciliationGate(initially_open=True)
+    startup_gate = SecurityStartupGate(
+        security_config=cfg_live,
+        credential_store=live_store,
+        reconciliation_gate=temp_gate,
+    )
+    startup_gate.verify_startup()
+
+    authorizer = SecurityAuthorizer(
+        security_config=cfg_live,
+        credential_store=live_store,
+        reconciliation_gate=None,
+        startup_gate=startup_gate,
+    )
+    secure_broker = SecureBroker(delegate=paper_broker, authorizer=authorizer)
+
+    req = _make_order_request("ORD-LIVE-NO-REC")
+    with pytest.raises(SecurityAuthorizationError) as exc_info:
+        secure_broker.submit_order(req)
+    assert "Reconciliation gate is required for LIVE mode but is missing" in str(exc_info.value)
+    assert paper_broker.get_order(client_order_id="ORD-LIVE-NO-REC") is None
+
+
+def test_sec15_paper_mode_missing_gates_block_orders() -> None:
+    """SEC15: SecureBroker rejects paper orders when required gates are missing."""
+    cfg = SecurityConfig()
+    paper_broker = PaperBroker()
+    req = _make_order_request("ORD-PAPER-NO-GATE")
+
+    # Missing reconciliation gate
+    auth_no_rec = SecurityAuthorizer(security_config=cfg, reconciliation_gate=None)
+    broker_no_rec = SecureBroker(delegate=paper_broker, authorizer=auth_no_rec)
+    with pytest.raises(SecurityAuthorizationError) as exc_info:
+        broker_no_rec.submit_order(req)
+    assert "Reconciliation gate is required by configuration but is missing" in str(exc_info.value)
+
+    # Missing startup gate (with open reconciliation gate)
+    rec_gate = ReconciliationGate(initially_open=True)
+    auth_no_start = SecurityAuthorizer(
+        security_config=cfg,
+        reconciliation_gate=rec_gate,
+        startup_gate=None,
+    )
+    broker_no_start = SecureBroker(delegate=paper_broker, authorizer=auth_no_start)
+    with pytest.raises(SecurityAuthorizationError) as exc_info:
+        broker_no_start.submit_order(req)
+    assert "Startup gate is required by configuration but is missing" in str(exc_info.value)
+    assert paper_broker.get_order(client_order_id="ORD-PAPER-NO-GATE") is None

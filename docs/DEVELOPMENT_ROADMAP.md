@@ -199,9 +199,9 @@ Phase 17 = Controlled Live
 - **Dependencies:** Phase 12.
 - **Files/Modules:** `alphaforge/security/*`, `tests/unit/security/*`, `docs/PHASE_13_PERSONAL_SECURITY.md`, `.gitignore`.
 - **Implementation Tasks:** Strict boolean parser (`parse_strict_bool`), paper-first execution mode defaults, dual-key live authorization (`TRADING_MODE=LIVE` and `LIVE_TRADING_ENABLED=True`), `SecretValue` wrapper with custom redaction, `CredentialStore` with paper/live isolation and dummy credential rejection, thread-safe `KillSwitch` with audit trail, `RedactionFormatter` for log and exception scrubbing, `SecurityStartupGate` pre-flight verification, `SecurityAuthorizer` and `SecureBroker` order decoration, executable security invariants.
-- **Tests:** 32 dedicated security tests (SEC1–SEC15, ADV-SEC-1–7, Invariants 1–7) covering paper-first defaults, fail-closed typos and malformed config, log scrubbing, credential isolation, kill-switch concurrency, reconciliation gate blocking, and E2E secure order routing.
-- **Acceptance Criteria:** Zero secrets present in codebase, logs, dumps, or serialized state; live trading mode strictly locked behind dual authorization keys; 100% test pass rate across 742 repository tests; zero diff against frozen Phase 0–12 baseline.
-- **Exit Gate:** Clean security scan report, 32/32 security tests passing, 742/742 suite passing, formal documentation complete (`docs/PHASE_13_PERSONAL_SECURITY.md`); user sign-off.
+- **Tests:** 38 dedicated security tests (SEC1–SEC15, ADV-SEC-1–7, REG-1–3, Invariants 1–7) covering paper-first defaults, fail-closed typos and malformed config, log scrubbing, credential isolation, kill-switch concurrency, mandatory dual gates, reconciliation gate blocking, and E2E secure order routing.
+- **Acceptance Criteria:** Zero secrets present in codebase, logs, dumps, or serialized state; live trading mode strictly locked behind dual authorization keys; 100% test pass rate across 748 repository tests; zero diff against frozen Phase 0–12 baseline.
+- **Exit Gate:** Clean security scan report, 38/38 security tests passing, 748/748 suite passing, formal documentation complete (`docs/PHASE_13_PERSONAL_SECURITY.md`); user sign-off.
 - **Status:** IMPLEMENTED / VALIDATED (Freeze Ready).
 - **Risks:** Accidental live execution or secret leakage; mitigated by fail-closed paper defaults, dual-key live gates, and automated log redaction.
 

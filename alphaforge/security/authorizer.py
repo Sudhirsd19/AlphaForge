@@ -38,8 +38,8 @@ class SecurityAuthorizer:
     Guarantees:
     - Kill switch engagement blocks new order submissions.
     - LIVE mode submissions require dual-opt-in and authentic live credentials.
-    - Closed reconciliation gates block trade entry.
-    - Startup gate verification must be completed.
+    - Closed or missing reconciliation gates block trade entry.
+    - Unverified or missing startup security gates block trade entry.
     """
 
     def __init__(
@@ -66,6 +66,10 @@ class SecurityAuthorizer:
         return self._reconciliation_gate
 
     @property
+    def startup_gate(self) -> SecurityStartupGate | None:
+        return self._startup_gate
+
+    @property
     def config(self) -> SecurityConfig:
         return self._config
 
@@ -76,6 +80,7 @@ class SecurityAuthorizer:
         Fails closed with SecurityAuthorizationError (or subclass) if any condition is breached.
         """
         cid = request.client_order_id
+        mode = self._config.trading_mode_config.effective_mode
 
         # 1. Kill Switch Check (Immediate fail closed)
         if self._kill_switch.is_engaged():
@@ -83,8 +88,6 @@ class SecurityAuthorizer:
             raise KillSwitchEngagedError(
                 f"Order {cid} rejected: Kill switch is ENGAGED ({reason})."
             )
-
-        mode = self._config.trading_mode_config.effective_mode
 
         # 2. Live Trading Dual Authorization Check
         if mode == TradingMode.LIVE:
@@ -107,22 +110,30 @@ class SecurityAuthorizer:
                 )
                 raise SecurityAuthorizationError(msg)
 
-        # 3. Reconciliation Gate Check
-        if (
-            self._config.enforce_reconciliation_gate
-            and self._reconciliation_gate is not None
-            and not self._reconciliation_gate.is_open
-        ):
-            msg = (
-                f"Order {cid} rejected: "
-                f"Reconciliation gate is closed ({self._reconciliation_gate.reason})."
-            )
-            raise ReconciliationGateClosedError(msg)
+        # 3. Reconciliation Gate Check (Mandatory for LIVE or when configured)
+        if mode == TradingMode.LIVE or self._config.enforce_reconciliation_gate:
+            if self._reconciliation_gate is None:
+                ctx = "for LIVE mode" if mode == TradingMode.LIVE else "by configuration"
+                msg = f"Order {cid} rejected: Reconciliation gate is required {ctx} but is missing."
+                raise SecurityAuthorizationError(msg)
 
-        # 4. Startup Gate Check
-        if self._startup_gate is not None and not self._startup_gate.is_verified:
-            msg = f"Order {cid} rejected: Startup security gate verification has not passed."
-            raise SecurityAuthorizationError(msg)
+            if not self._reconciliation_gate.is_open:
+                msg = (
+                    f"Order {cid} rejected: "
+                    f"Reconciliation gate is closed ({self._reconciliation_gate.reason})."
+                )
+                raise ReconciliationGateClosedError(msg)
+
+        # 4. Startup Gate Check (Mandatory for LIVE or when configured)
+        if mode == TradingMode.LIVE or self._config.enforce_startup_gate:
+            if self._startup_gate is None:
+                ctx = "for LIVE mode" if mode == TradingMode.LIVE else "by configuration"
+                msg = f"Order {cid} rejected: Startup gate is required {ctx} but is missing."
+                raise SecurityAuthorizationError(msg)
+
+            if not self._startup_gate.is_verified:
+                msg = f"Order {cid} rejected: Startup security gate verification has not passed."
+                raise SecurityAuthorizationError(msg)
 
 
 class SecureBroker(AbstractBroker):
