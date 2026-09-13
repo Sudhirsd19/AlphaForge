@@ -8,7 +8,12 @@ Guarantees source artifact immutability and deterministic manifest extraction.
 from collections.abc import Sequence
 from pathlib import Path
 
-from alphaforge.backtest.models import BacktestResult, TraceEntry
+from alphaforge.backtest.models import (
+    BacktestResult,
+    TraceEntry,
+    TraceEventType,
+    compute_trace_canonical_hash,
+)
 from alphaforge.core.exceptions import ReplayIntegrityError
 from alphaforge.ledger.ledger import AuditLedger
 from alphaforge.ledger.models import AuditEvent, AuditEventType
@@ -113,6 +118,18 @@ class ReplayArtifactSource:
         # If BacktestResult is provided, extract high-fidelity manifest
         if self._backtest_result is not None:
             res = self._backtest_result
+            auth_trace = [
+                e
+                for e in res.execution_trace
+                if e.event_type
+                in (
+                    TraceEventType.SIGNAL_GENERATED,
+                    TraceEventType.RISK_EVALUATED,
+                    TraceEventType.ORDER_SIMULATED,
+                    TraceEventType.FILL_SIMULATED,
+                    TraceEventType.TRADE_CLOSED,
+                )
+            ]
             return ReplayManifest(
                 source_run_id=res.backtest_run_id,
                 source_dataset_id=res.dataset_metadata.dataset_id,
@@ -121,13 +138,29 @@ class ReplayArtifactSource:
                 source_strategy_version=res.config.strategy_version,
                 source_engine_version=res.config.engine_version,
                 source_result_canonical_hash=res.result_canonical_hash,
-                source_trace_canonical_hash=res.trace_canonical_hash,
+                source_trace_canonical_hash=compute_trace_canonical_hash(auth_trace),
                 source_contract_id=res.dataset_metadata.symbol,
                 source_risk_config_fingerprint=None,
                 source_cost_config_fingerprint=None,
                 source_replay_schema_version=REPLAY_SCHEMA_VERSION,
                 replay_engine_version=REPLAY_ENGINE_VERSION,
             )
+
+        source_trace_hash: str | None = None
+        if self._trace:
+            auth_trace = [
+                e
+                for e in self._trace
+                if e.event_type
+                in (
+                    TraceEventType.SIGNAL_GENERATED,
+                    TraceEventType.RISK_EVALUATED,
+                    TraceEventType.ORDER_SIMULATED,
+                    TraceEventType.FILL_SIMULATED,
+                    TraceEventType.TRADE_CLOSED,
+                )
+            ]
+            source_trace_hash = compute_trace_canonical_hash(auth_trace)
 
         # Inspect events for BACKTEST_STARTED event
         for ev in self._events:
@@ -143,7 +176,7 @@ class ReplayArtifactSource:
                     source_strategy_version=str(payload.get("strategy_version", "1.0.0")),
                     source_engine_version="1.0.0",
                     source_result_canonical_hash=None,
-                    source_trace_canonical_hash=None,
+                    source_trace_canonical_hash=source_trace_hash,
                     source_contract_id=None,
                     source_risk_config_fingerprint=None,
                     source_cost_config_fingerprint=None,
@@ -161,7 +194,7 @@ class ReplayArtifactSource:
             source_strategy_version="1.0.0",
             source_engine_version="1.0.0",
             source_result_canonical_hash=None,
-            source_trace_canonical_hash=None,
+            source_trace_canonical_hash=source_trace_hash,
             source_contract_id=None,
             source_risk_config_fingerprint=None,
             source_cost_config_fingerprint=None,

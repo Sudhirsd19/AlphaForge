@@ -6,13 +6,21 @@ Guarantees deterministic identity, canonical serialization, and strict schema va
 """
 
 import hashlib
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from alphaforge.backtest.models import BacktestTrade, TraceEntry
+from alphaforge.backtest.models import (
+    BacktestResult,
+    BacktestTrade,
+    EquitySnapshot,
+    QuantGateResult,
+    TraceEntry,
+)
 from alphaforge.core.exceptions import ReplayIntegrityError
 from alphaforge.execution.enums import OrderState
 from alphaforge.ledger.serialization import canonical_json
@@ -294,10 +302,15 @@ class ReplayState(BaseModel):
     risk: ReplayRiskState = Field(default_factory=ReplayRiskState)
     trades: tuple[BacktestTrade, ...] = Field(default_factory=tuple)
     trace: tuple[TraceEntry, ...] = Field(default_factory=tuple)
+    equity_curve: tuple[EquitySnapshot, ...] = Field(default_factory=tuple)
+    quant_gates: tuple[QuantGateResult, ...] = Field(default_factory=tuple)
     last_processed_sequence: int = Field(default=0, ge=0)
     last_event_id: str | None = Field(default=None)
     last_event_hash: str | None = Field(default=None)
     last_event_timestamp: datetime | None = Field(default=None)
+    last_exit_fill: Mapping[str, Any] | None = Field(
+        default=None, description="Temporary exit fill details pending TRADE_CLOSED"
+    )
 
     def compute_fingerprint(self) -> str:
         """
@@ -319,8 +332,10 @@ class ReplayState(BaseModel):
                 "lot_size": self.contract.lot_size,
                 "post_expiry_fills": self.contract.post_expiry_fills,
             },
+            "equity_snapshots_count": len(self.equity_curve),
             "last_event_hash": self.last_event_hash,
             "last_event_id": self.last_event_id,
+            "last_exit_fill": dict(self.last_exit_fill) if self.last_exit_fill else None,
             "last_processed_sequence": self.last_processed_sequence,
             "orders": {
                 order_id: {
@@ -363,6 +378,7 @@ class ReplayState(BaseModel):
                 "strategy_version": self.position.strategy_version,
                 "symbol": self.position.symbol,
             },
+            "quant_gates_count": len(self.quant_gates),
             "risk": {
                 "circuit_breaker_active": self.risk.circuit_breaker_active,
                 "risk_approvals": self.risk.risk_approvals,
@@ -370,7 +386,9 @@ class ReplayState(BaseModel):
                 "risk_evaluations": self.risk.risk_evaluations,
                 "risk_rejections": self.risk.risk_rejections,
             },
+            "trade_ids": [t.trade_id for t in self.trades],
             "trades_count": len(self.trades),
+            "trades_net_pnl": str(sum((t.net_pnl for t in self.trades), Decimal("0"))),
             "trace_events_count": len(self.trace),
         }
         canonical_repr = canonical_json(state_payload)
@@ -454,6 +472,12 @@ class ReplayResult(BaseModel):
     )
     replay_result_hash: str | None = Field(
         default=None, description="Canonical backtest result hash calculated from replayed state"
+    )
+    reconstructed_result: BacktestResult | None = Field(
+        default=None, description="Independently reconstructed BacktestResult, if available"
+    )
+    reconstruction_status: str = Field(
+        default="INCOMPLETE", description="COMPLETE, INCOMPLETE, or FAILED"
     )
     checkpoints: tuple[ReplayCheckpoint, ...] = Field(
         default_factory=tuple, description="Deterministic checkpoints captured during replay"

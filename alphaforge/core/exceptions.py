@@ -234,7 +234,10 @@ class ReplayError(AlphaForgeError):
 
 
 class ReplayIntegrityError(ReplayError):
-    """Raised when source artifacts or replayed events violate cryptographic, ordering, or schema integrity."""
+    """
+    Raised when source artifacts or replayed events violate cryptographic,
+    ordering, or schema integrity.
+    """
 
     pass
 
@@ -249,4 +252,3 @@ class ReplayStateTransitionError(ReplayError):
     """Raised when an invalid state transition occurs during replay."""
 
     pass
-

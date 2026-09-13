@@ -218,14 +218,7 @@ class FSMTransitionValidator:
             )
 
         allowed = ALLOWED_TRANSITIONS.get(current_state, frozenset())
-        # Support Phase 7/8 live transitions and Phase 10 simulated order events
-        # where simulated orders (CREATED/VALIDATED/SUBMITTED) transition to FILLED
-        is_simulated_fill = target_state == OrderState.FILLED and current_state in (
-            OrderState.SUBMITTED,
-            OrderState.CREATED,
-            OrderState.VALIDATED,
-        )
-        if target_state not in allowed and not is_simulated_fill:
+        if target_state not in allowed:
             allowed_names = sorted(s.value for s in allowed)
             return ReplayMismatch(
                 divergent_sequence=sequence_number,

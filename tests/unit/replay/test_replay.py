@@ -30,10 +30,20 @@ import pytest
 
 from alphaforge.backtest.datasets import BacktestDataset
 from alphaforge.backtest.engine import BacktestEngine
-from alphaforge.backtest.models import BacktestConfig, BacktestResult
+from alphaforge.backtest.models import (
+    BacktestConfig,
+    BacktestResult,
+    BacktestTrade,
+    TraceEntry,
+    TraceEventType,
+    compute_result_canonical_hash,
+    compute_trace_canonical_hash,
+)
 from alphaforge.contract.models import ContractMaster
+from alphaforge.core.exceptions import ReplayIntegrityError
 from alphaforge.data.enums import InstrumentType
 from alphaforge.data.models import MarketCandle
+from alphaforge.execution.enums import OrderState
 from alphaforge.ledger.ledger import AuditLedger
 from alphaforge.ledger.models import (
     AuditEvent,
@@ -48,6 +58,7 @@ from alphaforge.replay.models import (
     ReplayMode,
     ReplayStatus,
 )
+from alphaforge.risk.enums import TradeSide
 
 
 def _make_synthetic_candles(n: int = 50) -> list[MarketCandle]:
@@ -97,6 +108,94 @@ def _run_sample_backtest() -> tuple[BacktestEngine, BacktestResult]:
     engine = BacktestEngine(cfg, dataset)
     res = engine.run()
     return engine, res
+
+
+def _build_sample_trade_ledger(symbol: str = "NIFTY") -> AuditLedger:
+    storage = InMemoryLedgerStorage()
+    ledger = AuditLedger(storage)
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    e1 = ledger.append(
+        event_type=AuditEventType.BACKTEST_STARTED,
+        entity_type="BACKTEST",
+        entity_id="RUN_TRD",
+        correlation_id="RUN_TRD",
+        causation_id="GENESIS",
+        payload={"run_id": "RUN_TRD", "contract_id": symbol, "initial_capital": "1000000"},
+        event_timestamp=t0,
+    )
+    e2 = ledger.append(
+        event_type=AuditEventType.SIGNAL_GENERATED,
+        entity_type="SIGNAL",
+        entity_id="SIG_1",
+        correlation_id="RUN_TRD",
+        causation_id=e1.event_id,
+        payload={
+            "signal_id": "SIG_1",
+            "direction": "LONG",
+            "symbol": symbol,
+            "entry_price": "24000",
+            "stop_loss": "23900",
+            "profit_target": "24200",
+        },
+        event_timestamp=t0 + timedelta(minutes=1),
+    )
+    e3 = ledger.append(
+        event_type=AuditEventType.ORDER_SIMULATED,
+        entity_type="ORDER",
+        entity_id="ORD_1",
+        correlation_id="RUN_TRD",
+        causation_id=e2.event_id,
+        payload={
+            "order_id": "ORD_1",
+            "symbol": symbol,
+            "side": "LONG",
+            "quantity": 10,
+            "entry_price": "24000",
+        },
+        event_timestamp=t0 + timedelta(minutes=2),
+    )
+    e4 = ledger.append(
+        event_type=AuditEventType.FILL_SIMULATED,
+        entity_type="ORDER",
+        entity_id="ORD_1",
+        correlation_id="RUN_TRD",
+        causation_id=e3.event_id,
+        payload={
+            "order_id": "ORD_1",
+            "symbol": symbol,
+            "side": "LONG",
+            "quantity": 10,
+            "effective_price": "24000",
+            "fee": "20",
+            "slippage_loss": "5",
+        },
+        event_timestamp=t0 + timedelta(minutes=3),
+    )
+    e5 = ledger.append(
+        event_type=AuditEventType.TRADE_CLOSED,
+        entity_type="TRADE",
+        entity_id="TRD_1",
+        correlation_id="RUN_TRD",
+        causation_id=e4.event_id,
+        payload={
+            "trade_id": "TRD_1",
+            "symbol": symbol,
+            "gross_pnl": "1000",
+            "net_pnl": "975",
+            "exit_reason": "SIGNAL",
+        },
+        event_timestamp=t0 + timedelta(minutes=4),
+    )
+    ledger.append(
+        event_type=AuditEventType.BACKTEST_COMPLETED,
+        entity_type="BACKTEST",
+        entity_id="RUN_TRD",
+        correlation_id="RUN_TRD",
+        causation_id=e5.event_id,
+        payload={"run_id": "RUN_TRD", "total_trades": 1, "final_equity": "1000975"},
+        event_timestamp=t0 + timedelta(minutes=5),
+    )
+    return ledger
 
 
 # ---------------------------------------------------------------------------
@@ -669,3 +768,598 @@ def test_r20_risk_execution_telemetry_replay() -> None:
     assert res.final_state.risk.risk_approvals == 1
     assert res.final_state.risk.risk_rejections == 1
     assert res.final_state.risk.circuit_breaker_active is True
+
+
+# ---------------------------------------------------------------------------
+# R21: Source trace mutation without audit-event mutation fails TRACE_HASH_MISMATCH
+# ---------------------------------------------------------------------------
+def test_r21_source_trace_mutation_fails() -> None:
+    clean_ledger = _build_sample_trade_ledger()
+    clean_events = clean_ledger._storage.read_all()
+    baseline_res = ReplayEngine(ReplayConfig(), ReplayArtifactSource(events=clean_events)).replay()
+    assert baseline_res.status == ReplayStatus.PASS
+    assert baseline_res.final_state is not None
+    assert len(baseline_res.final_state.trace) > 0
+
+    mutated_trace = list(baseline_res.final_state.trace)
+    orig = mutated_trace[0]
+    mutated_trace[0] = orig.model_copy(update={"price": Decimal("999999")})
+
+    source = ReplayArtifactSource(
+        events=clean_events,
+        trace=mutated_trace,
+    )
+    config = ReplayConfig(verify_execution_trace=True)
+    res = ReplayEngine(config, source).replay()
+
+    assert res.status == ReplayStatus.FAIL
+    assert res.first_divergence is not None
+    assert res.first_divergence.mismatch_category == "TRACE_HASH_MISMATCH"
+
+
+# ---------------------------------------------------------------------------
+# R22: Audit event mutation causes independent replay trace divergence
+# ---------------------------------------------------------------------------
+def test_r22_audit_event_mutation_diverges_replay_trace() -> None:
+    clean_ledger = _build_sample_trade_ledger()
+    clean_events = clean_ledger._storage.read_all()
+    baseline_res = ReplayEngine(ReplayConfig(), ReplayArtifactSource(events=clean_events)).replay()
+    assert baseline_res.status == ReplayStatus.PASS
+    assert baseline_res.final_state is not None
+    expected_trace = baseline_res.final_state.trace
+    expected_trace_hash = compute_trace_canonical_hash(expected_trace)
+
+    tampered_events = list(clean_events)
+    tampered_idx = None
+    for idx, ev in enumerate(tampered_events):
+        if ev.event_type == AuditEventType.ORDER_SIMULATED:
+            tampered_idx = idx
+            break
+
+    assert tampered_idx is not None
+    orig_ev = tampered_events[tampered_idx]
+    mutated_payload = dict(orig_ev.payload)
+    mutated_payload["entry_price"] = "999999"
+    tampered_ev = orig_ev.model_copy(update={"payload": mutated_payload})
+    tampered_events[tampered_idx] = tampered_ev
+
+    manifest = ReplayManifest(
+        source_run_id="RUN_TRD",
+        source_dataset_id="DS",
+        source_dataset_checksum="CHK",
+        source_strategy_id="STRAT",
+        source_strategy_version="1.0.0",
+        source_engine_version="1.0.0",
+        source_trace_canonical_hash=expected_trace_hash,
+    )
+    source = ReplayArtifactSource(events=tampered_events, manifest=manifest)
+    config = ReplayConfig(verify_audit_hash_chain=False, verify_execution_trace=True)
+    res = ReplayEngine(config, source).replay()
+
+    assert res.status == ReplayStatus.FAIL
+    assert res.first_divergence is not None
+    assert res.first_divergence.mismatch_category == "TRACE_HASH_MISMATCH"
+
+
+# ---------------------------------------------------------------------------
+# R23: Source BacktestResult hash replaced with false value is detected
+# ---------------------------------------------------------------------------
+def test_r23_source_result_hash_false_value_detected() -> None:
+    bt_engine, bt_res = _run_sample_backtest()
+    events = bt_engine.ledger._storage.read_all()
+
+    manifest = ReplayManifest(
+        source_run_id=bt_res.backtest_run_id,
+        source_dataset_id="DS",
+        source_dataset_checksum="CHK",
+        source_strategy_id="STRAT",
+        source_strategy_version="1.0.0",
+        source_engine_version="1.0.0",
+        source_result_canonical_hash="0" * 64,
+    )
+    source = ReplayArtifactSource(events=events, backtest_result=bt_res, manifest=manifest)
+    config = ReplayConfig(verify_result_hash=True)
+    res = ReplayEngine(config, source).replay()
+
+    assert res.status == ReplayStatus.FAIL
+    assert res.first_divergence is not None
+    assert res.first_divergence.mismatch_category == "RESULT_HASH_MISMATCH"
+    assert res.replay_result_hash is not None
+    assert res.replay_result_hash != "0" * 64
+    assert res.reconstructed_result is not None
+
+
+# ---------------------------------------------------------------------------
+# R24: Source BacktestResult contents mutated while audit events remain unchanged
+# ---------------------------------------------------------------------------
+def test_r24_source_result_mutation_not_silently_copied() -> None:
+    bt_engine, bt_res = _run_sample_backtest()
+    events = bt_engine.ledger._storage.read_all()
+
+    fake_trade = BacktestTrade(
+        trade_id="TRD-FORGED-999",
+        symbol="NIFTY",
+        side=TradeSide.LONG,
+        entry_timestamp=bt_res.config.start_time,
+        entry_price=Decimal("20000"),
+        entry_quantity=100,
+        exit_timestamp=bt_res.config.start_time + timedelta(minutes=15),
+        exit_price=Decimal("25000"),
+        exit_quantity=100,
+        gross_pnl=Decimal("500000"),
+        fees=Decimal("100"),
+        slippage=Decimal("50"),
+        other_costs=Decimal("0"),
+        net_pnl=Decimal("499850"),
+        return_pct=Decimal("25"),
+        holding_duration_seconds=900,
+        max_favorable_excursion=Decimal("0"),
+        max_adverse_excursion=Decimal("0"),
+        entry_signal_id="SIG_FORGED",
+        strategy_version="1.0.0",
+        exit_reason="SIGNAL",
+    )
+    mutated_bt_res = bt_res.model_copy(update={"trades": (fake_trade,)})
+    mutated_bt_res = mutated_bt_res.model_copy(
+        update={"result_canonical_hash": compute_result_canonical_hash(mutated_bt_res)}
+    )
+
+    source = ReplayArtifactSource(events=events, backtest_result=mutated_bt_res)
+    config = ReplayConfig(verify_result_hash=True)
+    res = ReplayEngine(config, source).replay()
+
+    assert res.reconstructed_result is not None
+    reconstructed_trade_ids = [t.trade_id for t in res.reconstructed_result.trades]
+    assert "TRD-FORGED-999" not in reconstructed_trade_ids
+    assert res.status == ReplayStatus.FAIL
+    assert res.first_divergence is not None
+    assert res.first_divergence.mismatch_category == "RESULT_HASH_MISMATCH"
+
+
+# ---------------------------------------------------------------------------
+# R25: Synthetic/hardcoded trade data cannot appear in replay reconstruction
+# ---------------------------------------------------------------------------
+def test_r25_no_synthetic_trade_data() -> None:
+    ledger = AuditLedger(InMemoryLedgerStorage())
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    e1 = ledger.append(
+        event_type=AuditEventType.BACKTEST_STARTED,
+        entity_type="BACKTEST",
+        entity_id="RUN_SYNTH",
+        correlation_id="RUN_SYNTH",
+        causation_id="GENESIS",
+        payload={"run_id": "RUN_SYNTH"},
+        event_timestamp=t0,
+    )
+    e2 = ledger.append(
+        event_type=AuditEventType.FILL_SIMULATED,
+        entity_type="ORDER",
+        entity_id="ORD_1",
+        correlation_id="RUN_SYNTH",
+        causation_id=e1.event_id,
+        payload={"order_id": "ORD_1", "effective_price": "0", "quantity": 0},
+        event_timestamp=t0 + timedelta(minutes=1),
+    )
+    ledger.append(
+        event_type=AuditEventType.TRADE_CLOSED,
+        entity_type="TRADE",
+        entity_id="TRD_1",
+        correlation_id="RUN_SYNTH",
+        causation_id=e2.event_id,
+        payload={"trade_id": "TRD_1"},
+        event_timestamp=t0 + timedelta(minutes=2),
+    )
+    source = ReplayArtifactSource(events=ledger._storage.read_all())
+    res = ReplayEngine(ReplayConfig(), source).replay()
+
+    assert res.status == ReplayStatus.FAIL
+    assert res.first_divergence is not None
+    assert res.first_divergence.mismatch_category == "MISSING_TRADE_DATA"
+
+
+# ---------------------------------------------------------------------------
+# R26: Fresh replay vs checkpoint resume has identical independently reconstructed trace
+# ---------------------------------------------------------------------------
+def test_r26_fresh_vs_checkpoint_identical_trace() -> None:
+    bt_engine, bt_res = _run_sample_backtest()
+    events = bt_engine.ledger._storage.read_all()
+
+    source = ReplayArtifactSource(events=events, backtest_result=bt_res)
+    config = ReplayConfig(mode=ReplayMode.FULL, checkpoint_interval=2)
+    full_res = ReplayEngine(config, source).replay()
+    assert full_res.status == ReplayStatus.PASS
+    assert len(full_res.checkpoints) >= 2
+
+    mid_cp = full_res.checkpoints[1]
+    resumed_res = ReplayEngine(config, source).resume_from_checkpoint(mid_cp)
+
+    assert resumed_res.status == ReplayStatus.PASS
+    assert resumed_res.final_state is not None
+    assert full_res.final_state is not None
+    assert len(resumed_res.final_state.trace) == len(full_res.final_state.trace)
+    assert resumed_res.replay_trace_hash == full_res.replay_trace_hash
+
+
+# ---------------------------------------------------------------------------
+# R27: Fresh replay vs checkpoint resume has identical independently reconstructed result hash
+# ---------------------------------------------------------------------------
+def test_r27_fresh_vs_checkpoint_identical_result_hash() -> None:
+    bt_engine, bt_res = _run_sample_backtest()
+    events = bt_engine.ledger._storage.read_all()
+
+    source = ReplayArtifactSource(events=events, backtest_result=bt_res)
+    config = ReplayConfig(mode=ReplayMode.FULL, checkpoint_interval=2)
+    full_res = ReplayEngine(config, source).replay()
+    assert full_res.status == ReplayStatus.PASS
+
+    mid_cp = full_res.checkpoints[1]
+    resumed_res = ReplayEngine(config, source).resume_from_checkpoint(mid_cp)
+
+    assert resumed_res.status == ReplayStatus.PASS
+    assert resumed_res.replay_result_hash == full_res.replay_result_hash
+    assert resumed_res.final_state_fingerprint == full_res.final_state_fingerprint
+
+
+# ---------------------------------------------------------------------------
+# R28: Changing an authoritative fill event changes replay-derived state/result
+# ---------------------------------------------------------------------------
+def test_r28_altering_fill_event_changes_state() -> None:
+    def build_ledger(fill_price: str) -> list[AuditEvent]:
+        storage = InMemoryLedgerStorage()
+        ldg = AuditLedger(storage)
+        t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+        e1 = ldg.append(
+            event_type=AuditEventType.BACKTEST_STARTED,
+            entity_type="BACKTEST",
+            entity_id="RUN_F",
+            correlation_id="RUN_F",
+            causation_id="GENESIS",
+            payload={"run_id": "RUN_F", "initial_capital": "1000000", "contract_id": "NIFTY"},
+            event_timestamp=t0,
+        )
+        e2 = ldg.append(
+            event_type=AuditEventType.FILL_SIMULATED,
+            entity_type="ORDER",
+            entity_id="ORD_1",
+            correlation_id="RUN_F",
+            causation_id=e1.event_id,
+            payload={
+                "order_id": "ORD_1",
+                "symbol": "NIFTY",
+                "side": "LONG",
+                "quantity": 10,
+                "effective_price": fill_price,
+                "fee": "10",
+                "slippage_loss": "2",
+            },
+            event_timestamp=t0 + timedelta(minutes=1),
+        )
+        ldg.append(
+            event_type=AuditEventType.TRADE_CLOSED,
+            entity_type="TRADE",
+            entity_id="TRD_1",
+            correlation_id="RUN_F",
+            causation_id=e2.event_id,
+            payload={"trade_id": "TRD_1", "net_pnl": "500"},
+            event_timestamp=t0 + timedelta(minutes=2),
+        )
+        return list(ldg._storage.read_all())
+
+    events1 = build_ledger("24000")
+    events2 = build_ledger("25000")
+
+    res1 = ReplayEngine(ReplayConfig(), ReplayArtifactSource(events=events1)).replay()
+    res2 = ReplayEngine(ReplayConfig(), ReplayArtifactSource(events=events2)).replay()
+
+    assert res1.status == ReplayStatus.PASS
+    assert res2.status == ReplayStatus.PASS
+    assert res1.final_state_fingerprint != res2.final_state_fingerprint
+
+
+# ---------------------------------------------------------------------------
+# R29: Checkpoint corruption detection
+# ---------------------------------------------------------------------------
+def test_r29_checkpoint_corruption_detection() -> None:
+    bt_engine, bt_res = _run_sample_backtest()
+    events = bt_engine.ledger._storage.read_all()
+
+    source = ReplayArtifactSource(events=events, backtest_result=bt_res)
+    config = ReplayConfig(mode=ReplayMode.FULL, checkpoint_interval=2)
+    full_res = ReplayEngine(config, source).replay()
+    assert full_res.status == ReplayStatus.PASS
+
+    valid_cp = full_res.checkpoints[1]
+    corrupt_cp = valid_cp.model_copy(update={"state_fingerprint": "CORRUPTED_HASH_VAL"})
+
+    engine = ReplayEngine(config, source)
+    with pytest.raises(ReplayIntegrityError) as exc_info:
+        engine.resume_from_checkpoint(corrupt_cp)
+    assert "Checkpoint state fingerprint mismatch" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# R30: Missing trade mandatory fields fail closed with MISSING_TRADE_DATA
+# ---------------------------------------------------------------------------
+def test_r30_missing_trade_mandatory_fields_fail_closed() -> None:
+    ledger = AuditLedger(InMemoryLedgerStorage())
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    e1 = ledger.append(
+        event_type=AuditEventType.BACKTEST_STARTED,
+        entity_type="BACKTEST",
+        entity_id="RUN_MISS",
+        correlation_id="RUN_MISS",
+        causation_id="GENESIS",
+        payload={"run_id": "RUN_MISS"},
+        event_timestamp=t0,
+    )
+    e2 = ledger.append(
+        event_type=AuditEventType.FILL_SIMULATED,
+        entity_type="ORDER",
+        entity_id="ORD_M",
+        correlation_id="RUN_MISS",
+        causation_id=e1.event_id,
+        payload={"order_id": "ORD_M", "symbol": "NIFTY", "quantity": 0, "effective_price": "24000"},
+        event_timestamp=t0 + timedelta(minutes=1),
+    )
+    ledger.append(
+        event_type=AuditEventType.TRADE_CLOSED,
+        entity_type="TRADE",
+        entity_id="TRD_M",
+        correlation_id="RUN_MISS",
+        causation_id=e2.event_id,
+        payload={"trade_id": "TRD_M", "net_pnl": "100"},
+        event_timestamp=t0 + timedelta(minutes=2),
+    )
+    source = ReplayArtifactSource(events=ledger._storage.read_all())
+    res = ReplayEngine(ReplayConfig(), source).replay()
+
+    assert res.status == ReplayStatus.FAIL
+    assert res.first_divergence is not None
+    assert res.first_divergence.mismatch_category == "MISSING_TRADE_DATA"
+
+
+# ---------------------------------------------------------------------------
+# R31: Pure audit event replay with no BacktestResult succeeds and has independent trace and state
+# ---------------------------------------------------------------------------
+def test_r31_pure_audit_event_replay_no_backtest_result() -> None:
+    ledger = AuditLedger(InMemoryLedgerStorage())
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    e1 = ledger.append(
+        event_type=AuditEventType.BACKTEST_STARTED,
+        entity_type="BACKTEST",
+        entity_id="RUN_PURE",
+        correlation_id="RUN_PURE",
+        causation_id="GENESIS",
+        payload={"run_id": "RUN_PURE", "contract_id": "NIFTY", "initial_capital": "500000"},
+        event_timestamp=t0,
+    )
+    ledger.append(
+        event_type=AuditEventType.ORDER_SIMULATED,
+        entity_type="ORDER",
+        entity_id="ORD_P1",
+        correlation_id="RUN_PURE",
+        causation_id=e1.event_id,
+        payload={"order_id": "ORD_P1", "symbol": "NIFTY", "side": "LONG", "quantity": 10},
+        event_timestamp=t0 + timedelta(minutes=1),
+    )
+    source = ReplayArtifactSource(events=ledger._storage.read_all())
+    res = ReplayEngine(ReplayConfig(), source).replay()
+
+    assert res.status == ReplayStatus.PASS
+    assert res.events_processed == 2
+    assert res.reconstruction_status == "NO_SOURCE_RESULT"
+    assert res.reconstructed_result is None
+    assert res.final_state is not None
+    assert len(res.final_state.trace) == 1
+    assert "ORD_P1" in res.final_state.orders
+
+
+# ---------------------------------------------------------------------------
+# R32: Circuit breaker event updates risk state and trace entry without side effects
+# ---------------------------------------------------------------------------
+def test_r32_circuit_breaker_telemetry_isolation() -> None:
+    ledger = AuditLedger(InMemoryLedgerStorage())
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    e1 = ledger.append(
+        event_type=AuditEventType.BACKTEST_STARTED,
+        entity_type="BACKTEST",
+        entity_id="RUN_CB",
+        correlation_id="RUN_CB",
+        causation_id="GENESIS",
+        payload={"run_id": "RUN_CB"},
+        event_timestamp=t0,
+    )
+    ledger.append(
+        event_type=AuditEventType.CIRCUIT_BREAKER_TRIGGERED,
+        entity_type="RISK",
+        entity_id="CB_EVENT",
+        correlation_id="RUN_CB",
+        causation_id=e1.event_id,
+        payload={"reason": "MAX_DRAWDOWN"},
+        event_timestamp=t0 + timedelta(minutes=1),
+    )
+    source = ReplayArtifactSource(events=ledger._storage.read_all())
+    res = ReplayEngine(ReplayConfig(), source).replay()
+
+    assert res.status == ReplayStatus.PASS
+    assert res.final_state is not None
+    assert res.final_state.risk.circuit_breaker_active is True
+    assert res.final_state.risk.risk_evaluations == 0
+
+
+# ---------------------------------------------------------------------------
+# R33: Full FSM lifecycle verified with zero unofficial exceptions
+# ---------------------------------------------------------------------------
+def test_r33_full_fsm_lifecycle() -> None:
+    ledger = AuditLedger(InMemoryLedgerStorage())
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    e1 = ledger.append(
+        event_type=AuditEventType.BACKTEST_STARTED,
+        entity_type="BACKTEST",
+        entity_id="RUN_FSM33",
+        correlation_id="RUN_FSM33",
+        causation_id="GENESIS",
+        payload={"run_id": "RUN_FSM33", "contract_id": "NIFTY"},
+        event_timestamp=t0,
+    )
+    e2 = ledger.append(
+        event_type=AuditEventType.ORDER_SIMULATED,
+        entity_type="ORDER",
+        entity_id="ORD_FSM33",
+        correlation_id="RUN_FSM33",
+        causation_id=e1.event_id,
+        payload={"order_id": "ORD_FSM33", "symbol": "NIFTY", "side": "LONG", "quantity": 1},
+        event_timestamp=t0 + timedelta(minutes=1),
+    )
+    e3 = ledger.append(
+        event_type=AuditEventType.ORDER_ACKNOWLEDGED,
+        entity_type="ORDER",
+        entity_id="ORD_FSM33",
+        correlation_id="RUN_FSM33",
+        causation_id=e2.event_id,
+        payload={"order_id": "ORD_FSM33"},
+        event_timestamp=t0 + timedelta(minutes=2),
+    )
+    e4 = ledger.append(
+        event_type=AuditEventType.ORDER_FILLED,
+        entity_type="ORDER",
+        entity_id="ORD_FSM33",
+        correlation_id="RUN_FSM33",
+        causation_id=e3.event_id,
+        payload={
+            "order_id": "ORD_FSM33",
+            "symbol": "NIFTY",
+            "quantity": 1,
+            "effective_price": "24000",
+        },
+        event_timestamp=t0 + timedelta(minutes=3),
+    )
+    e5 = ledger.append(
+        event_type=AuditEventType.PROTECTION_PENDING,
+        entity_type="ORDER",
+        entity_id="ORD_FSM33",
+        correlation_id="RUN_FSM33",
+        causation_id=e4.event_id,
+        payload={"order_id": "ORD_FSM33"},
+        event_timestamp=t0 + timedelta(minutes=4),
+    )
+    ledger.append(
+        event_type=AuditEventType.PROTECTION_CONFIRMED,
+        entity_type="ORDER",
+        entity_id="ORD_FSM33",
+        correlation_id="RUN_FSM33",
+        causation_id=e5.event_id,
+        payload={"order_id": "ORD_FSM33"},
+        event_timestamp=t0 + timedelta(minutes=5),
+    )
+    source = ReplayArtifactSource(events=ledger._storage.read_all())
+    res = ReplayEngine(ReplayConfig(verify_fsm_transitions=True), source).replay()
+
+    assert res.status == ReplayStatus.PASS
+    assert res.final_state is not None
+    ord_state = res.final_state.orders["ORD_FSM33"]
+    assert ord_state.state == OrderState.PROTECTED
+    assert ord_state.is_protection_confirmed is True
+
+
+# ---------------------------------------------------------------------------
+# R34: Terminal state resurrection strictly fails with FSM_TERMINAL_RESURRECTION
+# ---------------------------------------------------------------------------
+def test_r34_terminal_state_resurrection_strictly_fails() -> None:
+    ledger = AuditLedger(InMemoryLedgerStorage())
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    e1 = ledger.append(
+        event_type=AuditEventType.BACKTEST_STARTED,
+        entity_type="BACKTEST",
+        entity_id="RUN_FSM34",
+        correlation_id="RUN_FSM34",
+        causation_id="GENESIS",
+        payload={"run_id": "RUN_FSM34", "contract_id": "NIFTY"},
+        event_timestamp=t0,
+    )
+    e2 = ledger.append(
+        event_type=AuditEventType.ORDER_SIMULATED,
+        entity_type="ORDER",
+        entity_id="ORD_T34",
+        correlation_id="RUN_FSM34",
+        causation_id=e1.event_id,
+        payload={"order_id": "ORD_T34", "symbol": "NIFTY", "side": "LONG", "quantity": 1},
+        event_timestamp=t0 + timedelta(minutes=1),
+    )
+    e3 = ledger.append(
+        event_type=AuditEventType.ORDER_REJECTED,
+        entity_type="ORDER",
+        entity_id="ORD_T34",
+        correlation_id="RUN_FSM34",
+        causation_id=e2.event_id,
+        payload={"order_id": "ORD_T34"},
+        event_timestamp=t0 + timedelta(minutes=2),
+    )
+    ledger.append(
+        event_type=AuditEventType.ORDER_FILLED,
+        entity_type="ORDER",
+        entity_id="ORD_T34",
+        correlation_id="RUN_FSM34",
+        causation_id=e3.event_id,
+        payload={
+            "order_id": "ORD_T34",
+            "symbol": "NIFTY",
+            "quantity": 1,
+            "effective_price": "24000",
+        },
+        event_timestamp=t0 + timedelta(minutes=3),
+    )
+    source = ReplayArtifactSource(events=ledger._storage.read_all())
+    res = ReplayEngine(ReplayConfig(verify_fsm_transitions=True), source).replay()
+
+    assert res.status == ReplayStatus.FAIL
+    assert res.first_divergence is not None
+    assert res.first_divergence.mismatch_category == "FSM_TERMINAL_RESURRECTION"
+
+
+# ---------------------------------------------------------------------------
+# Adversarial Golden Test: source audit events valid, reference artifacts wrong
+# ---------------------------------------------------------------------------
+def test_adversarial_golden_independent_reconstruction() -> None:
+    bt_engine, bt_res = _run_sample_backtest()
+    events = bt_engine.ledger._storage.read_all()
+
+    fake_trace_entry = TraceEntry(
+        timestamp=bt_res.config.start_time,
+        event_type=TraceEventType.ORDER_SIMULATED,
+        entity_id="FORGED_ENTITY_999",
+        symbol="FORGED_SYM",
+        price=Decimal("999999"),
+    )
+    forged_trace = (fake_trace_entry,)
+
+    forged_manifest = ReplayManifest(
+        source_run_id=bt_res.backtest_run_id,
+        source_dataset_id="DS_FORGED",
+        source_dataset_checksum="CHK_FORGED",
+        source_strategy_id="STRAT_FORGED",
+        source_strategy_version="9.9.9",
+        source_engine_version="9.9.9",
+        source_result_canonical_hash="a" * 64,
+        source_trace_canonical_hash="b" * 64,
+    )
+
+    source = ReplayArtifactSource(
+        events=events,
+        trace=forged_trace,
+        manifest=forged_manifest,
+        backtest_result=bt_res,
+    )
+
+    config = ReplayConfig(
+        verify_execution_trace=True,
+        verify_result_hash=True,
+    )
+    res = ReplayEngine(config, source).replay()
+
+    assert res.status == ReplayStatus.FAIL
+    assert res.first_divergence is not None
+    assert res.first_divergence.mismatch_category in ("TRACE_HASH_MISMATCH", "RESULT_HASH_MISMATCH")
+    assert res.final_state is not None
+    assert "FORGED_ENTITY_999" not in res.final_state.orders
+    assert res.replay_trace_hash != "b" * 64

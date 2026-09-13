@@ -7,6 +7,15 @@
 Phase 11 introduces the **Deterministic, Offline, Audit-Grade Replay Subsystem** (`alphaforge.replay`), fulfilling the core architectural requirement:
 > **"Given any previously recorded, immutable audit ledger stream or backtest execution trace from AlphaForge, can the system reproduce the exact operational sequence, reconstruct the identical financial state, and verify end-to-end cryptographic and FSM integrity without modifying frozen trading/risk logic or accessing external services?"**
 
+### The Core Forensic Principle
+> **"Replay must RECONSTRUCT, not COPY."**
+
+1. The source `AuditLedger` and its audit events are the **authoritative replay inputs**.
+2. The source execution trace and source `BacktestResult` are reference artifacts for validation only. They are **never** used as hidden reconstruction shortcuts.
+3. Replay engine initializes `ReplayState` with an empty trace (`trace=()`), zero trades (`trades=()`), and empty equity curve (`equity_curve=()`).
+4. Replay trace is built event-by-event exclusively from authoritative audit events.
+5. All `BacktestTrade` objects, performance metrics, and final `BacktestResult` are reconstructed independently and evaluated against the manifest's canonical hashes.
+
 ### Offline-Only Architectural Mandate
 The Replay Engine is strictly an **offline, post-facto forensic verification engine**. Under no circumstances does it:
 - Connect to live broker APIs, exchange gateways, WebSocket streams, or network endpoints.
@@ -222,40 +231,63 @@ This isolates the exact event sequence, before/after states, and rationale for f
 
 ## 10. Test Strategy & Traceability Matrix
 
-### Unit Tests (20 Tests — R1..R20)
-| Test ID | Requirement Covered | File |
-| :--- | :--- | :--- |
-| `R1` | Empty replay controlled warning behavior | `tests/unit/replay/test_replay.py` |
-| `R2` | Single valid event replay | `tests/unit/replay/test_replay.py` |
-| `R3` | Multi-event hash chain verification | `tests/unit/replay/test_replay.py` |
-| `R4` | Tampered event payload rejection | `tests/unit/replay/test_replay.py` |
-| `R5` | Out-of-order sequence rejection | `tests/unit/replay/test_replay.py` |
-| `R6` | Corrupt previous_hash rejection | `tests/unit/replay/test_replay.py` |
-| `R7` | Unknown event type fail-closed | `tests/unit/replay/test_replay.py` |
-| `R8` | Duplicate event ID conflict handling | `tests/unit/replay/test_replay.py` |
-| `R9` | Non-monotonic timestamp rejection | `tests/unit/replay/test_replay.py` |
-| `R10` | Mode A full replay state equivalence | `tests/unit/replay/test_replay.py` |
-| `R11` | Mode B validation-only speed and pass | `tests/unit/replay/test_replay.py` |
-| `R12` | Mode C prefix replay cutoff | `tests/unit/replay/test_replay.py` |
-| `R13` | Checkpoint generation at trade boundary | `tests/unit/replay/test_replay.py` |
-| `R14` | Resume from checkpoint equivalence | `tests/unit/replay/test_replay.py` |
-| `R15` | First-divergence diagnostic format | `tests/unit/replay/test_replay.py` |
-| `R16` | Source ledger immutability | `tests/unit/replay/test_replay.py` |
-| `R17` | Execution trace hash validation | `tests/unit/replay/test_replay.py` |
-| `R18` | Result hash validation | `tests/unit/replay/test_replay.py` |
-| `R19` | Contract expiry replay semantics | `tests/unit/replay/test_replay.py` |
-| `R20` | Full backtest artifact replay pass | `tests/unit/replay/test_replay.py` |
+### Unit Tests (35 Tests — R1..R34 + Adversarial Golden Test)
+| Test ID | Requirement Description | File | Status |
+| :--- | :--- | :--- | :--- |
+| `R1` | Empty replay controlled warning behavior | `tests/unit/replay/test_replay.py` | PASS |
+| `R2` | Single valid event replay | `tests/unit/replay/test_replay.py` | PASS |
+| `R3` | Multi-event hash chain verification | `tests/unit/replay/test_replay.py` | PASS |
+| `R4` | Tampered event payload rejection | `tests/unit/replay/test_replay.py` | PASS |
+| `R5` | Out-of-order sequence rejection | `tests/unit/replay/test_replay.py` | PASS |
+| `R6` | Corrupt previous_hash rejection | `tests/unit/replay/test_replay.py` | PASS |
+| `R7` | Unknown event type fail-closed | `tests/unit/replay/test_replay.py` | PASS |
+| `R8` | Duplicate event ID conflict handling | `tests/unit/replay/test_replay.py` | PASS |
+| `R9` | Non-monotonic timestamp rejection | `tests/unit/replay/test_replay.py` | PASS |
+| `R10` | Mode A full replay state equivalence | `tests/unit/replay/test_replay.py` | PASS |
+| `R11` | Mode B validation-only speed and pass | `tests/unit/replay/test_replay.py` | PASS |
+| `R12` | Mode C prefix replay cutoff | `tests/unit/replay/test_replay.py` | PASS |
+| `R13` | Checkpoint generation at trade boundary | `tests/unit/replay/test_replay.py` | PASS |
+| `R14` | Resume from checkpoint equivalence | `tests/unit/replay/test_replay.py` | PASS |
+| `R15` | First-divergence diagnostic format | `tests/unit/replay/test_replay.py` | PASS |
+| `R16` | Source ledger immutability | `tests/unit/replay/test_replay.py` | PASS |
+| `R17` | Execution trace hash validation | `tests/unit/replay/test_replay.py` | PASS |
+| `R18` | Result hash validation | `tests/unit/replay/test_replay.py` | PASS |
+| `R19` | Contract expiry replay semantics | `tests/unit/replay/test_replay.py` | PASS |
+| `R20` | Full backtest artifact replay pass | `tests/unit/replay/test_replay.py` | PASS |
+| `R21` | Source trace mutation without audit-event mutation fails TRACE_HASH_MISMATCH | `tests/unit/replay/test_replay.py` | PASS |
+| `R22` | Audit event mutation causes independent replay trace divergence | `tests/unit/replay/test_replay.py` | PASS |
+| `R23` | Source BacktestResult hash replaced with false value is detected | `tests/unit/replay/test_replay.py` | PASS |
+| `R24` | Source BacktestResult contents mutated while audit events remain unchanged | `tests/unit/replay/test_replay.py` | PASS |
+| `R25` | Synthetic/hardcoded trade data cannot appear in replay reconstruction | `tests/unit/replay/test_replay.py` | PASS |
+| `R26` | Replay without BacktestResult artifact computes complete trade metrics | `tests/unit/replay/test_replay.py` | PASS |
+| `R27` | Execution trace entries generated event-by-event match source trace hash | `tests/unit/replay/test_replay.py` | PASS |
+| `R28` | Multi-trade sequence correctly updates cash, portfolio, and closed trades | `tests/unit/replay/test_replay.py` | PASS |
+| `R29` | Short trade sequence reconstructs correct PnL and trade metrics | `tests/unit/replay/test_replay.py` | PASS |
+| `R30` | Validation-only mode skips trade metric reconstruction | `tests/unit/replay/test_replay.py` | PASS |
+| `R31` | Pure audit event replay with no BacktestResult succeeds with NO_SOURCE_RESULT | `tests/unit/replay/test_replay.py` | PASS |
+| `R32` | Non-positive exit price fails closed with MISSING_TRADE_DATA | `tests/unit/replay/test_replay.py` | PASS |
+| `R33` | Missing open position on exit fill fails closed | `tests/unit/replay/test_replay.py` | PASS |
+| `R34` | Terminal state resurrection strictly fails with FSM_TERMINAL_RESURRECTION | `tests/unit/replay/test_replay.py` | PASS |
+| `Golden` | Adversarial Golden Test: source audit events valid, reference artifacts wrong | `tests/unit/replay/test_replay.py` | PASS |
 
-### Property Tests (7 Tests — P32..P38)
-| Test ID | Invariant Proven | File |
-| :--- | :--- | :--- |
-| `P32` | Event Stream Result Hash Determinism | `tests/property/test_replay_properties.py` |
-| `P33` | Event Permutation Rejection | `tests/property/test_replay_properties.py` |
-| `P34` | Event Payload Mutation Detection | `tests/property/test_replay_properties.py` |
-| `P35` | Checkpoint-Resume Equivalence | `tests/property/test_replay_properties.py` |
-| `P36` | Source Immutability | `tests/property/test_replay_properties.py` |
-| `P37` | Contract Expiry Replay & Gate E | `tests/property/test_replay_properties.py` |
-| `P38` | Illegal FSM Sequences Rejected | `tests/property/test_replay_properties.py` |
+### Property Tests (15 Tests — P32..P46)
+| Test ID | Invariant Proven | File | Status |
+| :--- | :--- | :--- | :--- |
+| `P32` | Event Stream Result Hash Determinism | `tests/property/test_replay_properties.py` | PASS |
+| `P33` | Event Permutation Rejection | `tests/property/test_replay_properties.py` | PASS |
+| `P34` | Event Payload Mutation Detection | `tests/property/test_replay_properties.py` | PASS |
+| `P35` | Checkpoint-Resume Equivalence | `tests/property/test_replay_properties.py` | PASS |
+| `P36` | Source Immutability | `tests/property/test_replay_properties.py` | PASS |
+| `P37` | Contract Expiry Replay & Gate E | `tests/property/test_replay_properties.py` | PASS |
+| `P38` | Illegal FSM Sequences Rejected | `tests/property/test_replay_properties.py` | PASS |
+| `P39` | Source Trace Mutation Always Detected by Replay Trace Hash | `tests/property/test_replay_properties.py` | PASS |
+| `P40` | Replay Trace Strictly Independent of Source Execution Trace | `tests/property/test_replay_properties.py` | PASS |
+| `P41` | Result Reconstruction Strictly Reproduces Canonical Result Hash | `tests/property/test_replay_properties.py` | PASS |
+| `P42` | Arbitrary BacktestResult Mutations Fail Result Hash Verification | `tests/property/test_replay_properties.py` | PASS |
+| `P43` | Full FSM Transition Chain Validity Over Legal Transitions | `tests/property/test_replay_properties.py` | PASS |
+| `P44` | Terminal State Resurrection Always Fails with FSM_TERMINAL_RESURRECTION | `tests/property/test_replay_properties.py` | PASS |
+| `P45` | Missing Mandatory Trade Attributes Strictly Fail Closed | `tests/property/test_replay_properties.py` | PASS |
+| `P46` | State Fingerprint Invariance Across Intermediate Checkpoint Resumption | `tests/property/test_replay_properties.py` | PASS |
 
 ---
 
