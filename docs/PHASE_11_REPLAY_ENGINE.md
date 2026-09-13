@@ -231,7 +231,7 @@ This isolates the exact event sequence, before/after states, and rationale for f
 
 ## 10. Test Strategy & Traceability Matrix
 
-### Unit Tests (35 Tests — R1..R34 + Adversarial Golden Test)
+### Unit Tests (41 Tests — R1..R40 + Adversarial Golden Test)
 | Test ID | Requirement Description | File | Status |
 | :--- | :--- | :--- | :--- |
 | `R1` | Empty replay controlled warning behavior | `tests/unit/replay/test_replay.py` | PASS |
@@ -268,9 +268,15 @@ This isolates the exact event sequence, before/after states, and rationale for f
 | `R32` | Non-positive exit price fails closed with MISSING_TRADE_DATA | `tests/unit/replay/test_replay.py` | PASS |
 | `R33` | Missing open position on exit fill fails closed | `tests/unit/replay/test_replay.py` | PASS |
 | `R34` | Terminal state resurrection strictly fails with FSM_TERMINAL_RESURRECTION | `tests/unit/replay/test_replay.py` | PASS |
-| `Golden` | Adversarial Golden Test: source audit events valid, reference artifacts wrong | `tests/unit/replay/test_replay.py` | PASS |
+| `R35` | Source equity curve mutation cannot alter replay-derived equity | `tests/unit/replay/test_replay.py` | PASS |
+| `R36` | Source quant gates mutation cannot alter replay-derived gate state | `tests/unit/replay/test_replay.py` | PASS |
+| `R37` | Source diagnostics/warnings/errors mutation cannot alter replay result | `tests/unit/replay/test_replay.py` | PASS |
+| `R38` | Source non-audit trace entries mutation isolation | `tests/unit/replay/test_replay.py` | PASS |
+| `R39` | Missing mandatory authoritative equity event handling | `tests/unit/replay/test_replay.py` | PASS |
+| `R40` | Missing mandatory metadata (quantity, side, symbol) fails closed with MISSING_TRADE_DATA | `tests/unit/replay/test_replay.py` | PASS |
+| `Golden` | Adversarial Golden Test: corrupts ALL reference artifacts (equity_curve, quant_gates, diagnostics, warnings, errors, execution_trace); replay ignores all | `tests/unit/replay/test_replay.py` | PASS |
 
-### Property Tests (15 Tests — P32..P46)
+### Property Tests (20 Tests — P32..P51)
 | Test ID | Invariant Proven | File | Status |
 | :--- | :--- | :--- | :--- |
 | `P32` | Event Stream Result Hash Determinism | `tests/property/test_replay_properties.py` | PASS |
@@ -288,10 +294,59 @@ This isolates the exact event sequence, before/after states, and rationale for f
 | `P44` | Terminal State Resurrection Always Fails with FSM_TERMINAL_RESURRECTION | `tests/property/test_replay_properties.py` | PASS |
 | `P45` | Missing Mandatory Trade Attributes Strictly Fail Closed | `tests/property/test_replay_properties.py` | PASS |
 | `P46` | State Fingerprint Invariance Across Intermediate Checkpoint Resumption | `tests/property/test_replay_properties.py` | PASS |
+| `P47` | Source equity mutations cannot alter replay-derived equity | `tests/property/test_replay_properties.py` | PASS |
+| `P48` | Source quant-gate mutations cannot alter replay-derived gate state | `tests/property/test_replay_properties.py` | PASS |
+| `P49` | Source diagnostics/warnings/errors mutations cannot alter result | `tests/property/test_replay_properties.py` | PASS |
+| `P50` | Source non-authoritative trace mutations cannot alter replay trace | `tests/property/test_replay_properties.py` | PASS |
+| `P51` | Removing authoritative result data fails when result verification enabled | `tests/property/test_replay_properties.py` | PASS |
 
 ---
 
-## 11. Minimal Deterministic Example
+## 11. Residual Independence Fix (Commit `8b0a25a`)
+
+This patch eliminated the last remaining shortcuts where the replay engine copied fields from the source `BacktestResult` instead of independently reconstructing them from authoritative audit events.
+
+### Changes Made
+
+#### Independent Equity Curve Reconstruction
+- **Before**: Replay passed `equity_curve=source_res.equity_curve` directly into the reconstructed result.
+- **After**: Replay builds `equity_curve` event-by-event during state transitions (`BACKTEST_STARTED`, `FILL_SIMULATED`, `TRADE_CLOSED`, `BACKTEST_COMPLETED`), capturing `EquitySnapshot` at each transition point. The source equity curve is never read.
+
+#### Independent Quant Gates Reconstruction
+- **Before**: Replay passed `quant_gates=source_res.quant_gates` directly.
+- **After**: Replay reconstructs `quant_gates` from `GATE_EVALUATION` events in the audit ledger, mapping each gate result to a `QuantGateResult`. The source quant gates are never read.
+
+#### Independent Diagnostics/Warnings/Errors
+- **Before**: Replay copied `diagnostics`, `warnings`, and `errors` from the source result.
+- **After**: Replay accumulates these independently from replay-internal diagnostic events. Source diagnostic fields are never read.
+
+#### Independent Execution Trace
+- **Before**: Replay trace was partially derived from source execution trace.
+- **After**: Replay trace is built exclusively from authoritative audit events. Source execution trace is used only for hash comparison (when `verify_execution_trace=True`).
+
+#### Equity Calculation Fix on TRADE_CLOSED
+- **Before**: `equity = state.portfolio.equity + net_pnl` double-counted entry fees/slippage already reflected in equity at entry time.
+- **After**: `equity = new_cash` (since no open position after close), which correctly represents `cash + gross_pnl - exit_slippage - exit_fee`.
+
+#### Elimination of Fallback Defaults
+- Zero fallbacks to `side = LONG`, `quantity = 1`, or `"UNKNOWN"` values.
+- Missing mandatory metadata (`quantity`, `side`, `symbol`) now fails closed with `MISSING_TRADE_DATA`.
+
+### Source Result Access Policy (Post-Fix)
+| `source_res` Field | Allowed? | Rationale |
+| :--- | :--- | :--- |
+| `source_res.config` | ✅ Yes | Simulation parameters (start/end time) |
+| `source_res.dataset_metadata` | ✅ Yes | Dataset context for result construction |
+| `source_res.equity_curve` | ❌ No | Must be independently reconstructed |
+| `source_res.quant_gates` | ❌ No | Must be independently reconstructed |
+| `source_res.diagnostics` | ❌ No | Must be independently accumulated |
+| `source_res.warnings` | ❌ No | Must be independently accumulated |
+| `source_res.errors` | ❌ No | Must be independently accumulated |
+| `source_res.execution_trace` | ❌ No | Reference-only for hash comparison |
+
+---
+
+## 12. Minimal Deterministic Example
 
 ```python
 from alphaforge.replay import (
