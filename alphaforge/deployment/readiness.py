@@ -138,12 +138,10 @@ class DeploymentReadinessChecker:
         # 5. Security Gates Check
         security_ready = True
         if env == DeploymentEnvironment.LIVE:
-            if not self._config.live_authorized:
+            if not self._config.live_authorized or self._security_startup_gate is None:
                 security_ready = False
-            elif self._security_startup_gate is not None:
-                security_ready = self._security_startup_gate.is_verified
             else:
-                security_ready = True
+                security_ready = bool(self._security_startup_gate.is_verified)
         else:
             security_ready = True
         checks["security_ready"] = security_ready

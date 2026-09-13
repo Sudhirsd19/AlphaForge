@@ -186,13 +186,16 @@ class DeploymentRuntime:
                 )
 
             # Step 6: Security Gate Verification (if LIVE)
-            if env == DeploymentEnvironment.LIVE and self._security_startup_gate is not None:
-                try:
-                    self._security_startup_gate.verify_startup()
-                except Exception as exc:
+            if env == DeploymentEnvironment.LIVE:
+                if self._security_startup_gate is None:
                     raise StartupValidationError(
-                        f"Startup failed: SecurityStartupGate verification failed: {exc}"
-                    ) from exc
+                        "Startup failed: LIVE trading requires an active, "
+                        "verified SecurityStartupGate."
+                    )
+                if not self._security_startup_gate.is_verified:
+                    raise StartupValidationError(
+                        "Startup failed: SecurityStartupGate verification has not passed."
+                    )
 
             # All checks passed
             self._is_started = True

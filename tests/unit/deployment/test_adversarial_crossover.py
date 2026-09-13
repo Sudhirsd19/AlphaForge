@@ -47,13 +47,18 @@ from alphaforge.deployment.exceptions import (
 )
 from alphaforge.deployment.identity import get_deployment_identity
 from alphaforge.deployment.isolation import EnvironmentDirectoryManager
+from alphaforge.deployment.readiness import DeploymentReadinessChecker
 from alphaforge.deployment.rollback import RollbackCoordinator
 from alphaforge.deployment.runtime import DeploymentRuntime
 from alphaforge.execution.enums import OrderSide
 from alphaforge.execution.idempotency import OrderRole
-from alphaforge.security.credentials import BrokerCredentials, CredentialStore
+from alphaforge.reconciliation.gate import ReconciliationGate
+from alphaforge.security.config import SecurityConfig, TradingModeConfig
+from alphaforge.security.credentials import BrokerCredentials, CredentialStore, SecretValue
+from alphaforge.security.enums import TradingMode
 from alphaforge.security.exceptions import SecurityConfigurationError
 from alphaforge.security.redaction import redact_text
+from alphaforge.security.startup import SecurityStartupGate
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -359,3 +364,262 @@ def test_adv_17_live_restore_safety_strictly_blocks_crossover(tmp_path: Path) ->
             target_config=cfg_live,
             confirmation_phrase=LIVE_RECOVERY_CONFIRMATION_PHRASE,
         )
+
+
+def test_live_without_security_startup_gate_is_rejected(tmp_path: Path) -> None:
+    """
+    Blocker 1 Adversarial Test:
+    LIVE environment startup strictly fails closed if SecurityStartupGate is missing (None).
+    """
+    cfg_live = DeploymentConfig(
+        environment=DeploymentEnvironment.LIVE,
+        live_authorized=True,
+        credential_source="env",
+        runtime_root=tmp_path,
+    )
+    live_broker = FakeLiveBroker()
+
+    # 1. DeploymentReadinessChecker must reject LIVE when security_startup_gate is None
+    checker = DeploymentReadinessChecker(
+        config=cfg_live,
+        broker=live_broker,
+        security_startup_gate=None,
+    )
+    report = checker.check_readiness()
+    assert report.is_ready is False
+    assert report.security_ready is False
+    assert report.checks["security_ready"] is False
+
+    # 2. DeploymentRuntime startup must raise StartupValidationError
+    runtime = DeploymentRuntime(
+        config=cfg_live,
+        broker=live_broker,
+        security_startup_gate=None,
+    )
+    with pytest.raises(
+        StartupValidationError,
+        match="Pre-flight readiness check failed|requires an active, verified SecurityStartupGate",
+    ):
+        runtime.startup()
+
+    assert runtime.is_started is False
+    assert runtime.is_active is False
+
+
+def test_live_with_unverified_security_startup_gate_is_rejected(tmp_path: Path) -> None:
+    """
+    Blocker 1 Adversarial Test:
+    LIVE environment startup strictly fails closed if SecurityStartupGate is present but unverified.
+    """
+    cfg_live = DeploymentConfig(
+        environment=DeploymentEnvironment.LIVE,
+        live_authorized=True,
+        credential_source="env",
+        runtime_root=tmp_path,
+    )
+    live_broker = FakeLiveBroker()
+
+    sec_cfg = SecurityConfig(
+        trading_mode_config=TradingModeConfig(
+            trading_mode=TradingMode.LIVE,
+            live_trading_enabled=True,
+        )
+    )
+    gate = SecurityStartupGate(security_config=sec_cfg)
+    assert gate.is_verified is False
+
+    # 1. DeploymentReadinessChecker rejects unverified gate
+    checker = DeploymentReadinessChecker(
+        config=cfg_live,
+        broker=live_broker,
+        security_startup_gate=gate,
+    )
+    report = checker.check_readiness()
+    assert report.is_ready is False
+    assert report.security_ready is False
+
+    # 2. DeploymentRuntime rejects unverified gate
+    runtime = DeploymentRuntime(
+        config=cfg_live,
+        broker=live_broker,
+        security_startup_gate=gate,
+    )
+    with pytest.raises(StartupValidationError):
+        runtime.startup()
+
+    assert runtime.is_started is False
+    assert runtime.is_active is False
+
+
+def test_live_with_verified_security_startup_gate_is_allowed(tmp_path: Path) -> None:
+    """
+    Blocker 1 Affirmative Safety Test:
+    LIVE environment with valid broker, credentials, and verified SecurityStartupGate is allowed.
+    """
+    root = tmp_path / "runtime"
+    cfg_live = DeploymentConfig(
+        environment=DeploymentEnvironment.LIVE,
+        live_authorized=True,
+        credential_source="env",
+        runtime_root=root,
+    )
+    live_broker = FakeLiveBroker()
+
+    sec_cfg = SecurityConfig(
+        trading_mode_config=TradingModeConfig(
+            trading_mode=TradingMode.LIVE,
+            live_trading_enabled=True,
+        )
+    )
+    store = CredentialStore()
+    store.set_live_credentials(
+        BrokerCredentials(
+            broker_id="zerodha",
+            api_key=SecretValue("ProductionKeyABC987"),
+            api_secret=SecretValue("ProductionSecretXYZ987"),
+            account_id="ACC_PROD_1",
+            is_live=True,
+        )
+    )
+    recon_gate = ReconciliationGate(initially_open=True)
+    gate = SecurityStartupGate(
+        security_config=sec_cfg,
+        credential_store=store,
+        reconciliation_gate=recon_gate,
+    )
+    gate.verify_startup()
+    assert gate.is_verified is True
+
+    EnvironmentDirectoryManager.initialize_directories(cfg_live)
+
+    # 1. DeploymentReadinessChecker confirms ready
+    checker = DeploymentReadinessChecker(
+        config=cfg_live,
+        broker=live_broker,
+        security_startup_gate=gate,
+    )
+    report = checker.check_readiness()
+    assert report.is_ready is True
+    assert report.security_ready is True
+    assert report.broker_ready is True
+    assert report.credentials_ready is True
+
+    # 2. DeploymentRuntime starts up successfully
+    runtime = DeploymentRuntime(
+        config=cfg_live,
+        broker=live_broker,
+        security_startup_gate=gate,
+    )
+    runtime.startup()
+    assert runtime.is_started is True
+    assert runtime.is_active is True
+    runtime.shutdown()
+    assert runtime.is_active is False
+
+
+def test_live_with_paper_broker_is_rejected(tmp_path: Path) -> None:
+    """
+    Blocker 2 Adversarial Test:
+    LIVE environment paired with PaperBroker must raise DeploymentSafetyError at construction
+    and order submission time, and fail readiness diagnostics.
+    """
+    cfg_live = DeploymentConfig(
+        environment=DeploymentEnvironment.LIVE,
+        live_authorized=True,
+        credential_source="env",
+        runtime_root=tmp_path,
+    )
+    paper_broker = PaperBroker()
+
+    # 1. Construction-time rejection in DeploymentBrokerGuard
+    with pytest.raises(
+        DeploymentSafetyError,
+        match="LIVE environment cannot be paired with a non-live broker",
+    ):
+        DeploymentBrokerGuard(delegate=paper_broker, config=cfg_live)
+
+    # 2. Construction-time rejection in DeploymentRuntime
+    with pytest.raises(
+        DeploymentSafetyError,
+        match="LIVE environment cannot be paired with a non-live broker",
+    ):
+        DeploymentRuntime(config=cfg_live, broker=paper_broker)
+
+    # 3. Pre-flight readiness check failure in DeploymentReadinessChecker
+    checker = DeploymentReadinessChecker(config=cfg_live, broker=paper_broker)
+    report = checker.check_readiness()
+    assert report.broker_ready is False
+    assert report.is_ready is False
+
+
+def test_live_with_simulated_broker_is_rejected(tmp_path: Path) -> None:
+    """
+    Blocker 2 Adversarial Test:
+    LIVE environment paired with MockBroker or SimulatedBroker must raise DeploymentSafetyError.
+    """
+
+    class SimulatedBroker(AbstractBroker):
+        def submit_order(self, request: BrokerOrderRequest) -> BrokerOrder:
+            return BrokerOrder.create_synthetic_ack(request, "SIM-1")
+
+        def get_order(self, client_order_id=None, broker_order_id=None):  # noqa: ARG002
+            return None
+
+        def get_open_orders(self):
+            return ()
+
+        def get_positions(self):
+            return ()
+
+        def cancel_order(self, client_order_id: str):
+            raise NotImplementedError
+
+        def is_available(self) -> bool:
+            return True
+
+    class MockBroker(AbstractBroker):
+        def submit_order(self, request: BrokerOrderRequest) -> BrokerOrder:
+            return BrokerOrder.create_synthetic_ack(request, "MOCK-1")
+
+        def get_order(self, client_order_id=None, broker_order_id=None):  # noqa: ARG002
+            return None
+
+        def get_open_orders(self):
+            return ()
+
+        def get_positions(self):
+            return ()
+
+        def cancel_order(self, client_order_id: str):
+            raise NotImplementedError
+
+        def is_available(self) -> bool:
+            return True
+
+    cfg_live = DeploymentConfig(
+        environment=DeploymentEnvironment.LIVE,
+        live_authorized=True,
+        credential_source="env",
+        runtime_root=tmp_path,
+    )
+
+    # 1. SimulatedBroker rejected at construction time
+    with pytest.raises(
+        DeploymentSafetyError,
+        match="LIVE environment cannot be paired with a non-live broker",
+    ):
+        DeploymentBrokerGuard(delegate=SimulatedBroker(), config=cfg_live)
+
+    # 2. MockBroker rejected at construction time
+    with pytest.raises(
+        DeploymentSafetyError,
+        match="LIVE environment cannot be paired with a non-live broker",
+    ):
+        DeploymentBrokerGuard(delegate=MockBroker(), config=cfg_live)
+
+    # 3. Also verified in readiness diagnostics
+    checker_sim = DeploymentReadinessChecker(config=cfg_live, broker=SimulatedBroker())
+    assert checker_sim.check_readiness().broker_ready is False
+
+    checker_mock = DeploymentReadinessChecker(config=cfg_live, broker=MockBroker())
+    assert checker_mock.check_readiness().broker_ready is False

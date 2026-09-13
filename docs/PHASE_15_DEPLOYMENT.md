@@ -152,17 +152,27 @@ def unwrap_broker(broker: AbstractBroker) -> AbstractBroker:
 
 def is_live_execution_broker(broker: AbstractBroker) -> bool:
     core = unwrap_broker(broker)
-    if hasattr(broker, "is_live_broker"):
-        return bool(broker.is_live_broker)
-    if hasattr(core, "is_live_broker"):
-        return bool(core.is_live_broker)
     if isinstance(core, PaperBroker):
         return False
+    if hasattr(broker, "is_live_broker"):
+        val = broker.is_live_broker
+        return bool(val() if callable(val) else val)
+    if hasattr(core, "is_live_broker"):
+        val = core.is_live_broker
+        return bool(val() if callable(val) else val)
     cls_name = type(core).__name__.lower()
-    return not ("paper" in cls_name or "mock" in cls_name or "sim" in cls_name)
+    if any(k in cls_name for k in ("paper", "mock", "sim", "fake", "dummy", "test")):
+        return False
+    return False
 ```
 
-Invariants are checked **both at initialization time and prior to every single `submit_order()` call**. Even if live credentials exist on the host machine, a `PAPER` or `SHADOW` run cannot route an order to a real exchange.
+Invariants are checked **both at initialization time and prior to every single `submit_order()` call**:
+- `PAPER` + live broker => `DeploymentSafetyError`
+- `SHADOW` + live broker => `DeploymentSafetyError`
+- `DEV` / `TEST` + live broker => `DeploymentSafetyError`
+- `LIVE` + `PaperBroker` / `MockBroker` / `SimulatedBroker` => `DeploymentSafetyError`
+- `LIVE` + non-live broker (missing `is_live_broker = True`) => `DeploymentSafetyError`
+- `LIVE` + live-capable broker => ALLOW (subject to Phase 13 dual opt-in authorization)
 
 ---
 
@@ -186,7 +196,9 @@ class ReadinessReport(BaseModel):
 ### Forensic Guarantees
 - **Simulation Isolation**: `PAPER` and `SHADOW` never probe or require a live broker or live credentials.
 - **Strictly Diagnostic**: Readiness checks **never** call `submit_order()`, `cancel_order()`, modify risk limits, or mutate position state.
-- **Fail-Closed**: If any check fails, `is_ready = False`, halting startup.
+- **Fail-Closed Missing Security Gate**: In `LIVE`, `security_startup_gate is None` or `not gate.is_verified` immediately marks `security_ready = False` and `is_ready = False`.
+- **Fail-Closed Non-Live Broker**: In `LIVE`, pairing with a simulated or non-live broker adapter (`PaperBroker`, `MockBroker`, `SimulatedBroker`) marks `broker_ready = False` and `is_ready = False`.
+- **Atomic Readiness**: If any check fails, `is_ready = False`, halting startup unconditionally.
 
 ---
 

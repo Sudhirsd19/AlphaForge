@@ -36,26 +36,34 @@ def is_live_execution_broker(broker: AbstractBroker) -> bool:
     """
     Determine whether a broker adapter has real live execution capability.
 
-    Rules:
-    - If broker has explicit 'is_live_broker' attribute, respect it.
-    - If underlying broker is PaperBroker, it is strictly simulated (non-live).
-    - If underlying broker is not a simulated broker (e.g. live broker adapter), it is live.
+    Deterministic capability signals (in priority order):
+    1. Underlying PaperBroker instance is strictly simulated (non-live).
+    2. Explicit 'is_live_broker' capability boolean on wrapper or core broker.
+    3. Heuristic inspection: class names indicating paper/mock/simulated/fake/dummy/test
+       environments are strictly non-live.
+    4. By default, absent explicit live capability declaration, fail-closed as non-live.
     """
     core = unwrap_broker(broker)
 
-    # Check explicit attribute on core or wrapper
-    if hasattr(broker, "is_live_broker"):
-        return bool(broker.is_live_broker)
-    if hasattr(core, "is_live_broker"):
-        return bool(core.is_live_broker)
-
-    # PaperBroker is always simulated
+    # 1. PaperBroker is always simulated (strongest domain invariant)
     if isinstance(core, PaperBroker):
         return False
 
-    # Check class name heuristic if custom live broker is defined
+    # 2. Check explicit capability attribute on wrapper or core
+    if hasattr(broker, "is_live_broker"):
+        val = broker.is_live_broker
+        return bool(val() if callable(val) else val)
+    if hasattr(core, "is_live_broker"):
+        val = core.is_live_broker
+        return bool(val() if callable(val) else val)
+
+    # 3. Class name indicators of simulated/mock brokers
     cls_name = type(core).__name__.lower()
-    return not ("paper" in cls_name or "mock" in cls_name or "sim" in cls_name)
+    if any(k in cls_name for k in ("paper", "mock", "sim", "fake", "dummy", "test")):
+        return False
+
+    # 4. Fail-closed: broker without explicit live capability is not a live broker
+    return False
 
 
 class DeploymentBrokerGuard(AbstractBroker):
@@ -131,11 +139,15 @@ class DeploymentBrokerGuard(AbstractBroker):
                 )
                 raise DeploymentSafetyError(msg)
 
-            # Check if underlying broker is wrapped in SecureBroker with authorizer
+            # LIVE execution requires an actual live-capable broker (fail closed)
             core = unwrap_broker(self._delegate)
-            if not is_live_execution_broker(core):
-                # Warning: running LIVE with a paper broker is rejected unless explicitly simulated
-                pass
+            if not self._is_live or not is_live_execution_broker(core):
+                msg = (
+                    f"Deployment safety violation: LIVE environment cannot be paired with a "
+                    f"non-live broker ({type(core).__name__}). "
+                    f"Execution must use an actual live-capable broker."
+                )
+                raise DeploymentSafetyError(msg)
 
     def submit_order(self, request: BrokerOrderRequest) -> BrokerOrder:
         """
@@ -152,9 +164,18 @@ class DeploymentBrokerGuard(AbstractBroker):
             )
             raise DeploymentSafetyError(msg)
 
-        if env == DeploymentEnvironment.LIVE and not self._config.live_authorized:
-            msg = "Order submission rejected: LIVE trading has not been authorized."
-            raise DeploymentSafetyError(msg)
+        if env == DeploymentEnvironment.LIVE:
+            if not self._config.live_authorized:
+                msg = "Order submission rejected: LIVE trading has not been authorized."
+                raise DeploymentSafetyError(msg)
+
+            core = unwrap_broker(self._delegate)
+            if not self._is_live or not is_live_execution_broker(core):
+                msg = (
+                    f"Order submission rejected: LIVE environment cannot execute on a "
+                    f"non-live broker ({type(core).__name__})."
+                )
+                raise DeploymentSafetyError(msg)
 
         return self._delegate.submit_order(request)
 
