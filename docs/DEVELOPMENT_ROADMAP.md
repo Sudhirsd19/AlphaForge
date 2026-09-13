@@ -182,14 +182,15 @@ Phase 17 = Controlled Live
 ---
 
 ### Phase 12: Failure-Injection Testing
-- **Objective:** Execute automated chaos tests across all 17 failure scenarios defined in Section 20 of Master Constitution.
+- **Objective:** Execute automated adversarial tests across data corruption, audit tampering, broker timeouts, process crashes, checkpoint corruption, storage I/O failures, clock anomalies, concurrency races, and risk-state persistence.
 - **Dependencies:** Phase 11.
-- **Files/Modules:** `tests/failure_injection/*`.
-- **Implementation Tasks:** Build test harnesses injecting socket drops, stale candles, broker timeouts, partial fills, clock drifts, and disk errors.
-- **Tests:** 17 distinct automated chaos test suites.
-- **Acceptance Criteria:** System gracefully halts, fails closed, reconciles, and reports alerts across all 17 scenarios without capital leakage.
-- **Exit Gate:** 17/17 failure tests passing with documented recovery evidence; user sign-off.
-- **Risks:** Incomplete test harness isolation; mitigated by mock broker network interception.
+- **Files/Modules:** `alphaforge/fault_injection/*`, `tests/unit/fault_injection/*`, `tests/property/test_fault_injection_properties.py`, `docs/PHASE_12_FAILURE_INJECTION.md`.
+- **Implementation Tasks:** Build isolated deterministic fault injection module (`models.py`, `injectors.py`, `invariants.py`), implement unit failure suites (D1–D6, L1–L8, O1–O9, C1–C8, K1–K5, S1–S5, T1–T5, RACE1–RACE5, Risk-1..9), golden adversarial scenarios (GOLDEN-1..6), and property tests (FP1–FP10).
+- **Tests:** 100 deterministic tests (84 unit failure scenarios, 6 golden adversarial scenarios, 10 property tests).
+- **Acceptance Criteria:** System gracefully halts, fails closed, reconciles, and reports alerts across all scenarios without capital leakage, state fabrication, or duplicate execution.
+- **Exit Gate:** 100/100 failure-injection tests passing; 696/696 full suite passing; zero live exchange or credentials leaks; formal documentation complete; user sign-off.
+- **Status:** IMPLEMENTED / VALIDATED (Freeze Ready).
+- **Risks:** Incomplete test harness isolation; mitigated by isolated `alphaforge/fault_injection/` module with zero modifications to production domain logic.
 
 ---
 
