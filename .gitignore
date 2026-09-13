@@ -44,6 +44,9 @@ coverage.xml
 *.key
 *.pem
 *.pfx
+*.secret
+*.cert
+*.crt
 secrets/
 credentials/
 tokens/
