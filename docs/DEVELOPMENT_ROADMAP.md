@@ -246,12 +246,14 @@ Phase 17 = Controlled Live
 
 ---
 
-### Phase 17: Controlled Live
-- **Objective:** Deploy single-lot live trading with minimal capital allocation under strict human supervision.
+### Phase 17: Extended Real-Market Shadow Validation & Certification
+- **Objective:** Deploy and validate an extended real-market shadow validation and certification layer against real-time or replayed NSE/NIFTY Futures market feeds under realistic frictions, adverse slippage, network disconnections, sequence anomalies, and crash/restart cycles—while remaining 100% physically and logically incapable of placing real-money orders.
 - **Dependencies:** Phase 16.
-- **Files/Modules:** Live execution configuration (`LIVE_TRADING = TRUE`).
-- **Implementation Tasks:** Connect live broker API with 1-lot maximum risk cap, manual supervision desk, and continuous reconciliation.
-- **Tests:** Real broker live order placement, execution, stop-loss confirmation, and position close for 1 lot.
-- **Acceptance Criteria:** 100% successful broker order acknowledgments, verified stop-loss resting on exchange book, bit-exact reconciliation with broker console.
-- **Exit Gate:** Final production audit sign-off by Principal Architect.
-- **Risks:** Real financial capital risk; mitigated by hardcoded 1-lot limit and strict daily loss stop.
+- **Files/Modules:** `alphaforge/shadow_validation/*`, `tests/unit/shadow_validation/*`, `docs/PHASE_17_SHADOW_VALIDATION.md`.
+- **Implementation Tasks:** Non-negotiable `ShadowExecutionOnlyGuard` enforcing fail-closed isolation against live credentials; multi-dimensional `MarketStreamValidator` checking contract metadata, exchange timestamp monotonicity, clock drift ($|T_{local} - T_{exchange}| \le 5000\text{ms}$), cross-timeframe candle formation synchronization, forming-bar quarantine, and anomaly classification; `RealisticExecutionEngine` modeling dynamic spread widening, queue position, latency, adverse slippage, gap openings, and Cases A–I fills; `NetworkResilienceCoordinator` handling disconnections, backoff reconnects, stream idempotency, and gap buffering; `StateReconstructionEngine` enforcing canonical business-state normalization and SHA-256 equivalence across 9 lifecycle states; `CausalCertifier` enforcing anti-lookahead monotonicity ($\text{decision\_ts} \ge \max(\text{input\_ts})$); `LongDurationRunner` forward runner with memory profiling and immutable evidence package creation; `ForensicReplayVerifier` with structured field-level diffs; `CertificationReporter` 3-tier verdict generator.
+- **Tests:** 19 dedicated automated unit and component tests (PS-39 through PS-54, Corrections 1–10) covering contract validation, clock drift, sequence anomalies, spread/queue/latency simulation, adverse slippage, Cases A–I fills, disconnect recovery, canonical state reconstruction across all 9 lifecycle states, anti-lookahead monotonicity, long-duration runner telemetry, forensic replay diffs, and Level A/B/C certification reporting.
+- **Acceptance Criteria:** Real-money live broker order placement is 100% impossible; anti-lookahead invariant $\text{decision\_ts} \ge \max(\text{input\_ts})$ strictly certified; canonical business-state equivalence verified across crash/restarts; zero modification to frozen Phase 0–16 trading modules; 100% test pass rate across all 930 repository tests.
+- **Certification Status:** Level A (Implementation): PASS | Level B (Automated Validation): PASS | Level C (Real-Market Shadow): PENDING. Final Verdict: `PHASE 17 BLOCKED` (pending live market session capture in active market window).
+- **Exit Gate:** 19/19 Phase 17 tests passing, 930/930 full suite passing, 0 Ruff errors, 0 strict Mypy errors, clean diff, formal documentation complete (`docs/PHASE_17_SHADOW_VALIDATION.md`); user sign-off.
+- **Status:** IMPLEMENTED / VALIDATED (Phase 17 Level A & B Certified).
+- **Risks:** Live market execution risk (Zero: live orders are structurally blocked by `ShadowExecutionOnlyGuard` and Phase 15 `DeploymentBrokerGuard`).

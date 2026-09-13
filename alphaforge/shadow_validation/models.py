@@ -1,0 +1,233 @@
+"""
+AlphaForge Extended Real-Market Shadow Validation & Certification Models (Phase 17).
+Defines immutable Pydantic models for enriched market events, shadow signal records,
+realistic fill records, performance metrics, canonical state snapshots, and evidence packages.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from alphaforge.core.exceptions import DataIntegrityError
+from alphaforge.execution.enums import OrderSide  # noqa: TC001
+from alphaforge.risk.enums import TradeSide  # noqa: TC001
+from alphaforge.shadow_validation.enums import (  # noqa: TC001
+    CertificationLevelStatus,
+    CertificationVerdict,
+    DataSourceType,
+    FillExecutionType,
+    MarketDataAnomalyType,
+    ProcessLifecycleState,
+)
+
+
+class MarketStreamEvent(BaseModel):
+    """Enriched market stream event with multi-tiered causal timestamps and sequence tracking."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    event_id: str = Field(description="Deterministic event identifier")
+    symbol: str = Field(description="Trading symbol, e.g. NIFTY")
+    contract_id: str = Field(description="Authoritative contract identifier, e.g. NIFTY26SEPFUT")
+    sequence_no: int = Field(ge=0, description="Monotonically increasing sequence number")
+    exchange_timestamp: datetime = Field(description="Exchange candle/tick timestamp")
+    ingestion_timestamp: datetime = Field(description="Ingestion timestamp at network boundary")
+    processing_timestamp: datetime = Field(description="Processing timestamp before evaluation")
+    open_price: Decimal = Field(gt=Decimal("0"), description="Bar open price")
+    high_price: Decimal = Field(gt=Decimal("0"), description="Bar high price")
+    low_price: Decimal = Field(gt=Decimal("0"), description="Bar low price")
+    close_price: Decimal = Field(gt=Decimal("0"), description="Bar close price")
+    volume: int = Field(ge=0, description="Bar traded volume")
+    data_source: DataSourceType = Field(description="Data source category")
+    anomalies: list[MarketDataAnomalyType] = Field(default_factory=list)
+    is_session_valid: bool = Field(default=True)
+
+    @field_validator(
+        "exchange_timestamp",
+        "ingestion_timestamp",
+        "processing_timestamp",
+    )
+    @classmethod
+    def validate_utc(cls, v: datetime) -> datetime:
+        if v.tzinfo is None or v.utcoffset() != UTC.utcoffset(v):
+            raise DataIntegrityError(f"Timestamp must be timezone-aware UTC: {v}")
+        return v
+
+
+class ShadowSignalRecord(BaseModel):
+    """Immutable shadow signal record containing complete decision context for reproducibility."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    signal_id: str = Field(description="Unique signal identifier")
+    decision_id: str = Field(description="Causal decision identifier")
+    symbol: str = Field(description="Trading symbol")
+    contract_id: str = Field(description="Contract identifier")
+    expiry_datetime: datetime = Field(description="Contract expiration datetime")
+    decision_timestamp: datetime = Field(description="Exact decision timestamp")
+    strategy_version: str = Field(description="Strategy semantic version")
+    strategy_state: dict[str, Any] = Field(description="Strategy state parameters")
+    market_price: Decimal = Field(gt=Decimal("0"), description="Market price at signal")
+    signal_price: Decimal = Field(gt=Decimal("0"), description="Signal execution reference price")
+    side: TradeSide = Field(description="Signal direction: LONG | SHORT")
+    entry_reference: Decimal = Field(gt=Decimal("0"), description="Entry reference level")
+    stop_reference: Decimal = Field(gt=Decimal("0"), description="Stop loss level")
+    tp1: Decimal = Field(gt=Decimal("0"), description="Take profit 1 level")
+    tp2: Decimal = Field(gt=Decimal("0"), description="Take profit 2 level")
+    tp3: Decimal = Field(gt=Decimal("0"), description="Take profit 3 / runner level")
+    risk_state: dict[str, Any] = Field(description="Portfolio risk state at decision time")
+    portfolio_state: dict[str, Any] = Field(description="Portfolio equity and balance state")
+    market_data_version: str = Field(description="Market data schema version")
+    input_event_timestamps: list[datetime] = Field(
+        default_factory=list,
+        description="All input timestamps consumed to derive signal",
+    )
+
+
+class RealisticFillRecord(BaseModel):
+    """Authoritative record of a simulated realistic shadow fill."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    fill_id: str = Field(description="Unique fill identifier")
+    order_id: str = Field(description="FSM order identifier")
+    trade_id: str = Field(description="Trade identifier")
+    causation_id: str = Field(description="Cryptographic causation link")
+    symbol: str = Field(description="Trading symbol")
+    side: OrderSide = Field(description="Order direction: BUY | SELL")
+    decision_timestamp: datetime = Field(description="Signal decision timestamp")
+    submission_timestamp: datetime = Field(description="Order router submission timestamp")
+    fill_timestamp: datetime = Field(description="Simulated execution fill timestamp")
+    reference_price: Decimal = Field(gt=Decimal("0"), description="Initial target price")
+    simulated_fill_price: Decimal = Field(gt=Decimal("0"), description="Executed price")
+    quantity: int = Field(gt=0, description="Intended order quantity")
+    filled_quantity: int = Field(ge=0, description="Quantity executed in this fill")
+    remaining_quantity: int = Field(ge=0, description="Unfilled remaining quantity")
+    slippage: Decimal = Field(description="Signed slippage delta (simulated_price - ref_price)")
+    latency_ms: int = Field(ge=0, description="Simulated execution latency in milliseconds")
+    spread: Decimal = Field(ge=Decimal("0"), description="Market bid-ask spread at execution")
+    execution_type: FillExecutionType = Field(description="Execution classification")
+    execution_reason: str = Field(
+        description="Reason for execution (e.g. BREAKOUT_ENTRY, SL_TRIGGER)"
+    )
+    fees: Decimal = Field(ge=Decimal("0"), description="Transaction and regulatory fees")
+
+
+class PerformanceMetrics(BaseModel):
+    """Runtime telemetry and performance diagnostics."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    processing_latency_ms_avg: float = Field(ge=0.0)
+    processing_latency_ms_p99: float = Field(ge=0.0)
+    cpu_utilization_pct: float = Field(ge=0.0, le=100.0)
+    memory_rss_mb: float = Field(ge=0.0)
+    queue_depth: int = Field(ge=0)
+    active_task_count: int = Field(ge=0)
+    error_count: int = Field(ge=0)
+
+
+class CanonicalStateSnapshot(BaseModel):
+    """Canonical business-state snapshot used for deterministic cryptographic hashing."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    symbol: str
+    contract_id: str
+    expiry_datetime: str
+    lifecycle_state: ProcessLifecycleState
+    position_quantity: int
+    average_entry_price: str
+    realized_pnl: str
+    unrealized_pnl: str
+    reserved_risk: str
+    reserved_notional: str
+    open_trade_count: int
+    causation_lineage: list[str]
+    ledger_hash: str
+
+    def canonical_json(self) -> str:
+        """Produce deterministic sorted JSON representation."""
+        data = self.model_dump()
+        return json.dumps(data, sort_keys=True)
+
+    def canonical_hash(self) -> str:
+        """Compute SHA-256 hash of canonical business state."""
+        return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
+
+
+class CertificationConfig(BaseModel):
+    """Validation duration thresholds required for real-market certification."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    minimum_duration_seconds: int = Field(default=18000, ge=1)
+    minimum_market_sessions: int = Field(default=1, ge=1)
+    minimum_valid_market_events: int = Field(default=300, ge=1)
+    minimum_shadow_decisions: int = Field(default=1, ge=1)
+
+
+class ImmutableEvidencePackage(BaseModel):
+    """Tamper-evident append-only evidence package compiled from a validation run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    run_id: str
+    git_sha: str
+    config_hash: str
+    strategy_version: str
+    contract_metadata_version: str
+    data_source_type: DataSourceType
+    start_time: datetime
+    end_time: datetime
+    duration_seconds: float
+    market_sessions_count: int
+    valid_events_count: int
+    decisions_count: int
+    signals_count: int
+    orders_count: int
+    fills_count: int
+    risk_events_count: int
+    anomalies: list[dict[str, Any]]
+    pnl_summary: dict[str, str]
+    reconciliation_result: dict[str, Any]
+    canonical_state_hash: str
+    replay_result: dict[str, Any]
+    certification_levels: dict[str, str]
+    manifest_hash: str
+
+    @classmethod
+    def create(cls, data: dict[str, Any]) -> ImmutableEvidencePackage:
+        data_copy = dict(data)
+        data_copy.pop("manifest_hash", None)
+        manifest_raw = json.dumps(data_copy, sort_keys=True, default=str)
+        digest = hashlib.sha256(manifest_raw.encode("utf-8")).hexdigest()
+        data_copy["manifest_hash"] = digest
+        return cls(**data_copy)
+
+
+class IndependentCertificationReport(BaseModel):
+    """Multi-level independent certification audit report."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    report_id: str
+    timestamp: datetime
+    git_sha: str
+    config_hash: str
+    strategy_version: str
+    contract_metadata_version: str
+    level_a_status: CertificationLevelStatus
+    level_a_details: dict[str, Any]
+    level_b_status: CertificationLevelStatus
+    level_b_details: dict[str, Any]
+    level_c_status: CertificationLevelStatus
+    level_c_details: dict[str, Any]
+    final_verdict: CertificationVerdict
+    summary_notes: str
