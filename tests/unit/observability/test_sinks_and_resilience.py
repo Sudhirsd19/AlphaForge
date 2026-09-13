@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -171,3 +173,134 @@ def test_adv_obs_3_secret_injection_payload_scrubbed(tmp_path: Path) -> None:
     content = log_file.read_text(encoding="utf-8")
     assert "SuperSecretLivePass99!" not in content
     assert REDACTION_MASK in content
+
+
+def test_adv_obs_11_security_failure_isolated_from_observability_crash() -> None:
+    """
+    ADV-OBS-11: Security observer failure preserves original security exception
+    and blocks broker submission. LIVE order with invalid security condition +
+    crashing dispatcher -> original SecurityAuthorizationError subclass re-raised,
+    broker receives 0 orders, LIVE remains blocked.
+    """
+    from alphaforge.broker.models import BrokerOrderRequest, BrokerOrderType
+    from alphaforge.broker.paper import PaperBroker
+    from alphaforge.execution.enums import OrderSide
+    from alphaforge.execution.idempotency import OrderRole
+    from alphaforge.observability.hub import set_global_dispatcher
+    from alphaforge.reconciliation.gate import ReconciliationGate
+    from alphaforge.security.authorizer import SecureBroker, SecurityAuthorizer
+    from alphaforge.security.config import SecurityConfig, TradingModeConfig
+    from alphaforge.security.enums import KillSwitchStatus, TradingMode
+    from alphaforge.security.exceptions import SecurityAuthorizationError
+    from alphaforge.security.kill_switch import KillSwitch
+
+    # Setup crashing dispatcher
+    broken_sink = BrokenSink()
+    dispatcher = SafeObservabilityDispatcher([broken_sink])
+    set_global_dispatcher(dispatcher)
+
+    try:
+        # Force invalid security condition: LIVE mode attempted without configured credentials
+        cfg = SecurityConfig(
+            trading_mode_config=TradingModeConfig(
+                trading_mode=TradingMode.LIVE,
+                live_trading_enabled=True,
+            )
+        )
+        paper_broker = PaperBroker()
+        kill_switch = KillSwitch(initial_status=KillSwitchStatus.DISARMED)
+        rec_gate = ReconciliationGate(initially_open=True)
+        from alphaforge.security.credentials import CredentialStore
+
+        empty_store = CredentialStore()
+
+        authorizer = SecurityAuthorizer(
+            security_config=cfg,
+            credential_store=empty_store,
+            kill_switch=kill_switch,
+            reconciliation_gate=rec_gate,
+        )
+        secure_broker = SecureBroker(delegate=paper_broker, authorizer=authorizer)
+
+        req = BrokerOrderRequest(
+            client_order_id="ORD-LIVE-UNAUTH-001",
+            symbol="NIFTY",
+            side=OrderSide.BUY,
+            quantity=50,
+            role=OrderRole.ENTRY,
+            order_type=BrokerOrderType.MARKET,
+        )
+
+        with pytest.raises(SecurityAuthorizationError) as exc_info:
+            secure_broker.submit_order(req)
+
+        # Original security exception preserved (NOT masked by BrokenSink or observability error)
+        assert "Live credentials are not configured" in str(exc_info.value)
+        # Broker received zero orders; LIVE remains blocked
+        assert len(paper_broker.get_open_orders()) == 0
+        assert paper_broker.get_order("ORD-LIVE-UNAUTH-001") is None
+    finally:
+        set_global_dispatcher(None)
+
+
+def test_adv_obs_12_valid_security_config_isolated_from_crashing_sink() -> None:
+    """
+    ADV-OBS-12: Valid security configuration + crashing sink does not cause false rejection.
+    Order is authorized and submitted normally, broker order returned unaltered.
+    """
+    from alphaforge.broker.models import BrokerOrderRequest, BrokerOrderType
+    from alphaforge.broker.paper import PaperBroker
+    from alphaforge.execution.enums import OrderSide
+    from alphaforge.execution.idempotency import OrderRole
+    from alphaforge.observability.hub import set_global_dispatcher
+    from alphaforge.reconciliation.gate import ReconciliationGate
+    from alphaforge.security.authorizer import SecureBroker, SecurityAuthorizer
+    from alphaforge.security.config import SecurityConfig
+    from alphaforge.security.enums import KillSwitchStatus
+    from alphaforge.security.kill_switch import KillSwitch
+    from alphaforge.security.startup import SecurityStartupGate
+
+    # Setup crashing dispatcher
+    broken_sink = BrokenSink()
+    dispatcher = SafeObservabilityDispatcher([broken_sink])
+    set_global_dispatcher(dispatcher)
+
+    try:
+        cfg = SecurityConfig()
+        paper_broker = PaperBroker()
+        kill_switch = KillSwitch(initial_status=KillSwitchStatus.DISARMED)
+        rec_gate = ReconciliationGate(initially_open=True)
+        startup_gate = SecurityStartupGate(
+            security_config=cfg,
+            kill_switch=kill_switch,
+            reconciliation_gate=rec_gate,
+        )
+        startup_gate.verify_startup()
+
+        authorizer = SecurityAuthorizer(
+            security_config=cfg,
+            kill_switch=kill_switch,
+            reconciliation_gate=rec_gate,
+            startup_gate=startup_gate,
+        )
+        secure_broker = SecureBroker(delegate=paper_broker, authorizer=authorizer)
+
+        req = BrokerOrderRequest(
+            client_order_id="ORD-VALID-001",
+            symbol="NIFTY",
+            side=OrderSide.BUY,
+            quantity=50,
+            role=OrderRole.ENTRY,
+            order_type=BrokerOrderType.MARKET,
+        )
+
+        # Order must be authorized and submitted normally despite BrokenSink
+        order = secure_broker.submit_order(req)
+
+        assert order is not None
+        assert order.client_order_id == "ORD-VALID-001"
+        assert order.symbol == "NIFTY"
+        # Broker received and recorded the order
+        assert paper_broker.get_order("ORD-VALID-001") is not None
+    finally:
+        set_global_dispatcher(None)

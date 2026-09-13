@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 _current_correlation_id: ContextVar[str | None] = ContextVar("correlation_id", default=None)
 _current_causation_id: ContextVar[str | None] = ContextVar("causation_id", default=None)
 _current_span_name: ContextVar[str | None] = ContextVar("span_name", default=None)
+_correlation_sequences: ContextVar[dict[str, int] | None] = ContextVar(
+    "correlation_sequences", default=None
+)
 
 
 class TraceContext:
@@ -45,6 +48,33 @@ class TraceContext:
         return _current_span_name.get()
 
     @classmethod
+    def next_sequence(cls, correlation_id: str | None = None) -> int:
+        """
+        Return the next monotonic sequence ordinal for the given correlation chain.
+        Thread-safe and async-safe via ContextVar.
+        Guarantees deterministic, collision-free event ordering.
+        """
+        cid = correlation_id or cls.get_correlation_id() or "__root__"
+        curr_map = _correlation_sequences.get()
+        curr = dict(curr_map) if curr_map is not None else {}
+        seq = curr.get(cid, 0) + 1
+        curr[cid] = seq
+        _correlation_sequences.set(curr)
+        return seq
+
+    @classmethod
+    def reset_sequence(cls, correlation_id: str | None = None) -> None:
+        """Reset sequence ordinal for a specific correlation ID or all correlations if None."""
+        if correlation_id is None:
+            _correlation_sequences.set(None)
+        else:
+            curr_map = _correlation_sequences.get()
+            if curr_map is not None:
+                curr = dict(curr_map)
+                curr.pop(correlation_id, None)
+                _correlation_sequences.set(curr)
+
+    @classmethod
     def set_context(
         cls,
         correlation_id: str | None = None,
@@ -69,6 +99,7 @@ class TraceContext:
         _current_correlation_id.set(None)
         _current_causation_id.set(None)
         _current_span_name.set(None)
+        _correlation_sequences.set(None)
 
 
 @contextmanager

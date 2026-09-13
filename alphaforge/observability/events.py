@@ -159,6 +159,8 @@ def compute_deterministic_event_id(
     correlation_id: str | None = None,
     causation_id: str | None = None,
     client_order_id: str | None = None,
+    broker_order_id: str | None = None,
+    position_id: str | None = None,
     symbol: str | None = None,
     sequence: int | None = None,
     extra_seed: str | None = None,
@@ -174,6 +176,8 @@ def compute_deterministic_event_id(
         (correlation_id or "").strip(),
         (causation_id or "").strip(),
         (client_order_id or "").strip(),
+        (broker_order_id or "").strip(),
+        (position_id or "").strip(),
         (symbol or "").strip().upper(),
         str(sequence) if sequence is not None else "",
         (extra_seed or "").strip(),
@@ -213,6 +217,7 @@ class ObservabilityEvent(BaseModel):
     client_order_id: str | None = None
     broker_order_id: str | None = None
     position_id: str | None = None
+    sequence: int | None = None
     message: str = ""
     attributes: dict[str, Any] = Field(default_factory=dict)
 
@@ -228,15 +233,29 @@ class ObservabilityEvent(BaseModel):
 
     @model_validator(mode="after")
     def _ensure_event_id_and_utc(self) -> ObservabilityEvent:
+        from alphaforge.observability.context import TraceContext
+
         # Guarantee timezone-aware UTC
         if self.timestamp.tzinfo is None:
             ts_utc = self.timestamp.replace(tzinfo=UTC)
         else:
             ts_utc = self.timestamp.astimezone(UTC)
 
-        # Compute deterministic event_id if not provided
+        # Resolve correlation/causation from trace context if not explicitly set
+        corr = self.correlation_id or TraceContext.get_correlation_id()
+        caus = self.causation_id or TraceContext.get_causation_id()
+        if corr != self.correlation_id:
+            object.__setattr__(self, "correlation_id", corr)
+        if caus != self.causation_id:
+            object.__setattr__(self, "causation_id", caus)
+
+        # Resolve sequence ordinal per correlation chain if not provided
+        seq = self.sequence
         eid = self.event_id
         if not eid or not eid.strip():
+            if seq is None:
+                seq = TraceContext.next_sequence(corr)
+                object.__setattr__(self, "sequence", seq)
             eid = compute_deterministic_event_id(
                 category=self.category.value
                 if isinstance(self.category, ObservabilityCategory)
@@ -246,7 +265,10 @@ class ObservabilityEvent(BaseModel):
                 correlation_id=self.correlation_id,
                 causation_id=self.causation_id,
                 client_order_id=self.client_order_id,
+                broker_order_id=self.broker_order_id,
+                position_id=self.position_id,
                 symbol=self.symbol,
+                sequence=seq,
                 extra_seed=self.message,
             )
 
@@ -272,6 +294,7 @@ class ObservabilityEvent(BaseModel):
             "client_order_id": self.client_order_id,
             "broker_order_id": self.broker_order_id,
             "position_id": self.position_id,
+            "sequence": self.sequence,
             "message": self.message,
             "attributes": self.attributes,
         }

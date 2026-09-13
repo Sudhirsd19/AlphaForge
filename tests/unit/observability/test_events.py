@@ -18,6 +18,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from alphaforge.observability.context import TraceContext, trace_span
 from alphaforge.observability.events import (
     ObservabilityCategory,
     ObservabilityEvent,
@@ -187,3 +188,128 @@ def test_deterministic_event_id_policy() -> None:
         symbol="NIFTY",
     )
     assert id1 != id3
+
+
+def test_id_1_same_seed_and_same_sequence_yields_same_id() -> None:
+    """ID-1: Same seed + same sequence -> same event_id."""
+    id1 = compute_deterministic_event_id(
+        category="ORDER",
+        event_type="ORDER_SUBMIT",
+        correlation_id="TX-100",
+        client_order_id="ORD-01",
+        broker_order_id="BRK-01",
+        position_id="POS-01",
+        symbol="NIFTY",
+        sequence=1,
+    )
+    id2 = compute_deterministic_event_id(
+        category="ORDER",
+        event_type="ORDER_SUBMIT",
+        correlation_id="TX-100",
+        client_order_id="ORD-01",
+        broker_order_id="BRK-01",
+        position_id="POS-01",
+        symbol="NIFTY",
+        sequence=1,
+    )
+    assert id1 == id2
+    assert id1.startswith("OBS-")
+
+
+def test_id_2_same_seed_and_different_sequence_yields_different_id() -> None:
+    """ID-2: Same seed + different sequence -> different event_id."""
+    id1 = compute_deterministic_event_id(
+        category="ORDER",
+        event_type="ORDER_SUBMIT",
+        correlation_id="TX-100",
+        client_order_id="ORD-01",
+        symbol="NIFTY",
+        sequence=1,
+    )
+    id2 = compute_deterministic_event_id(
+        category="ORDER",
+        event_type="ORDER_SUBMIT",
+        correlation_id="TX-100",
+        client_order_id="ORD-01",
+        symbol="NIFTY",
+        sequence=2,
+    )
+    assert id1 != id2
+
+
+def test_id_3_same_symbol_events_in_same_correlation_get_distinct_ordinals_and_ids() -> None:
+    """
+    ID-3: Two same-symbol events in same correlation chain get distinct ordinals (1, 2)
+    producing distinct IDs.
+    """
+    TraceContext.clear()
+    with trace_span("trading_span", correlation_id="CORR-AAPL-100"):
+        ev1 = ObservabilityEvent(
+            event_type=StrategyEventType.SIGNAL_GENERATED.value,
+            category=ObservabilityCategory.STRATEGY,
+            symbol="AAPL",
+        )
+        ev2 = ObservabilityEvent(
+            event_type=StrategyEventType.SIGNAL_GENERATED.value,
+            category=ObservabilityCategory.STRATEGY,
+            symbol="AAPL",
+        )
+
+    assert ev1.correlation_id == "CORR-AAPL-100"
+    assert ev2.correlation_id == "CORR-AAPL-100"
+    assert ev1.sequence == 1
+    assert ev2.sequence == 2
+    assert ev1.event_id != ev2.event_id
+
+
+def test_id_4_concurrent_trades_have_separate_correlation_ids_collision_free() -> None:
+    """ID-4: Concurrent trades have separate correlation IDs -> collision-free."""
+    TraceContext.clear()
+    with trace_span("trade_a", correlation_id="CORR-ALPHA-1"):
+        ev_a = ObservabilityEvent(
+            event_type=StrategyEventType.SIGNAL_GENERATED.value,
+            category=ObservabilityCategory.STRATEGY,
+            symbol="RELIANCE",
+        )
+    with trace_span("trade_b", correlation_id="CORR-BETA-2"):
+        ev_b = ObservabilityEvent(
+            event_type=StrategyEventType.SIGNAL_GENERATED.value,
+            category=ObservabilityCategory.STRATEGY,
+            symbol="RELIANCE",
+        )
+
+    assert ev_a.correlation_id != ev_b.correlation_id
+    assert ev_a.event_id != ev_b.event_id
+
+
+def test_id_5_explicitly_passed_event_id_is_preserved() -> None:
+    """ID-5: Explicitly passed event_id is preserved."""
+    custom_id = "OBS-CUSTOM-PRESERVED-ID"
+    ev = ObservabilityEvent(
+        event_id=custom_id,
+        event_type="TEST_EVENT",
+        category=ObservabilityCategory.SYSTEM,
+        symbol="INFY",
+    )
+    assert ev.event_id == custom_id
+
+
+def test_id_6_serialization_includes_sequence_and_roundtrips_stably() -> None:
+    """ID-6: to_dict() / to_json() includes sequence, so serialized events remain stable."""
+    ev = ObservabilityEvent(
+        event_type=OrderEventType.ORDER_SUBMIT.value,
+        category=ObservabilityCategory.ORDER,
+        symbol="NIFTY",
+        sequence=42,
+    )
+    d = ev.to_dict()
+    assert "sequence" in d
+    assert d["sequence"] == 42
+
+    json_str = ev.to_json()
+    assert '"sequence":42' in json_str
+
+    deserialized = ObservabilityEvent(**json.loads(json_str))
+    assert deserialized.sequence == 42
+    assert deserialized.event_id == ev.event_id
+    assert deserialized.to_dict() == d

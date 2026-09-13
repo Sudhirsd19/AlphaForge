@@ -351,7 +351,7 @@ OBS22 proves the core non-interference invariant:
 
 ## 23. Test Matrix
 
-The Phase 14 test suite consists of 32 dedicated automated tests across 8 test suites:
+The Phase 14 test suite consists of 40 dedicated automated tests across 8 test suites:
 
 | Suite | Test ID | Description | Result |
 | :--- | :--- | :--- | :--- |
@@ -361,6 +361,12 @@ The Phase 14 test suite consists of 32 dedicated automated tests across 8 test s
 | | `OBS4` | Secret redaction across event messages and arbitrary attribute trees | PASS |
 | | `Attributes` | JSON primitive enforcement (rejects non-primitive objects) | PASS |
 | | `DeterministicID` | Bit-exact event ID reproducibility for identical event contents | PASS |
+| | `ID-1` | Same seed + same sequence ordinal yields identical `event_id` | PASS |
+| | `ID-2` | Same seed + different sequence ordinal yields distinct `event_id` | PASS |
+| | `ID-3` | Sequential same-symbol events in same correlation get distinct ordinals (1, 2) | PASS |
+| | `ID-4` | Concurrent trades have separate correlation IDs ensuring collision-free IDs | PASS |
+| | `ID-5` | Explicitly passed `event_id` is strictly preserved | PASS |
+| | `ID-6` | Serialized dictionary and JSON retain sequence ordinal with round-trip fidelity | PASS |
 | `test_tracing.py` | `OBS5` | Correlation ID propagation across execution boundaries | PASS |
 | | `OBS6` | Causation ID parent-child linkage | PASS |
 | | `OBS7` | Complete order lifecycle trace reconstruction | PASS |
@@ -388,6 +394,8 @@ The Phase 14 test suite consists of 32 dedicated automated tests across 8 test s
 | | `ADV-OBS-2` | Disk / network sink unavailability does not crash trading | PASS |
 | | `ADV-OBS-3` | Injection of raw secret credentials into payload is scrubbed across sinks | PASS |
 | | `ADV-OBS-10` | Deterministic bounded ring buffer overflow under burst load | PASS |
+| | `ADV-OBS-11` | Observer crash preserves original security exception; blocks broker order | PASS |
+| | `ADV-OBS-12` | Valid security config with crashing sink succeeds without false rejection | PASS |
 | `test_forensic_trace.py` | Golden Trace | Synthetic full lifecycle golden trace (`DATA` -> `SIGNAL` -> `RECON`) | PASS |
 | | Rejection Trace| Rejection trace (`DATA` -> `SIGNAL` -> `RISK_REJECTED` -> `NO ORDER`) | PASS |
 | | Audit Separation| Strict operational separation of Observability vs Phase 9 Audit Ledger | PASS |
@@ -416,7 +424,7 @@ The Phase 14 test suite consists of 32 dedicated automated tests across 8 test s
 | 4 | Can a strategy rejection be explained? | **YES** | Proved by `test_obs10_strategy_decision_diagnostic_capture` (rejection codes and indicators captured). |
 | 5 | Can order timeout/retry be distinguished? | **YES** | Proved by `test_obs8_order_timeout_retry_ack_distinction`. |
 | 6 | Can partial fills be individually traced? | **YES** | Proved by `test_adv_obs_5_partial_fill_traceability`. |
-| 7 | Can concurrent same-symbol trades remain separate? | **YES** | Proved by `test_adv_obs_4_concurrent_same_symbol_distinct_correlation`. |
+| 7 | Can concurrent same-symbol trades remain separate? | **YES** | Proved by `test_adv_obs_4_concurrent_same_symbol_distinct_correlation` and `test_id_4`. |
 | 8 | Are correlation IDs preserved? | **YES** | Proved by `test_obs5_correlation_id_propagation_across_boundaries` via `TraceContext`. |
 | 9 | Are causation IDs correct? | **YES** | Proved by `test_obs6_causation_id_linkage`. |
 | 10 | Are secret values excluded from payloads? | **YES** | Proved by `test_obs4_secret_redaction_in_message_and_attributes` and `test_adv_obs_3`. |
@@ -428,8 +436,40 @@ The Phase 14 test suite consists of 32 dedicated automated tests across 8 test s
 | 16 | Is Phase 9 still authoritative? | **YES** | Proved by `test_observability_vs_audit_ledger_separation`; Audit Ledger remains immutable and sovereign. |
 | 17 | Does restart/recovery remain reconstructible? | **YES** | Proved by `test_adv_obs_9_system_restart_recovery_trace`. |
 | 18 | Does observability remain bounded? | **YES** | Proved by `test_obs19_bounded_queue_overflow` and `test_adv_obs_10_queue_capacity_overflow`. |
-| 19 | Does OBS21 pass? | **YES** | 100% pass on real runtime integration test. |
+| 19 | Can observer crash mask a security failure or cause false rejection? | **NO** | Proved by `test_adv_obs_11` (original security exception preserved, broker untouched) and `test_adv_obs_12` (order authorized and executed normally). |
 | 20 | Does OBS22 prove semantic equivalence? | **YES** | 100% pass proving identical execution state under healthy vs crashing sinks. |
+
+---
+
+## 26. Frozen Baseline Diff & Semantic Invariance Audit
+
+### ZERO TRADING / SECURITY SEMANTIC CHANGE
+While the frozen Phase 13 baseline commit `7004a0d26dcb8626a0585c44c9d89ceb2cdb1bbc` remains authoritative, exactly 4 files outside `alphaforge/observability/` contain passive instrumentation hooks required for automated telemetry generation. Every hook is strictly passive (`READ / RECORD / MEASURE`), wrapped in try-except / `contextlib.suppress` failure isolation, and verified to have **ZERO SEMANTIC CHANGE** on calculations, state machines, or security controls:
+
+1. **`alphaforge/data/normalization.py`**
+   - **Function**: `MarketDataNormalizer.normalize_batch()`
+   - **Instrumentation**: Added `from alphaforge.observability.hub import observe_data_normalized; observe_data_normalized(...)`.
+   - **Rationale**: Emits `DATA_RECEIVED` (and `DATA_GAP` if gaps detected) for candle batches entering the system.
+   - **Semantic Impact**: **NONE**. The returned `NormalizationResult` is computed identically before the hook and returned unaltered.
+
+2. **`alphaforge/strategy/engine.py`**
+   - **Function**: `DeterministicStrategyEngine._evaluate_rules()` and `_create_rejection_signal()`
+   - **Instrumentation**: Added `self._notify_strategy_observability(accept_signal)` and `self._notify_strategy_observability(rejection_signal)` calling `observe_strategy_decision(signal)`.
+   - **Rationale**: Emits `SIGNAL_ACCEPTED` or `SIGNAL_REJECTED` diagnostic telemetry explaining strategy signals.
+   - **Semantic Impact**: **NONE**. Strategy rule evaluation, indicator mathematics, candle isolation, and signal ID generation are completely untouched. The signal is returned unaltered.
+
+3. **`alphaforge/risk/engine.py`**
+   - **Function**: `evaluate_trade_risk()`
+   - **Instrumentation**: Wrapped internal evaluation in `_evaluate_trade_risk_internal()` and added `_notify_risk_observability(decision, trade_input)` calling `observe_risk_evaluation(decision, trade_input)`.
+   - **Rationale**: Emits `RISK_ACCEPTED` or `RISK_REJECTED` diagnostic telemetry with explicit violation reason codes.
+   - **Semantic Impact**: **NONE**. Deterministic risk math, position limit checks, capital reservation logic, and the returned `RiskDecision` are 100% identical.
+
+4. **`alphaforge/security/authorizer.py`**
+   - **Function**: `SecurityAuthorizer.authorize_order()` and `SecureBroker.submit_order()`
+   - **Instrumentation**: Added passive notifications `_notify_security_rejection`, `_notify_security_acceptance`, `_notify_submit`, `_notify_ack`, and `_notify_submit_failure`, all strictly wrapped in `with contextlib.suppress(Exception):`.
+   - **Rationale**: Emits `SECURITY_CHECK`, `SECURITY_REJECTED`, `ORDER_SUBMIT`, `ORDER_ACK` telemetry for lifecycle tracking.
+   - **Semantic Impact**: **NONE**. Security authorizer guards evaluate identically and fail closed with original security exceptions. Broker order submission delegates to the underlying broker and returns the order unaltered. An observer crash can never mask a security exception (proved by `ADV-OBS-11`) or cause a false order rejection (proved by `ADV-OBS-12`).
 
 ### Final Freeze Verdict
 **`PHASE 14 — FORENSIC PASS / FREEZE READY`**
+
