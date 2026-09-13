@@ -221,14 +221,15 @@ Phase 17 = Controlled Live
 ---
 
 ### Phase 15: Deployment Environments
-- **Objective:** Configure environment isolation across Research, Paper, Shadow, Tiny Live, and Production.
+- **Objective:** Establish deterministic, fail-closed deployment runtime boundaries and directory isolation across DEV, TEST, PAPER, SHADOW, and LIVE environments for personal/private quantitative trading.
 - **Dependencies:** Phase 14.
-- **Files/Modules:** `deploy/*`, runtime configuration files.
-- **Implementation Tasks:** Environment configuration manifests, reproducible runtime, NTP time synchronization service.
-- **Tests:** Verify container builds and NTP synchronization ($<50\text{ms}$ drift).
-- **Acceptance Criteria:** Strict separation of environment configurations verified.
-- **Exit Gate:** Verified staging runtime environment ready for paper execution; user sign-off.
-- **Risks:** Host OS clock drift; mitigated by continuous NTP daemon.
+- **Files/Modules:** `alphaforge/deployment/*`, `tests/unit/deployment/*`, `docs/PHASE_15_DEPLOYMENT.md`.
+- **Implementation Tasks:** `DeploymentEnvironment` string enum (PAPER default, fail-closed parsing); immutable `DeploymentConfig` with deterministic path derivation and traversal protection; `DeploymentBrokerGuard` enforcing execution safety (simulation orders to live broker impossible); `EnvironmentDirectoryManager` with `.alphaforge_env_marker` crossover protection; `DeploymentReadinessChecker` read-only pre-flight diagnostic probes; `DeploymentRuntime` with ordered startup validation and clean safe shutdown; `DeterministicBackupManager` producing bit-for-bit reproducible ZIP archives with canonical manifests; controlled LIVE recovery prohibiting generic restore into LIVE; `RollbackCoordinator` preventing cross-environment rollbacks; deterministic `DeploymentIdentity` combining git revision and configuration hash.
+- **Tests:** 38 dedicated automated tests (ENV-1–ENV-20, ADV-1–ADV-17, SEM-EQ-1) verifying environment isolation, fail-closed parsing, broker guard invariants, startup ordering, safe shutdown, bit-exact backup determinism, rollback safety, secret scrubbing, and order semantic equivalence.
+- **Acceptance Criteria:** PAPER strictly defaults; LIVE requires explicit dual authorization; simulation execution cannot route to live broker; backups are bit-for-bit deterministic; cross-environment restore into LIVE is strictly blocked; zero secrets in logs/dumps/payloads; zero modifications to frozen Phase 0–14 domain code; 100% test pass rate across all 827 repository tests.
+- **Exit Gate:** 38/38 deployment tests passing, 827/827 full suite passing, 0 Ruff errors, 0 strict Mypy errors, clean diff against Phase 14 baseline, formal documentation complete (`docs/PHASE_15_DEPLOYMENT.md`); user sign-off.
+- **Status:** IMPLEMENTED / VALIDATED (Freeze Ready).
+- **Risks:** Cross-environment state crossover; mitigated by directory marker verification and execution guard rejecting live routing in non-live environments.
 
 ---
 
