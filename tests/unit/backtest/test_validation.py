@@ -161,6 +161,15 @@ def test_quant_gate_evaluator_all_pass() -> None:
         "trace_entries_compared": 100,
         "mismatches": 0,
     }
+    risk_integration_evidence = {
+        "verification_executed": True,
+        "risk_calls": 35,
+        "approved_signals": 35,
+        "rejected_signals": 0,
+        "risk_config_fingerprint": "FP_RISK_1234",
+        "runtime_invariants_verified": True,
+        "integration_test_evidence": None,
+    }
 
     gates, status, warns, errs = QuantGateEvaluator.evaluate_gates(
         trades=trades,
@@ -170,6 +179,7 @@ def test_quant_gate_evaluator_all_pass() -> None:
         initial_capital=Decimal("1000000"),
         look_ahead_evidence=look_ahead_evidence,
         contract_evidence=contract_evidence,
+        risk_integration_evidence=risk_integration_evidence,
         reproducibility_evidence=reproducibility_evidence,
     )
 
@@ -244,9 +254,11 @@ def test_quant_gate_evaluator_unverified_gates_yield_warning() -> None:
     assert status == ValidationStatus.WARNING
     gate_a = next(g for g in gates if g.gate_id == "Gate A")
     gate_e = next(g for g in gates if g.gate_id == "Gate E")
+    gate_f = next(g for g in gates if g.gate_id == "Gate F")
     gate_g = next(g for g in gates if g.gate_id == "Gate G")
     assert gate_a.status == QuantGateStatus.WARNING
     assert gate_e.status == QuantGateStatus.WARNING
+    assert gate_f.status == QuantGateStatus.WARNING
     assert gate_g.status == QuantGateStatus.WARNING
 
 
@@ -419,11 +431,13 @@ def test_quant_gate_f_risk_integration_failure() -> None:
 
     # Risk calls mismatch: calls=5, but approved=2, rejected=1 (missing 2 evaluations)
     evidence = {
+        "verification_executed": True,
         "risk_calls": 5,
         "approved_signals": 2,
         "rejected_signals": 1,
         "risk_config_fingerprint": "TEST_FP",
-        "integration_assertions_passed": False,
+        "runtime_invariants_verified": False,
+        "integration_test_evidence": False,
     }
     gates, status, warns, errs = QuantGateEvaluator.evaluate_gates(
         trades=[],
@@ -437,6 +451,107 @@ def test_quant_gate_f_risk_integration_failure() -> None:
     assert gate_f.status == QuantGateStatus.FAIL
     assert status == ValidationStatus.INVALID
     assert any("Gate F Failed" in e for e in errs)
+
+
+def test_quant_gate_f_runtime_provenance_pass() -> None:
+    """Verify Gate F passes with genuine deterministic runtime provenance."""
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    dataset = BacktestDataset("DS", [_create_candle(t0, Decimal("24000"))])
+    metrics = BacktestMetrics(
+        total_return=Decimal("100"),
+        total_return_pct=Decimal("0.01"),
+        total_trades=1,
+        winning_trades=1,
+        losing_trades=0,
+        break_even_trades=0,
+        win_rate=Decimal("1"),
+        loss_rate=Decimal("0"),
+        average_win=Decimal("100"),
+        average_loss=Decimal("0"),
+        expectancy=Decimal("100"),
+        max_drawdown=Decimal("0"),
+        max_drawdown_pct=Decimal("0"),
+        max_drawdown_duration_seconds=0,
+        average_exposure=Decimal("0"),
+        max_exposure=Decimal("0"),
+        gross_pnl=Decimal("100"),
+        total_fees=Decimal("0"),
+        total_slippage=Decimal("0"),
+        net_pnl=Decimal("100"),
+    )
+    evidence = {
+        "verification_executed": True,
+        "risk_calls": 10,
+        "approved_signals": 8,
+        "rejected_signals": 2,
+        "risk_config_fingerprint": "PROVENANCE_FP_123",
+        "runtime_invariants_verified": True,
+        "integration_test_evidence": None,
+    }
+    gates, status, warns, errs = QuantGateEvaluator.evaluate_gates(
+        trades=[],
+        equity_curve=[],
+        metrics=metrics,
+        dataset=dataset,
+        initial_capital=Decimal("1000000"),
+        risk_integration_evidence=evidence,
+    )
+    gate_f = next(g for g in gates if g.gate_id == "Gate F")
+    assert gate_f.status == QuantGateStatus.PASS
+    assert gate_f.evidence["verification_executed"] is True
+    assert gate_f.evidence["risk_calls"] == 10
+    assert gate_f.evidence["approved_signals"] == 8
+    assert gate_f.evidence["rejected_signals"] == 2
+    assert gate_f.evidence["runtime_invariants_verified"] is True
+    assert "PROVENANCE_FP_123" in gate_f.reason
+
+
+def test_quant_gate_f_unexecuted_warning() -> None:
+    """Verify Gate F yields WARNING when verification was unavailable (no calls)."""
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    dataset = BacktestDataset("DS", [_create_candle(t0, Decimal("24000"))])
+    metrics = BacktestMetrics(
+        total_return=Decimal("0"),
+        total_return_pct=Decimal("0"),
+        total_trades=0,
+        winning_trades=0,
+        losing_trades=0,
+        break_even_trades=0,
+        win_rate=Decimal("0"),
+        loss_rate=Decimal("0"),
+        average_win=Decimal("0"),
+        average_loss=Decimal("0"),
+        expectancy=Decimal("0"),
+        max_drawdown=Decimal("0"),
+        max_drawdown_pct=Decimal("0"),
+        max_drawdown_duration_seconds=0,
+        average_exposure=Decimal("0"),
+        max_exposure=Decimal("0"),
+        gross_pnl=Decimal("0"),
+        total_fees=Decimal("0"),
+        total_slippage=Decimal("0"),
+        net_pnl=Decimal("0"),
+    )
+    evidence = {
+        "verification_executed": False,
+        "risk_calls": 0,
+        "approved_signals": 0,
+        "rejected_signals": 0,
+        "risk_config_fingerprint": "ZERO_CALLS_FP",
+        "runtime_invariants_verified": False,
+        "integration_test_evidence": None,
+    }
+    gates, status, warns, errs = QuantGateEvaluator.evaluate_gates(
+        trades=[],
+        equity_curve=[],
+        metrics=metrics,
+        dataset=dataset,
+        initial_capital=Decimal("1000000"),
+        risk_integration_evidence=evidence,
+    )
+    gate_f = next(g for g in gates if g.gate_id == "Gate F")
+    assert gate_f.status == QuantGateStatus.WARNING
+    assert any("Gate F" in w or "Risk Engine" in w for w in warns)
 
 
 def test_quant_gate_g_reproducibility_mismatch_failure() -> None:

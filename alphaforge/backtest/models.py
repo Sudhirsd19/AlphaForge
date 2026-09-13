@@ -560,6 +560,24 @@ def canonicalize_backtest_result(result: BacktestResult) -> str:
         "warnings": list(result.warnings),
         "errors": list(result.errors),
         "completion_status": result.completion_status,
+        "execution_trace": [
+            {
+                "timestamp": e.timestamp.astimezone(UTC).isoformat(),
+                "event_type": e.event_type.value,
+                "entity_id": e.entity_id,
+                "symbol": e.symbol,
+                "side": e.side.value if e.side is not None else None,
+                "quantity": e.quantity,
+                "price": str(e.price) if e.price is not None else None,
+                "effective_price": (
+                    str(e.effective_price) if e.effective_price is not None else None
+                ),
+                "reason": e.reason,
+                "state": e.state,
+                "metadata": {str(k): _canonicalize_value(v) for k, v in sorted(e.metadata.items())},
+            }
+            for e in result.execution_trace
+        ],
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 

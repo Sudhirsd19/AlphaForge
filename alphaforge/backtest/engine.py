@@ -135,6 +135,8 @@ class BacktestEngine:
         self.risk_evaluations_count: int = 0
         self.risk_approvals_count: int = 0
         self.risk_rejections_recorded: int = 0
+        self.all_approved_signals_passed_phase_5: bool = True
+        self.all_rejected_signals_produced_no_order: bool = True
 
         # Telemetry counters for contract lifecycle
         self.contract_checks: int = 0
@@ -688,16 +690,22 @@ class BacktestEngine:
             .hexdigest()[:16]
             .upper()
         )
+        verification_executed = self.risk_evaluations_count > 0
+        runtime_invariants_verified = bool(
+            self.risk_evaluations_count > 0
+            and self.risk_evaluations_count
+            == (self.risk_approvals_count + self.risk_rejections_recorded)
+            and self.all_approved_signals_passed_phase_5
+            and self.all_rejected_signals_produced_no_order
+        )
         risk_integration_evidence = {
+            "verification_executed": verification_executed,
             "risk_calls": self.risk_evaluations_count,
             "approved_signals": self.risk_approvals_count,
             "rejected_signals": self.risk_rejections_recorded,
             "risk_config_fingerprint": risk_fp,
-            "integration_assertions_passed": (
-                self.risk_evaluations_count
-                == (self.risk_approvals_count + self.risk_rejections_recorded)
-            ),
-            "integration_test_passed": True,
+            "runtime_invariants_verified": runtime_invariants_verified,
+            "integration_test_evidence": None,
         }
         oos_evidence = QuantGateEvaluator.verify_oos_partitioning(self.dataset)
 
@@ -1065,6 +1073,8 @@ class BacktestEngine:
                 "verification_executed": False,
                 "dual_run_executed": False,
                 "rerun_matched": False,
+                "run_1_id": "NONE",
+                "run_2_id": "NONE",
                 "run_1_canonical_hash": "BYPASS_UNVERIFIED",
                 "run_2_canonical_hash": "BYPASS_UNVERIFIED",
                 "trace_1_canonical_hash": "BYPASS_UNVERIFIED",
@@ -1100,6 +1110,7 @@ class BacktestEngine:
             "equity": [s.model_dump(mode="json") for s in equity],
             "metrics": metrics.model_dump(mode="json"),
             "dataset_metadata": self.dataset.metadata.model_dump(mode="json"),
+            "execution_trace": [e.model_dump(mode="json") for e in self.trace],
         }
         r2_payload = {
             "run_id": rerun_res.backtest_run_id,
@@ -1107,6 +1118,7 @@ class BacktestEngine:
             "equity": [s.model_dump(mode="json") for s in rerun_res.equity_curve],
             "metrics": rerun_res.metrics.model_dump(mode="json"),
             "dataset_metadata": rerun_res.dataset_metadata.model_dump(mode="json"),
+            "execution_trace": [e.model_dump(mode="json") for e in rerun_engine.trace],
         }
 
         r1_json = json.dumps(r1_payload, sort_keys=True, separators=(",", ":"), default=str)

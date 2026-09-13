@@ -320,42 +320,76 @@ class QuantGateEvaluator:
         )
 
         # --- Gate F: Correct Risk Engine Integration ---
+        verification_executed = False
         risk_calls = 0
         approved = 0
         rejected = risk_rejections_recorded
         risk_fp = "NONE"
-        assertions_passed = True
-        integration_test_passed = True
+        runtime_invariants_verified = False
+        integration_test_evidence: bool | None = None
 
         if risk_integration_evidence is not None:
+            verification_executed = bool(
+                risk_integration_evidence.get("verification_executed", False)
+            )
             risk_calls = int(risk_integration_evidence.get("risk_calls", 0))
             approved = int(risk_integration_evidence.get("approved_signals", 0))
             rejected = int(
                 risk_integration_evidence.get("rejected_signals", risk_rejections_recorded)
             )
             risk_fp = str(risk_integration_evidence.get("risk_config_fingerprint", "NONE"))
-            assertions_passed = bool(
-                risk_integration_evidence.get("integration_assertions_passed", True)
+            runtime_invariants_verified = bool(
+                risk_integration_evidence.get("runtime_invariants_verified", False)
             )
-            integration_test_passed = bool(
-                risk_integration_evidence.get("integration_test_passed", True)
-            )
+            raw_test_ev = risk_integration_evidence.get("integration_test_evidence", None)
+            if raw_test_ev is not None:
+                integration_test_evidence = bool(raw_test_ev)
 
-        risk_calls_valid = (risk_calls == 0) or (risk_calls == (approved + rejected))
-        if not assertions_passed or not integration_test_passed or not risk_calls_valid:
+        calls_tally_valid = risk_calls == (approved + rejected)
+
+        if integration_test_evidence is False:
             status_f = QuantGateStatus.FAIL
             reason_f = (
                 f"Risk engine integration failed: calls={risk_calls}, approved={approved}, "
-                f"rejected={rejected}, integration_test_passed={integration_test_passed}"
+                f"rejected={rejected}, integration_test_evidence=False"
             )
             errors.append(f"Gate F Failed: {reason_f}")
+            warn_f = 0
             err_f = 1
-        else:
+        elif not calls_tally_valid or (
+            verification_executed
+            and not runtime_invariants_verified
+            and integration_test_evidence is not True
+        ):
+            status_f = QuantGateStatus.FAIL
+            reason_f = (
+                f"Risk engine invariant violation: calls={risk_calls}, approved={approved}, "
+                f"rejected={rejected}, runtime_invariants_verified={runtime_invariants_verified}"
+            )
+            errors.append(f"Gate F Failed: {reason_f}")
+            warn_f = 0
+            err_f = 1
+        elif not verification_executed or (risk_calls == 0 and integration_test_evidence is None):
+            status_f = QuantGateStatus.WARNING
+            reason_f = "Phase 5 Risk Engine verification unavailable: no trade signals evaluated"
+            warnings.append(reason_f)
+            warn_f = 1
+            err_f = 0
+        elif (
+            verification_executed and runtime_invariants_verified and calls_tally_valid
+        ) or integration_test_evidence is True:
             status_f = QuantGateStatus.PASS
             reason_f = (
                 f"Phase 5 Risk Engine verified: {risk_calls} evaluations, "
                 f"{approved} approved, {rejected} rejected (FP: {risk_fp})"
             )
+            warn_f = 0
+            err_f = 0
+        else:
+            status_f = QuantGateStatus.WARNING
+            reason_f = "Phase 5 Risk Engine verification unavailable"
+            warnings.append(reason_f)
+            warn_f = 1
             err_f = 0
 
         gates.append(
@@ -365,14 +399,15 @@ class QuantGateEvaluator:
                 status=status_f,
                 reason=reason_f,
                 evidence={
+                    "verification_executed": verification_executed,
                     "risk_calls": risk_calls,
                     "approved_signals": approved,
                     "rejected_signals": rejected,
-                    "risk_rejections_recorded": rejected,
                     "risk_config_fingerprint": risk_fp,
-                    "integration_assertions_passed": assertions_passed,
-                    "integration_test_passed": integration_test_passed,
+                    "runtime_invariants_verified": runtime_invariants_verified,
+                    "integration_test_evidence": integration_test_evidence,
                 },
+                warning_count=warn_f,
                 error_count=err_f,
             )
         )
@@ -380,6 +415,8 @@ class QuantGateEvaluator:
         # --- Gate G: Deterministic Reproducibility ---
         verification_executed = False
         rerun_matched = False
+        run1_id = "NONE"
+        run2_id = "NONE"
         run1_hash = "NONE"
         run2_hash = "NONE"
         trace1_hash = "NONE"
@@ -394,6 +431,8 @@ class QuantGateEvaluator:
                 reproducibility_evidence.get("verification_executed", True)
             )
             rerun_matched = bool(reproducibility_evidence.get("rerun_matched", False))
+            run1_id = str(reproducibility_evidence.get("run_1_id", "NONE"))
+            run2_id = str(reproducibility_evidence.get("run_2_id", "NONE"))
             run1_hash = str(reproducibility_evidence.get("run_1_canonical_hash", "NONE"))
             run2_hash = str(reproducibility_evidence.get("run_2_canonical_hash", "NONE"))
             trace1_hash = str(reproducibility_evidence.get("trace_1_canonical_hash", "NONE"))
@@ -414,6 +453,7 @@ class QuantGateEvaluator:
             or mismatches > 0
             or run1_hash != run2_hash
             or trace1_hash != trace2_hash
+            or (run1_id != "NONE" and run2_id != "NONE" and run1_id != run2_id)
         ):
             status_g = QuantGateStatus.FAIL
             reason_g = (
@@ -442,6 +482,8 @@ class QuantGateEvaluator:
                     "verification_executed": verification_executed,
                     "dual_run_executed": verification_executed,
                     "rerun_matched": rerun_matched,
+                    "run_1_id": run1_id,
+                    "run_2_id": run2_id,
                     "run_1_canonical_hash": run1_hash,
                     "run_2_canonical_hash": run2_hash,
                     "trace_1_canonical_hash": trace1_hash,

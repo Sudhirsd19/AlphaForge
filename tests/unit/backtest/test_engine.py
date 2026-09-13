@@ -394,8 +394,32 @@ def test_trace_completeness_and_canonical_hash_stability() -> None:
 
 
 def test_result_canonical_hash_stability_and_non_circularity() -> None:
-    """Verify non-circular result canonical hashing and sensitivity to mutations."""
+    """
+    Verify non-circular result canonical hashing and sensitivity to mutations.
+    Explicitly tests:
+    - Test 1: hash_A == hash_B (identical complete results)
+    - Test 2: hash_A != hash_B (change one execution-trace event)
+    - Test 3: hash_A != hash_B (change one trade)
+    - Test 4: hash_A != hash_B (change one equity snapshot)
+    - Test 5: hash_A == hash_B (change only self-referential hash fields)
+    """
     candles = _load_fixture_candles()
+    last_c = candles[-1]
+    next_c = MarketCandle(
+        symbol="NIFTY",
+        instrument_type=InstrumentType.INDEX,
+        contract_id="NIFTY-SPOT",
+        exchange_timestamp=last_c.exchange_timestamp + timedelta(minutes=3),
+        received_timestamp=last_c.exchange_timestamp + timedelta(minutes=3, milliseconds=10),
+        timeframe="3m",
+        open=Decimal("24100.00"),
+        high=Decimal("24150.00"),
+        low=Decimal("24090.00"),
+        close=Decimal("24120.00"),
+        volume=2000,
+        source="NSE",
+    )
+    candles.append(next_c)
     dataset = BacktestDataset("RESULT_HASH_DS", candles)
     cfg = BacktestConfig(
         strategy_id="AF_ORB_MOMENTUM_V1",
@@ -405,6 +429,7 @@ def test_result_canonical_hash_stability_and_non_circularity() -> None:
         end_time=candles[-1].exchange_timestamp + timedelta(minutes=3),
         initial_capital=Decimal("1000000"),
         warmup_bars=15,
+        final_position_policy=FinalPositionPolicy.FORCE_CLOSE,
         verify_look_ahead=False,
         verify_reproducibility=False,
     )
@@ -418,18 +443,39 @@ def test_result_canonical_hash_stability_and_non_circularity() -> None:
     direct_hash = compute_result_canonical_hash(res)
     assert res.result_canonical_hash == direct_hash
 
-    # Non-circularity: setting result_canonical_hash to None or dummy string does not change hash
-    res_copy = res.model_copy(update={"result_canonical_hash": None, "trace_canonical_hash": None})
-    assert compute_result_canonical_hash(res_copy) == direct_hash
+    # Test 1: hash_A == hash_B (identical complete results)
+    res_clone = res.model_copy(deep=True)
+    assert compute_result_canonical_hash(res_clone) == direct_hash
 
-    res_tampered_hash = res.model_copy(update={"result_canonical_hash": "DUMMY_HASH_VAL"})
-    assert compute_result_canonical_hash(res_tampered_hash) == direct_hash
+    # Test 2: hash_A != hash_B (change one execution-trace event)
+    assert len(res.execution_trace) > 0
+    mutated_trace = list(res.execution_trace)
+    mutated_trace[0] = mutated_trace[0].model_copy(update={"quantity": 999999})
+    res_mutated_trace = res.model_copy(update={"execution_trace": tuple(mutated_trace)})
+    assert compute_result_canonical_hash(res_mutated_trace) != direct_hash
 
-    # Sensitivity: altering any domain field changes the result canonical hash
-    res_tampered_return = res.model_copy(
-        update={"metrics": res.metrics.model_copy(update={"total_return": Decimal("999999")})}
+    # Test 3: hash_A != hash_B (change one trade)
+    assert len(res.trades) > 0
+    mutated_trades = list(res.trades)
+    mutated_trades[0] = mutated_trades[0].model_copy(update={"entry_price": Decimal("999999")})
+    res_mutated_trade = res.model_copy(update={"trades": tuple(mutated_trades)})
+    assert compute_result_canonical_hash(res_mutated_trade) != direct_hash
+
+    # Test 4: hash_A != hash_B (change one equity snapshot)
+    assert len(res.equity_curve) > 0
+    mutated_equity = list(res.equity_curve)
+    mutated_equity[0] = mutated_equity[0].model_copy(update={"equity": Decimal("999999")})
+    res_mutated_equity = res.model_copy(update={"equity_curve": tuple(mutated_equity)})
+    assert compute_result_canonical_hash(res_mutated_equity) != direct_hash
+
+    # Test 5: hash_A == hash_B (change only self-referential hash fields: result & trace)
+    res_tampered_self_refs = res.model_copy(
+        update={
+            "result_canonical_hash": "CHANGED_RESULT_HASH_0123456789abcdef",
+            "trace_canonical_hash": "CHANGED_TRACE_HASH_0123456789abcdef",
+        }
     )
-    assert compute_result_canonical_hash(res_tampered_return) != direct_hash
+    assert compute_result_canonical_hash(res_tampered_self_refs) == direct_hash
 
 
 def test_audit_validation_event_emission_order() -> None:
