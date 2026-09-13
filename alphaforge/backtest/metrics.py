@@ -144,22 +144,38 @@ def calculate_backtest_metrics(
             downside_var = sum(downside_sq) / len(returns)
             downside_vol = math.sqrt(downside_var) if downside_var > 0 else 0.0
 
-            # Assuming 252 annual periods factor (or annualized by periods per year)
-            annual_factor = math.sqrt(252.0 * (len(returns) / max(1.0, float(duration_days))))
+            # Derive sampling interval and annualization factor from equity snapshots
+            # Standard NSE trading session: 9:15 to 15:30 = 375 minutes
+            # = 22,500 trading seconds/day.
+            # Annualized trading time: 252 trading days/year = 5,670,000 trading seconds/year.
+            intervals: list[float] = [
+                (equity_curve[j].timestamp - equity_curve[j - 1].timestamp).total_seconds()
+                for j in range(1, len(equity_curve))
+                if (equity_curve[j].timestamp - equity_curve[j - 1].timestamp).total_seconds() > 0
+            ]
+            if intervals:
+                intervals.sort()
+                median_interval_sec = intervals[len(intervals) // 2]
+                if median_interval_sec >= 86400.0:
+                    periods_per_year = 252.0
+                else:
+                    periods_per_year = max(1.0, 5670000.0 / median_interval_sec)
+            else:
+                periods_per_year = 252.0
+
+            annual_factor = math.sqrt(periods_per_year)
             ann_vol = vol * annual_factor
             ann_downside = downside_vol * annual_factor
 
             if ann_vol > 0:
                 volatility_annualized = Decimal(str(round(ann_vol * 100.0, 4)))
                 # Annualized Sharpe (0% risk-free rate assumption for baseline)
-                ann_sharpe = ((mean_ret * (annual_factor**2)) / ann_vol) if ann_vol > 0 else 0.0
+                ann_sharpe = (mean_ret / vol) * annual_factor
                 sharpe_ratio = Decimal(str(round(ann_sharpe, 4)))
 
             if ann_downside > 0:
                 downside_vol_annualized = Decimal(str(round(ann_downside * 100.0, 4)))
-                ann_sortino = (
-                    ((mean_ret * (annual_factor**2)) / ann_downside) if ann_downside > 0 else 0.0
-                )
+                ann_sortino = (mean_ret / downside_vol) * annual_factor
                 sortino_ratio = Decimal(str(round(ann_sortino, 4)))
 
             if annualized_return_pct is not None and max_dd_pct > Decimal("0"):

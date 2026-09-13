@@ -32,6 +32,9 @@ def compute_dataset_checksum(candles: Sequence[MarketCandle]) -> str:
     return hasher.hexdigest()
 
 
+SENTINEL_EMPTY_DATETIME: datetime = datetime(1970, 1, 1, 0, 0, tzinfo=UTC)
+
+
 class DatasetMetadata(BaseModel):
     """
     Immutable metadata identifying an authoritative backtesting market dataset.
@@ -127,13 +130,12 @@ class BacktestDataset:
                 checksum=self.checksum,
             )
         else:
-            now_utc = datetime.now(UTC)
             self.metadata = DatasetMetadata(
                 dataset_id=self.dataset_id,
                 symbol="EMPTY",
                 timeframe="NONE",
-                start_timestamp=now_utc,
-                end_timestamp=now_utc,
+                start_timestamp=SENTINEL_EMPTY_DATETIME,
+                end_timestamp=SENTINEL_EMPTY_DATETIME,
                 record_count=0,
                 data_source=data_source,
                 schema_version=1,

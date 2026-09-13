@@ -215,3 +215,187 @@ def test_market_regime_analyzer() -> None:
     ]
     regime = MarketRegimeAnalyzer.classify_candle_regime(bull_candles)
     assert regime in (RegimeType.TRENDING_BULL, RegimeType.HIGH_VOLATILITY)
+
+
+def test_quant_gate_a_look_ahead_violation_failure() -> None:
+    """
+    Verify Gate A fails when future mutation discrepancies or temporal inversions are detected.
+    """
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    dataset = BacktestDataset("DS", [_create_candle(t0, Decimal("24000"))])
+    metrics = BacktestMetrics(
+        total_return=Decimal("0"),
+        total_return_pct=Decimal("0"),
+        total_trades=0,
+        winning_trades=0,
+        losing_trades=0,
+        break_even_trades=0,
+        win_rate=Decimal("0"),
+        loss_rate=Decimal("0"),
+        average_win=Decimal("0"),
+        average_loss=Decimal("0"),
+        expectancy=Decimal("0"),
+        max_drawdown=Decimal("0"),
+        max_drawdown_pct=Decimal("0"),
+        max_drawdown_duration_seconds=0,
+        average_exposure=Decimal("0"),
+        max_exposure=Decimal("0"),
+        gross_pnl=Decimal("0"),
+        total_fees=Decimal("0"),
+        total_slippage=Decimal("0"),
+        net_pnl=Decimal("0"),
+    )
+
+    # Causality violation evidence provided
+    evidence = {
+        "future_mutation_tests": 1,
+        "causality_violations": 2,
+        "historical_decisions_compared": 5,
+        "historical_orders_compared": 5,
+        "historical_fills_compared": 5,
+        "historical_equity_snapshots_compared": 10,
+    }
+    gates, status, warns, errs = QuantGateEvaluator.evaluate_gates(
+        trades=[],
+        equity_curve=[],
+        metrics=metrics,
+        dataset=dataset,
+        initial_capital=Decimal("1000000"),
+        look_ahead_evidence=evidence,
+    )
+    gate_a = next(g for g in gates if g.gate_id == "Gate A")
+    assert gate_a.status == QuantGateStatus.FAIL
+    assert gate_a.error_count == 2
+    assert status == ValidationStatus.INVALID
+    assert any("Gate A Failed" in e for e in errs)
+
+
+def test_quant_gate_f_risk_integration_failure() -> None:
+    """Verify Gate F fails when risk integration assertions fail or counts mismatch."""
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    dataset = BacktestDataset("DS", [_create_candle(t0, Decimal("24000"))])
+    metrics = BacktestMetrics(
+        total_return=Decimal("0"),
+        total_return_pct=Decimal("0"),
+        total_trades=0,
+        winning_trades=0,
+        losing_trades=0,
+        break_even_trades=0,
+        win_rate=Decimal("0"),
+        loss_rate=Decimal("0"),
+        average_win=Decimal("0"),
+        average_loss=Decimal("0"),
+        expectancy=Decimal("0"),
+        max_drawdown=Decimal("0"),
+        max_drawdown_pct=Decimal("0"),
+        max_drawdown_duration_seconds=0,
+        average_exposure=Decimal("0"),
+        max_exposure=Decimal("0"),
+        gross_pnl=Decimal("0"),
+        total_fees=Decimal("0"),
+        total_slippage=Decimal("0"),
+        net_pnl=Decimal("0"),
+    )
+
+    # Risk calls mismatch: calls=5, but approved=2, rejected=1 (missing 2 evaluations)
+    evidence = {
+        "risk_calls": 5,
+        "approved_signals": 2,
+        "rejected_signals": 1,
+        "risk_config_fingerprint": "TEST_FP",
+        "integration_assertions_passed": False,
+    }
+    gates, status, warns, errs = QuantGateEvaluator.evaluate_gates(
+        trades=[],
+        equity_curve=[],
+        metrics=metrics,
+        dataset=dataset,
+        initial_capital=Decimal("1000000"),
+        risk_integration_evidence=evidence,
+    )
+    gate_f = next(g for g in gates if g.gate_id == "Gate F")
+    assert gate_f.status == QuantGateStatus.FAIL
+    assert status == ValidationStatus.INVALID
+    assert any("Gate F Failed" in e for e in errs)
+
+
+def test_quant_gate_g_reproducibility_mismatch_failure() -> None:
+    """Verify Gate G fails when canonical rerun hashes mismatch."""
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    dataset = BacktestDataset("DS", [_create_candle(t0, Decimal("24000"))])
+    metrics = BacktestMetrics(
+        total_return=Decimal("0"),
+        total_return_pct=Decimal("0"),
+        total_trades=0,
+        winning_trades=0,
+        losing_trades=0,
+        break_even_trades=0,
+        win_rate=Decimal("0"),
+        loss_rate=Decimal("0"),
+        average_win=Decimal("0"),
+        average_loss=Decimal("0"),
+        expectancy=Decimal("0"),
+        max_drawdown=Decimal("0"),
+        max_drawdown_pct=Decimal("0"),
+        max_drawdown_duration_seconds=0,
+        average_exposure=Decimal("0"),
+        max_exposure=Decimal("0"),
+        gross_pnl=Decimal("0"),
+        total_fees=Decimal("0"),
+        total_slippage=Decimal("0"),
+        net_pnl=Decimal("0"),
+    )
+
+    # Hash mismatch between run 1 and run 2
+    evidence = {
+        "rerun_matched": False,
+        "run_1_canonical_hash": "HASH_AAA",
+        "run_2_canonical_hash": "HASH_BBB",
+        "trades_compared": 5,
+        "snapshots_compared": 20,
+        "mismatches": 1,
+    }
+    gates, status, warns, errs = QuantGateEvaluator.evaluate_gates(
+        trades=[],
+        equity_curve=[],
+        metrics=metrics,
+        dataset=dataset,
+        initial_capital=Decimal("1000000"),
+        reproducibility_evidence=evidence,
+    )
+    gate_g = next(g for g in gates if g.gate_id == "Gate G")
+    assert gate_g.status == QuantGateStatus.FAIL
+    assert gate_g.error_count == 1
+    assert status == ValidationStatus.INVALID
+    assert any("Gate G Failed" in e for e in errs)
+
+
+def test_quant_gate_i_oos_chronology_and_parameter_isolation() -> None:
+    """Verify Gate I evaluates OOS chronological order, non-overlap, and parameter immutability."""
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles = [_create_candle(t0 + timedelta(minutes=3 * i), Decimal("24000")) for i in range(50)]
+    dataset = BacktestDataset("DS_50", candles)
+
+    # 1. Automatic partitioning verification passes
+    oos_result = QuantGateEvaluator.verify_oos_partitioning(dataset)
+    assert oos_result["fold_count"] > 0
+    assert oos_result["overlap_count"] == 0
+    assert oos_result["chronology_violations"] == 0
+    assert oos_result["oos_parameter_mutations"] == 0
+
+    # 2. Test parameter immutability on WalkForwardFold
+    params = {"rsi_period": 14, "target_multiple": "2.0"}
+    folds = WalkForwardEngine.generate_rolling_folds(
+        dataset=dataset,
+        train_bars=20,
+        val_bars=10,
+        test_bars=10,
+        step_bars=10,
+        parameters=params,
+    )
+    assert len(folds) > 0
+    f = folds[0]
+    import pytest
+
+    with pytest.raises(TypeError):
+        f.frozen_parameters["new_key"] = 123  # type: ignore[index]

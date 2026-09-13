@@ -4,6 +4,7 @@ Phase 10 offline historical simulation and quant gates.
 """
 
 from alphaforge.backtest.datasets import (
+    SENTINEL_EMPTY_DATETIME,
     BacktestDataset,
     DatasetMetadata,
     compute_dataset_checksum,
@@ -61,6 +62,7 @@ __all__ = [
     "QuantGateResult",
     "QuantGateStatus",
     "RegimeType",
+    "SENTINEL_EMPTY_DATETIME",
     "SimulatedFill",
     "SimulatedFillEngine",
     "ValidationStatus",

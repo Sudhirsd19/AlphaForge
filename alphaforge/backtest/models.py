@@ -112,6 +112,12 @@ class BacktestConfig(BaseModel):
     fill_policy_version: str = Field(
         default="CONSERVATIVE_V1", description="Execution fill simulation policy version"
     )
+    verify_look_ahead: bool = Field(
+        default=True, description="Execute causal future mutation verification in Gate A"
+    )
+    verify_reproducibility: bool = Field(
+        default=True, description="Execute deterministic dual-run verification in Gate G"
+    )
 
     @field_validator("start_time", "end_time")
     @classmethod

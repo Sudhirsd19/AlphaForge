@@ -18,17 +18,23 @@ P12: Future appendage independence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from alphaforge.backtest.datasets import BacktestDataset
+from alphaforge.backtest.datasets import SENTINEL_EMPTY_DATETIME, BacktestDataset
 from alphaforge.backtest.engine import BacktestEngine, compute_backtest_run_id
 from alphaforge.backtest.metrics import calculate_backtest_metrics
 from alphaforge.backtest.models import BacktestConfig
 from alphaforge.backtest.portfolio import PortfolioTracker
+from alphaforge.backtest.validation import WalkForwardEngine
+from alphaforge.contract.models import ContractMaster
+from alphaforge.cost.models import CostConfig
 from alphaforge.data.enums import InstrumentType
 from alphaforge.data.models import MarketCandle
 from alphaforge.risk.enums import TradeSide
+from alphaforge.risk.models import RiskConfig
+from alphaforge.strategy.config import StrategyConfig
 
 
 def _make_candle(ts: datetime, price: Decimal, volume: int = 100) -> MarketCandle:
@@ -264,3 +270,262 @@ def test_p9_p10_checksum_sensitivity(p1: int, p2: int) -> None:
         initial_capital=Decimal("1000000"),
     )
     assert compute_backtest_run_id(cfg, ds1.metadata) != compute_backtest_run_id(cfg, ds2.metadata)
+
+
+# ---------------------------------------------------------------------------
+# P11: Run identity uniqueness
+# ---------------------------------------------------------------------------
+@settings(max_examples=10, deadline=None)
+@given(delta_m=st.integers(min_value=1, max_value=60))
+def test_p11_run_identity_uniqueness(delta_m: int) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    c1 = _make_candle(t0, Decimal("24000"))
+    ds = BacktestDataset("DS", [c1])
+    cfg1 = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(minutes=30),
+        initial_capital=Decimal("1000000"),
+    )
+    cfg2 = cfg1.model_copy(update={"end_time": t0 + timedelta(minutes=30 + delta_m)})
+    assert compute_backtest_run_id(cfg1, ds.metadata) != compute_backtest_run_id(cfg2, ds.metadata)
+
+
+# ---------------------------------------------------------------------------
+# P12: Future appendage independence
+# ---------------------------------------------------------------------------
+@settings(max_examples=5, deadline=None)
+@given(future_price=st.integers(min_value=30000, max_value=50000))
+def test_p12_future_appendage_independence(future_price: int) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles_base = [
+        _make_candle(t0 + timedelta(minutes=3 * i), Decimal("24000")) for i in range(10)
+    ]
+    future_c = _make_candle(t0 + timedelta(minutes=30), Decimal(future_price), volume=50000)
+
+    ds_base = BacktestDataset("DS_BASE", candles_base)
+    ds_ext = BacktestDataset("DS_EXT", candles_base + [future_c])
+
+    cfg_base = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds_base.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(minutes=30),
+        initial_capital=Decimal("1000000"),
+        verify_look_ahead=False,
+        verify_reproducibility=False,
+    )
+    cfg_ext = cfg_base.model_copy(
+        update={
+            "dataset_id": ds_ext.dataset_id,
+            "end_time": t0 + timedelta(minutes=33),
+        }
+    )
+
+    res_base = BacktestEngine(cfg_base, ds_base).run()
+    res_ext = BacktestEngine(cfg_ext, ds_ext).run()
+
+    # Historical snapshots in base horizon must be identical
+    for k in range(len(candles_base)):
+        assert res_base.equity_curve[k].equity == res_ext.equity_curve[k].equity
+        assert res_base.equity_curve[k].cash == res_ext.equity_curve[k].cash
+
+
+# ---------------------------------------------------------------------------
+# P13: Risk config sensitivity
+# ---------------------------------------------------------------------------
+@settings(max_examples=5, deadline=None)
+@given(max_trades=st.integers(min_value=1, max_value=20))
+def test_p13_risk_config_sensitivity(max_trades: int) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    c = _make_candle(t0, Decimal("24000"))
+    ds = BacktestDataset("DS", [c])
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(hours=1),
+        initial_capital=Decimal("1000000"),
+    )
+    id_base = compute_backtest_run_id(cfg, ds.metadata)
+    risk_diff = RiskConfig(max_open_trades=max_trades + 25)
+    id_diff = compute_backtest_run_id(cfg, ds.metadata, risk_config=risk_diff)
+    assert id_base != id_diff
+
+
+# ---------------------------------------------------------------------------
+# P14: Strategy config sensitivity
+# ---------------------------------------------------------------------------
+@settings(max_examples=5, deadline=None)
+@given(atr_p=st.integers(min_value=5, max_value=50))
+def test_p14_strategy_config_sensitivity(atr_p: int) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    c = _make_candle(t0, Decimal("24000"))
+    ds = BacktestDataset("DS", [c])
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(hours=1),
+        initial_capital=Decimal("1000000"),
+    )
+    id_base = compute_backtest_run_id(cfg, ds.metadata)
+    strat_diff = StrategyConfig(atr_period=atr_p + 100)
+    id_diff = compute_backtest_run_id(cfg, ds.metadata, strategy_config=strat_diff)
+    assert id_base != id_diff
+
+
+# ---------------------------------------------------------------------------
+# P15: Contract master sensitivity
+# ---------------------------------------------------------------------------
+def test_p15_contract_master_sensitivity() -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    c = _make_candle(t0, Decimal("24000"))
+    ds = BacktestDataset("DS", [c])
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(hours=1),
+        initial_capital=Decimal("1000000"),
+    )
+    id_none = compute_backtest_run_id(cfg, ds.metadata, contract_master=None)
+    contract = ContractMaster(
+        exchange="NSE",
+        segment="NFO",
+        underlying_symbol="NIFTY",
+        contract_id="NIFTY26SEPFUT",
+        expiry_datetime=datetime(2026, 9, 25, 10, 0, tzinfo=UTC),
+        listing_datetime=datetime(2026, 6, 1, 9, 15, tzinfo=UTC),
+        trading_start_datetime=datetime(2026, 6, 1, 9, 15, tzinfo=UTC),
+        trading_end_datetime=datetime(2026, 9, 25, 10, 0, tzinfo=UTC),
+        lot_size=50,
+        tick_size=Decimal("0.05"),
+        data_source="NSE",
+    )
+    id_contract = compute_backtest_run_id(cfg, ds.metadata, contract_master=contract)
+    assert id_none != id_contract
+
+
+# ---------------------------------------------------------------------------
+# P16: Cost config sensitivity
+# ---------------------------------------------------------------------------
+@settings(max_examples=5, deadline=None)
+@given(fee_rate=st.floats(min_value=0.001, max_value=0.01))
+def test_p16_cost_config_sensitivity(fee_rate: float) -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    c = _make_candle(t0, Decimal("24000"))
+    ds = BacktestDataset("DS", [c])
+    cfg_base = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(hours=1),
+        initial_capital=Decimal("1000000"),
+    )
+    id_base = compute_backtest_run_id(cfg_base, ds.metadata)
+    cfg_diff = cfg_base.model_copy(
+        update={"cost_config": CostConfig(entry_fee_rate=Decimal(str(round(fee_rate, 4))))}
+    )
+    id_diff = compute_backtest_run_id(cfg_diff, ds.metadata)
+    assert id_base != id_diff
+
+
+# ---------------------------------------------------------------------------
+# P17: Engine version sensitivity
+# ---------------------------------------------------------------------------
+def test_p17_engine_version_sensitivity() -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    c = _make_candle(t0, Decimal("24000"))
+    ds = BacktestDataset("DS", [c])
+    cfg1 = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(hours=1),
+        initial_capital=Decimal("1000000"),
+        engine_version="PHASE10_BACKTEST_V1",
+    )
+    cfg2 = cfg1.model_copy(update={"engine_version": "PHASE10_BACKTEST_V2"})
+    assert compute_backtest_run_id(cfg1, ds.metadata) != compute_backtest_run_id(cfg2, ds.metadata)
+
+
+# ---------------------------------------------------------------------------
+# P18: Empty dataset determinism & sentinel metadata
+# ---------------------------------------------------------------------------
+def test_p18_empty_dataset_determinism_and_sentinel() -> None:
+    ds_empty = BacktestDataset("EMPTY_DS", [])
+    assert ds_empty.metadata.start_timestamp == SENTINEL_EMPTY_DATETIME
+    assert ds_empty.metadata.end_timestamp == SENTINEL_EMPTY_DATETIME
+    assert ds_empty.metadata.record_count == 0
+
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds_empty.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(hours=1),
+        initial_capital=Decimal("1000000"),
+    )
+    res1 = BacktestEngine(cfg, ds_empty).run()
+    res2 = BacktestEngine(cfg, ds_empty).run()
+
+    assert res1.backtest_run_id == res2.backtest_run_id
+    assert len(res1.trades) == 0
+    assert len(res1.equity_curve) == 0
+    assert res1.metrics.total_trades == 0
+
+
+# ---------------------------------------------------------------------------
+# P19: Dual-run canonical hash reproducibility
+# ---------------------------------------------------------------------------
+def test_p19_dual_run_canonical_hash_reproducibility() -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles = [_make_candle(t0 + timedelta(minutes=3 * i), Decimal("24000")) for i in range(10)]
+    ds = BacktestDataset("DS_REPRO", candles)
+    cfg = BacktestConfig(
+        strategy_id="AF_ORB_MOMENTUM_V1",
+        strategy_version="1.0.0",
+        dataset_id=ds.dataset_id,
+        start_time=t0,
+        end_time=t0 + timedelta(minutes=30),
+        initial_capital=Decimal("1000000"),
+        verify_reproducibility=True,
+    )
+    res = BacktestEngine(cfg, ds).run()
+    gate_g = next(g for g in res.quant_gates if g.gate_id == "Gate G")
+    assert gate_g.evidence["rerun_matched"] is True
+    assert gate_g.evidence["mismatches"] == 0
+    assert gate_g.evidence["run_1_canonical_hash"] == gate_g.evidence["run_2_canonical_hash"]
+    assert gate_g.evidence["run_1_canonical_hash"] != "NONE"
+
+
+# ---------------------------------------------------------------------------
+# P20: OOS parameter immutability
+# ---------------------------------------------------------------------------
+def test_p20_oos_parameter_immutability() -> None:
+    t0 = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
+    candles = [_make_candle(t0 + timedelta(minutes=3 * i), Decimal("24000")) for i in range(50)]
+    ds = BacktestDataset("DS_OOS", candles)
+    params = {"rsi_period": 14, "target_multiple": "2.0"}
+    folds = WalkForwardEngine.generate_rolling_folds(
+        dataset=ds,
+        train_bars=20,
+        val_bars=10,
+        test_bars=10,
+        step_bars=10,
+        parameters=params,
+    )
+    assert len(folds) > 0
+    f = folds[0]
+    with pytest.raises(TypeError):
+        f.frozen_parameters["mutated"] = True  # type: ignore[index]
