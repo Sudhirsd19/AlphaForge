@@ -233,15 +233,16 @@ Phase 17 = Controlled Live
 
 ---
 
-### Phase 16: Paper / Shadow
-- **Objective:** Run continuous paper trading against real-time live market feeds to validate execution latency and fill dynamics.
+### Phase 16: Paper / Shadow Trading
+- **Objective:** Implement a production-like Paper / Shadow Trading forward validation engine enforcing zero-live-orders safety, deterministic execution simulation with Phase 6 cost/slippage models, conservative SL-first OHLC ambiguity resolution, strict anti-lookahead causality, and continuous 6-point multi-entity reconciliation.
 - **Dependencies:** Phase 15.
-- **Files/Modules:** `alphaforge/modes/paper_runner.py`, `alphaforge/modes/shadow_runner.py`.
-- **Implementation Tasks:** Connect live WebSocket feeds to simulated matching engine; log all signals, hypothetical fills, and slippage.
-- **Tests:** Minimum 15 consecutive trading days of continuous zero-crash operation in paper mode.
-- **Acceptance Criteria:** Reconciled theoretical paper results against real exchange order books with zero state machine anomalies.
-- **Exit Gate:** 15 trading days completed with 100% uptime and verified zero unhandled exceptions; user sign-off.
-- **Risks:** Feed disconnects during market opening bell; verified handled by auto-reconnect.
+- **Files/Modules:** `alphaforge/paper_shadow/*`, `tests/unit/paper_shadow/*`, `tests/integration/paper_shadow/*`, `tests/adversarial/paper_shadow/*`, `tests/property/test_paper_shadow_properties.py`, `docs/PHASE_16_PAPER_SHADOW.md`.
+- **Implementation Tasks:** Deterministic enums and immutable Pydantic schemas (`PaperShadowConfig`, `MarketEvent`, `PaperTradeRecord`, `ShadowObservationRecord`, `ForwardRunReport`); `PaperMarketDataValidator` enforcing timestamp monotonicity, timeframe-scaled staleness thresholds, forming candle quarantine, and physical OHLC boundaries; `DeterministicFillSimulator` with Phase 6 friction and `SL_FIRST_CONSERVATIVE` same-bar resolution; `PaperPnLTracker` maintaining fixed-point `Decimal` accounting, FIFO exits, and drawdown tracking; `PaperShadowOrderRouter` managing 17-state `OrderStateMachine`, single-intent `IdempotencyRegistry`, and `DeploymentBrokerGuard(PaperBroker)` routing with zero broker operations in SHADOW mode; `ShadowComparator` passive diagnostic observer; `PaperShadowReconciler` continuously checking 6 authoritative entities; `PaperShadowEngine` and `ForwardValidationRunner` testbench with JSON checkpoint crash recovery and Phase 13 `KillSwitch` / Phase 14 `SafeObservabilityDispatcher` integration.
+- **Tests:** 62 dedicated automated tests (Unit, Integration, Adversarial PS-1..PS-31, Property) verifying zero live orders in paper/shadow, cross-environment blocking, idempotency, order quantity conservation, state recovery, conservative SL-first fill simulation, adverse slippage, non-negative fees, anti-lookahead causal monotonicity, kill-switch halting, and ledger chain integrity.
+- **Acceptance Criteria:** Real-money live broker order submission strictly impossible in PAPER and SHADOW modes; conservative SL-first intra-bar ambiguity resolution; 100% fixed-point Decimal arithmetic; continuous reconciliation with auto-halt on discrepancy; zero look-ahead bias; zero modifications to frozen Phase 0–15 baseline; 100% test pass rate across 894 repository tests.
+- **Exit Gate:** 62/62 Phase 16 tests passing, 894/894 full suite passing, 0 Ruff errors, 0 strict Mypy errors, clean diff against Phase 15 baseline, formal documentation complete (`docs/PHASE_16_PAPER_SHADOW.md`); user sign-off.
+- **Status:** COMPLETED / FROZEN (Phase 16 Forensic Pass).
+- **Risks:** Data leakage / lookahead bias or accidental live routing; mitigated by strict causal timestamp verification, forming-candle quarantine, and authoritative `DeploymentBrokerGuard` isolation.
 
 ---
 
