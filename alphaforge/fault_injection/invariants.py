@@ -158,41 +158,39 @@ def assert_no_phantom_positions(
     authoritative_executions: Sequence[Any],
 ) -> None:
     """
-    Verify every position has authoritative execution provenance.
+    Verify every non-zero position has explicit authoritative execution provenance.
 
-    Provenance Chain:
-      POSITION -> originating execution/fill -> order/client_order_id -> broker/audit truth
+    A positive position MUST have an explicit authoritative provenance path:
+      1. POSITION -> origin_order_id / client_order_id -> authoritative execution/fill
+      2. POSITION -> explicit position_id / position reference -> authoritative execution/fill
 
-    Enforces:
-    1. Originating order/fill exists in authoritative executions.
-    2. Position symbol matches execution symbol.
-    3. Position side matches execution side (BUY/LONG or SELL/SHORT).
-    4. Executed quantity is supported: position quantity <= supported executed quantity.
-    5. No position exists without authoritative execution evidence.
+    Provenance is NEVER inferred solely from market attributes (symbol + side).
+    Executions from different orders are NEVER aggregated merely because they
+    share the same symbol and side.
     """
     parsed_executions: list[dict[str, Any]] = []
     for ex in authoritative_executions:
-        ex_id = (
-            str(
-                _extract_field(
-                    ex, ["order_id", "client_order_id", "broker_order_id", "entity_id"], ""
-                )
-            )
-            .strip()
-            .upper()
-        )
+        client_id = str(_extract_field(ex, ["client_order_id"], "")).strip().upper()
+        broker_id = str(_extract_field(ex, ["broker_order_id"], "")).strip().upper()
+        order_id = str(_extract_field(ex, ["order_id", "entity_id"], "")).strip().upper()
+        ids = {i for i in (client_id, broker_id, order_id) if i}
+
         ex_sym = str(_extract_field(ex, ["symbol", "instrument"], "")).strip().upper()
         raw_side = _extract_field(ex, ["side", "direction"], "")
         ex_side = _normalize_side(raw_side)
         ex_qty = int(_extract_field(ex, ["filled_quantity", "fill_qty", "quantity", "qty"], 0))
-        pos_ref = _extract_field(ex, ["position_id"])
+        pos_ref = _extract_field(
+            ex, ["position_id", "position_ref", "pos_ref", "origin_position_id"]
+        )
+        pos_ref_clean = str(pos_ref).strip().upper() if pos_ref else None
+
         parsed_executions.append(
             {
-                "id": ex_id,
+                "ids": ids,
                 "symbol": ex_sym,
                 "side": ex_side,
                 "qty": ex_qty,
-                "pos_ref": str(pos_ref).strip().upper() if pos_ref else None,
+                "pos_ref": pos_ref_clean,
             }
         )
 
@@ -203,84 +201,52 @@ def assert_no_phantom_positions(
         pos_side = _normalize_side(raw_side)
         pos_qty = int(_extract_field(pos, ["quantity", "qty", "size"], 0))
         origin_order_id = _extract_field(
-            pos, ["order_id", "origin_order_id", "client_order_id", "originating_order_id"]
+            pos, ["origin_order_id", "client_order_id", "order_id", "originating_order_id"]
         )
 
         if pos_qty <= 0:
             continue
 
-        if origin_order_id:
-            origin_clean = str(origin_order_id).strip().upper()
-            matching = [ex for ex in parsed_executions if ex["id"] == origin_clean]
+        clean_origin = str(origin_order_id).strip().upper() if origin_order_id else ""
+        matching: list[dict[str, Any]] = []
+
+        if clean_origin:
+            # 1. Provenance via origin_order_id / client_order_id
+            matching = [ex for ex in parsed_executions if clean_origin in ex["ids"]]
             if not matching:
                 raise AssertionError(
-                    f"Phantom position detected: position '{pos_id}' references "
+                    f"Phantom position detected: position '{pos_id or clean_origin}' references "
                     f"non-existent order '{origin_order_id}'"
                 )
-            for m in matching:
-                if m["symbol"] and m["symbol"] != pos_sym:
-                    raise AssertionError(
-                        f"Provenance symbol mismatch for position '{pos_id}': "
-                        f"position symbol '{pos_sym}' != execution symbol '{m['symbol']}'"
-                    )
-                if m["side"] and m["side"] != pos_side:
-                    raise AssertionError(
-                        f"Provenance side mismatch for position '{pos_id}': "
-                        f"position side '{pos_side}' != execution side '{m['side']}'"
-                    )
-            supported_qty = sum(m["qty"] for m in matching)
-            if pos_qty > supported_qty:
+        elif pos_id:
+            # 2. Provenance via explicit position reference on executions
+            matching = [ex for ex in parsed_executions if ex["pos_ref"] == pos_id]
+            if not matching:
                 raise AssertionError(
-                    f"Position quantity ({pos_qty}) exceeds supported executed quantity "
-                    f"({supported_qty}) for position '{pos_id}'"
+                    f"Position '{pos_id}' has no explicit authoritative execution provenance"
                 )
         else:
-            matching = []
-            for ex_info in parsed_executions:
-                if (
-                    ex_info["pos_ref"]
-                    and ex_info["pos_ref"] == pos_id
-                    or ex_info["symbol"] == pos_sym
-                    and ex_info["side"] == pos_side
-                ):
-                    matching.append(ex_info)
+            # Fail closed when non-zero position has no provenance identifiers
+            raise AssertionError("Position has no explicit authoritative execution provenance")
 
-            if not matching:
-                if len(parsed_executions) == 1:
-                    single = parsed_executions[0]
-                    if single["symbol"] and single["symbol"] != pos_sym:
-                        raise AssertionError(
-                            f"Provenance symbol mismatch for position '{pos_id}': "
-                            f"position symbol '{pos_sym}' != execution symbol '{single['symbol']}'"
-                        )
-                    if single["side"] and single["side"] != pos_side:
-                        raise AssertionError(
-                            f"Provenance side mismatch for position '{pos_id}': "
-                            f"position side '{pos_side}' != execution side '{single['side']}'"
-                        )
+        for m in matching:
+            if m["symbol"] and m["symbol"] != pos_sym:
                 raise AssertionError(
-                    f"Phantom position detected: position '{pos_id}' has no matching "
-                    "authoritative execution evidence"
+                    f"Provenance symbol mismatch for position '{pos_id or clean_origin}': "
+                    f"position symbol '{pos_sym}' != execution symbol '{m['symbol']}'"
+                )
+            if m["side"] and m["side"] != pos_side:
+                raise AssertionError(
+                    f"Provenance side mismatch for position '{pos_id or clean_origin}': "
+                    f"position side '{pos_side}' != execution side '{m['side']}'"
                 )
 
-            for m in matching:
-                if m["symbol"] and m["symbol"] != pos_sym:
-                    raise AssertionError(
-                        f"Provenance symbol mismatch for position '{pos_id}': "
-                        f"position symbol '{pos_sym}' != execution symbol '{m['symbol']}'"
-                    )
-                if m["side"] and m["side"] != pos_side:
-                    raise AssertionError(
-                        f"Provenance side mismatch for position '{pos_id}': "
-                        f"position side '{pos_side}' != execution side '{m['side']}'"
-                    )
-
-            total_supported = sum(m["qty"] for m in matching)
-            if pos_qty > total_supported:
-                raise AssertionError(
-                    f"Position quantity ({pos_qty}) exceeds supported executed quantity "
-                    f"({total_supported}) for position '{pos_id}'"
-                )
+        supported_qty = sum(m["qty"] for m in matching)
+        if pos_qty > supported_qty:
+            raise AssertionError(
+                f"Position quantity ({pos_qty}) exceeds supported executed quantity "
+                f"({supported_qty}) for position '{pos_id or clean_origin}'"
+            )
 
 
 def assert_no_double_pnl(

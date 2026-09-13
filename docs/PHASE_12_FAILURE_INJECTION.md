@@ -218,7 +218,7 @@ The framework enforces 10 reusable invariant functions defined in `alphaforge.fa
 
 ## 7. Test Traceability Matrix
 
-The Phase 12 test suite comprises **112 tests** (95 unit failure scenarios, 7 golden adversarial scenarios, and 10 property tests) across 12 test files:
+The Phase 12 test suite comprises **114 tests** (97 unit failure scenarios, 7 golden adversarial scenarios, and 10 property tests) across 12 test files:
 
 | Test File | Test IDs | Count | Coverage Area | Status |
 | :--- | :--- | :---: | :--- | :---: |
@@ -232,9 +232,9 @@ The Phase 12 test suite comprises **112 tests** (95 unit failure scenarios, 7 go
 | `test_concurrency_faults.py` | RACE1–RACE5 | 5 | Deterministic thread-barrier races: exits, risk reservations, submits, reconciliation, appends | PASS |
 | `test_risk_faults.py` | Risk-1..Risk-9 | 9 | Max positions, daily loss lockout, circuit breakers, reservation persistence across crash | PASS |
 | `test_golden_adversarial.py` | GOLDEN-1..6 | 7 | Complex multi-failure end-to-end integration scenarios | PASS |
-| `test_forensic_remediation.py` | FI-H1, FI-S1, FI-F1..F3, FI-P1..P5 | 12 | Deterministic hash/seq corruption, hierarchical fill deduplication, position execution provenance | PASS |
+| `test_forensic_remediation.py` | FI-H1, FI-S1, FI-F1..F3, PP1..PP8 | 14 | Hash/seq corruption, hierarchical fill deduplication, strict execution provenance | PASS |
 | `test_fault_injection_properties.py` | FP1–FP10 | 10 | Hypothesis property tests proving invariants under arbitrary randomized parameters | PASS |
-| **Total Phase 12 Tests** | — | **112** | — | **100% PASS** |
+| **Total Phase 12 Tests** | — | **114** | — | **100% PASS** |
 
 ---
 
@@ -313,12 +313,12 @@ Targeted static scans across all 17 Phase 12 files yielded zero violations:
 
 Execution across the entire AlphaForge test suite:
 
-- **Full Pytest Suite**: **708 passed** in ~18s
+- **Full Pytest Suite**: **710 passed** in ~18s
   - 596 existing baseline tests (Phases 1–11)
-  - 112 Phase 12 tests (102 unit + 10 property tests)
+  - 114 Phase 12 tests (104 unit + 10 property tests)
   - 0 failed, 0 errors, 0 skipped
 - **Ruff Linter**: `All checks passed!` (0 errors across entire workspace)
-- **Ruff Formatter**: `154 files already formatted` (100% compliance)
+- **Ruff Formatter**: `200 files already formatted` (100% compliance)
 - **Mypy Typechecker**:
   - `mypy alphaforge`: `Success: no issues found in 77 source files`
   - `mypy --strict alphaforge/fault_injection`: `Success: no issues found in 4 source files`
@@ -338,8 +338,8 @@ Execution across the entire AlphaForge test suite:
 | Requirement | Verification Evidence | Status |
 | :--- | :--- | :---: |
 | **No Trading Logic Modified** | `git diff origin/master alphaforge/strategy/ alphaforge/risk/ alphaforge/execution/` is empty | CONFIRMED |
-| **112 Tests Passing** | All 112 Phase 12 tests pass in 1.3s; full suite 708 tests pass in ~18s | CONFIRMED |
-| **All Fault Scenarios Exercised** | D1–D6, L1–L8, O1–O9, C1–C8, K1–K5, S1–S5, T1–T5, RACE1–RACE5, Risk, GOLDEN-1..6, FP1–FP10, and FI-H1, FI-S1, FI-F1..F3, FI-P1..P5 | CONFIRMED |
+| **114 Tests Passing** | All 114 Phase 12 tests pass in 1.2s; full suite 710 tests pass in ~18s | CONFIRMED |
+| **All Fault Scenarios Exercised** | D1–D6, L1–L8, O1–O9, C1–C8, K1–K5, S1–S5, T1–T5, RACE1–RACE5, Risk, GOLDEN-1..6, FP1–FP10, and FI-H1, FI-S1, FI-F1..F3, PP1..PP8 | CONFIRMED |
 | **Zero Live Credentials/Calls** | Static scan confirmed 0 matches for live exchanges, URLs, or secrets | CONFIRMED |
 | **Deterministic Execution** | Zero `time.sleep()` calls, thread barriers used throughout | CONFIRMED |
 | **Strict Type Safety** | `mypy --strict alphaforge/fault_injection` passes with 0 issues | CONFIRMED |

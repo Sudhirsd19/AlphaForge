@@ -304,20 +304,20 @@ def _make_broker_order(
 
 
 class TestBlocker3PositionProvenanceInvariant:
-    """Proves assert_no_phantom_positions enforces full execution provenance."""
+    """Proves assert_no_phantom_positions enforces strict explicit provenance (PP1-PP8)."""
 
-    def test_FI_P1_PP1_valid_position_with_valid_fill(self) -> None:
-        """PP1: Valid position with corresponding authoritative fill passes."""
-        pos = BrokerPosition(
-            position_id="POS-NIFTY-1",
-            symbol="NIFTY",
-            side=TradeSide.LONG,
-            quantity=50,
-            average_price=Decimal("24000.00"),
-            status="OPEN",
-        )
+    def test_PP1_valid_position_provenance(self) -> None:
+        """PP1: Explicit valid position -> valid order/fill -> PASS."""
+        # Path A: Explicit origin_order_id on position
         client_id = generate_client_order_id("TREND", "1.0.0", "NIFTY", OrderRole.ENTRY, "SIG-PP1")
-        order = _make_broker_order(
+        pos_a = {
+            "position_id": "POS-NIFTY-1",
+            "origin_order_id": client_id,
+            "symbol": "NIFTY",
+            "side": "LONG",
+            "quantity": 50,
+        }
+        order_a = _make_broker_order(
             client_order_id=client_id,
             broker_order_id="BO-001",
             symbol="NIFTY",
@@ -327,18 +327,33 @@ class TestBlocker3PositionProvenanceInvariant:
             status=BrokerOrderStatus.FILLED,
             average_price=Decimal("24000.00"),
         )
+        assert_no_phantom_positions([pos_a], [order_a])
 
-        # Position with matching execution passes
-        assert_no_phantom_positions([pos], [order])
+        # Path B: Explicit position_id reference on execution
+        pos_b = BrokerPosition(
+            position_id="POS-NIFTY-2",
+            symbol="NIFTY",
+            side=TradeSide.LONG,
+            quantity=50,
+            average_price=Decimal("24000.00"),
+            status="OPEN",
+        )
+        fill_b = {
+            "position_id": "POS-NIFTY-2",
+            "symbol": "NIFTY",
+            "side": "BUY",
+            "quantity": 50,
+        }
+        assert_no_phantom_positions([pos_b], [fill_b])
 
-    def test_FI_P2_PP2_position_with_nonexistent_order_fails(self) -> None:
-        """PP2: Position referencing non-existent order fails with phantom detection."""
-        pos_dict = {
+    def test_PP2_nonexistent_origin_order_fails(self) -> None:
+        """PP2: Position with nonexistent origin order -> FAIL."""
+        pos = {
             "position_id": "POS-NIFTY-1",
+            "origin_order_id": "ORD-NONEXISTENT",
             "symbol": "NIFTY",
             "side": "LONG",
             "quantity": 50,
-            "order_id": "ORD-NONEXISTENT",
         }
         order = _make_broker_order(
             client_order_id="ORD-ACTUAL-001",
@@ -349,12 +364,74 @@ class TestBlocker3PositionProvenanceInvariant:
             filled_quantity=50,
             status=BrokerOrderStatus.FILLED,
         )
-
         with pytest.raises(AssertionError, match="references non-existent order"):
-            assert_no_phantom_positions([pos_dict], [order])
+            assert_no_phantom_positions([pos], [order])
 
-    def test_FI_P2_PP2_position_with_empty_executions_fails(self) -> None:
-        """PP2: Position with zero execution evidence fails with phantom detection."""
+    def test_PP3_quantity_exceeds_originating_execution_fails(self) -> None:
+        """PP3: Position quantity exceeds originating execution quantity -> FAIL."""
+        pos = {
+            "position_id": "POS-NIFTY-1",
+            "origin_order_id": "ORD-001",
+            "symbol": "NIFTY",
+            "side": "LONG",
+            "quantity": 100,  # Claims 100!
+        }
+        order = _make_broker_order(
+            client_order_id="ORD-001",
+            broker_order_id="BO-001",
+            symbol="NIFTY",
+            side=OrderSide.BUY,
+            quantity=50,
+            filled_quantity=50,  # Only 50 executed
+            status=BrokerOrderStatus.FILLED,
+        )
+        with pytest.raises(AssertionError, match="exceeds supported executed quantity"):
+            assert_no_phantom_positions([pos], [order])
+
+    def test_PP4_symbol_mismatch_fails(self) -> None:
+        """PP4: Position symbol mismatch -> FAIL."""
+        pos = {
+            "position_id": "POS-NIFTY-1",
+            "origin_order_id": "ORD-001",
+            "symbol": "NIFTY",
+            "side": "LONG",
+            "quantity": 50,
+        }
+        order = _make_broker_order(
+            client_order_id="ORD-001",
+            broker_order_id="BO-001",
+            symbol="BANKNIFTY",  # Execution is BANKNIFTY
+            side=OrderSide.BUY,
+            quantity=50,
+            filled_quantity=50,
+            status=BrokerOrderStatus.FILLED,
+        )
+        with pytest.raises(AssertionError, match="symbol"):
+            assert_no_phantom_positions([pos], [order])
+
+    def test_PP5_side_mismatch_fails(self) -> None:
+        """PP5: Position side mismatch -> FAIL."""
+        pos = {
+            "position_id": "POS-NIFTY-1",
+            "origin_order_id": "ORD-001",
+            "symbol": "NIFTY",
+            "side": "LONG",
+            "quantity": 50,
+        }
+        order = _make_broker_order(
+            client_order_id="ORD-001",
+            broker_order_id="BO-001",
+            symbol="NIFTY",
+            side=OrderSide.SELL,  # Execution is SELL / SHORT
+            quantity=50,
+            filled_quantity=50,
+            status=BrokerOrderStatus.FILLED,
+        )
+        with pytest.raises(AssertionError, match="side"):
+            assert_no_phantom_positions([pos], [order])
+
+    def test_PP6_no_provenance_identifiers_fails(self) -> None:
+        """PP6: Non-zero position with no provenance identifiers -> FAIL."""
         pos = BrokerPosition(
             position_id="POS-GHOST-1",
             symbol="NIFTY",
@@ -363,75 +440,128 @@ class TestBlocker3PositionProvenanceInvariant:
             average_price=Decimal("24000.00"),
             status="OPEN",
         )
+        order = _make_broker_order(
+            client_order_id="ORD-001",
+            broker_order_id="BO-001",
+            symbol="NIFTY",  # Matching symbol
+            side=OrderSide.BUY,  # Matching side
+            quantity=50,
+            filled_quantity=50,
+            status=BrokerOrderStatus.FILLED,
+        )
+        # Provenance cannot be inferred solely from symbol and side
+        with pytest.raises(
+            AssertionError, match="has no explicit authoritative execution provenance"
+        ):
+            assert_no_phantom_positions([pos], [order])
 
-        with pytest.raises(AssertionError, match="has no matching authoritative execution"):
+        with pytest.raises(
+            AssertionError, match="has no explicit authoritative execution provenance"
+        ):
             assert_no_phantom_positions([pos], [])
 
-    def test_FI_P3_PP3_position_quantity_greater_than_executed_fails(self) -> None:
-        """PP3: Position quantity exceeding supported executed quantity fails."""
-        pos = BrokerPosition(
-            position_id="POS-NIFTY-1",
-            symbol="NIFTY",
-            side=TradeSide.LONG,
-            quantity=100,  # Position claims 100!
-            average_price=Decimal("24000.00"),
-            status="OPEN",
-        )
-        order = _make_broker_order(
-            client_order_id="ORD-001",
+    def test_PP7_same_symbol_and_side_different_orders(self) -> None:
+        """
+        PP7: Two executions have same symbol and side but belong to different orders;
+        position belongs to only one -> only correct order may satisfy provenance.
+        """
+        order1 = _make_broker_order(
+            client_order_id="ORD-1",
             broker_order_id="BO-001",
             symbol="NIFTY",
             side=OrderSide.BUY,
             quantity=50,
-            filled_quantity=50,  # Only 50 executed!
+            filled_quantity=50,
+            status=BrokerOrderStatus.FILLED,
+        )
+        order2 = _make_broker_order(
+            client_order_id="ORD-2",
+            broker_order_id="BO-002",
+            symbol="NIFTY",
+            side=OrderSide.BUY,
+            quantity=50,
+            filled_quantity=50,
             status=BrokerOrderStatus.FILLED,
         )
 
+        # 7A: Position references ORD-1 with qty 50 -> PASS (only ORD-1 satisfies provenance)
+        pos1 = {
+            "position_id": "POS-1",
+            "origin_order_id": "ORD-1",
+            "symbol": "NIFTY",
+            "side": "LONG",
+            "quantity": 50,
+        }
+        assert_no_phantom_positions([pos1], [order1, order2])
+
+        # 7B: Position claims qty 100 referencing ORD-1 -> FAIL
+        # Proves order2 cannot be aggregated merely because of same symbol/side
+        pos_inflated = {
+            "position_id": "POS-1",
+            "origin_order_id": "ORD-1",
+            "symbol": "NIFTY",
+            "side": "LONG",
+            "quantity": 100,
+        }
         with pytest.raises(AssertionError, match="exceeds supported executed quantity"):
-            assert_no_phantom_positions([pos], [order])
+            assert_no_phantom_positions([pos_inflated], [order1, order2])
 
-    def test_FI_P4_PP4_symbol_mismatch_fails(self) -> None:
-        """PP4: Position symbol mismatch with execution evidence fails."""
-        pos = BrokerPosition(
-            position_id="POS-NIFTY-1",
-            symbol="NIFTY",  # Position is NIFTY
-            side=TradeSide.LONG,
-            quantity=50,
-            average_price=Decimal("24000.00"),
-            status="OPEN",
-        )
-        order = _make_broker_order(
-            client_order_id="ORD-001",
-            broker_order_id="BO-001",
-            symbol="BANKNIFTY",  # Execution is BANKNIFTY!
-            side=OrderSide.BUY,
-            quantity=50,
-            filled_quantity=50,
-            status=BrokerOrderStatus.FILLED,
-        )
+        # 7C: Position references non-existent ORD-3 -> FAIL
+        # Proves same symbol/side from order1 & order2 cannot satisfy unlinked position
+        pos_unlinked = {
+            "position_id": "POS-1",
+            "origin_order_id": "ORD-3",
+            "symbol": "NIFTY",
+            "side": "LONG",
+            "quantity": 50,
+        }
+        with pytest.raises(AssertionError, match="references non-existent order"):
+            assert_no_phantom_positions([pos_unlinked], [order1, order2])
 
-        with pytest.raises(AssertionError, match="symbol"):
-            assert_no_phantom_positions([pos], [order])
+    def test_PP8_multiple_partial_fills_from_same_originating_order(self) -> None:
+        """
+        PP8: Two legitimate partial fills from same originating order -> aggregate
+        only those fills and PASS when quantity is supported.
+        """
+        fill1 = {
+            "order_id": "ORD-PARTIAL-1",
+            "symbol": "NIFTY",
+            "side": "BUY",
+            "quantity": 25,
+            "filled_quantity": 25,
+        }
+        fill2 = {
+            "order_id": "ORD-PARTIAL-1",
+            "symbol": "NIFTY",
+            "side": "BUY",
+            "quantity": 25,
+            "filled_quantity": 25,
+        }
+        unrelated_fill = {
+            "order_id": "ORD-UNRELATED",
+            "symbol": "NIFTY",
+            "side": "BUY",
+            "quantity": 50,
+            "filled_quantity": 50,
+        }
 
-    def test_FI_P5_PP5_side_mismatch_fails(self) -> None:
-        """PP5: Position trade side mismatch with execution evidence fails."""
-        pos = BrokerPosition(
-            position_id="POS-NIFTY-1",
-            symbol="NIFTY",
-            side=TradeSide.LONG,  # Position is LONG
-            quantity=50,
-            average_price=Decimal("24000.00"),
-            status="OPEN",
-        )
-        order = _make_broker_order(
-            client_order_id="ORD-001",
-            broker_order_id="BO-001",
-            symbol="NIFTY",
-            side=OrderSide.SELL,  # Execution is SELL / SHORT!
-            quantity=50,
-            filled_quantity=50,
-            status=BrokerOrderStatus.FILLED,
-        )
+        pos = {
+            "position_id": "POS-PARTIAL-1",
+            "origin_order_id": "ORD-PARTIAL-1",
+            "symbol": "NIFTY",
+            "side": "LONG",
+            "quantity": 50,  # 25 + 25 = 50
+        }
+        # Legitimate partial fills aggregate to support 50
+        assert_no_phantom_positions([pos], [fill1, fill2, unrelated_fill])
 
-        with pytest.raises(AssertionError, match="side"):
-            assert_no_phantom_positions([pos], [order])
+        # Position claiming 51 exceeds sum of fill1 + fill2 and cannot use unrelated_fill
+        pos_excess = {
+            "position_id": "POS-PARTIAL-1",
+            "origin_order_id": "ORD-PARTIAL-1",
+            "symbol": "NIFTY",
+            "side": "LONG",
+            "quantity": 51,
+        }
+        with pytest.raises(AssertionError, match="exceeds supported executed quantity"):
+            assert_no_phantom_positions([pos_excess], [fill1, fill2, unrelated_fill])
