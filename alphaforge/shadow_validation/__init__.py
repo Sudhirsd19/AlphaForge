@@ -46,6 +46,14 @@ from alphaforge.shadow_validation.network_resilience_coordinator import (
 from alphaforge.shadow_validation.realistic_execution_engine import (
     RealisticShadowExecutionEngine,
 )
+from alphaforge.shadow_validation.reconciliation_hardening import (
+    ContinuousReconciliationCoordinator,
+    DiscrepancyRecord,
+    DiscrepancySeverity,
+    ReconciliationActionTaken,
+    ReconciliationAuditCycle,
+    ReconciliationTriggerType,
+)
 from alphaforge.shadow_validation.reconnect import (
     DataGapRecord,
     DisconnectReason,
@@ -76,9 +84,12 @@ __all__ = [
     "CertificationLevelStatus",
     "CertificationReporter",
     "CertificationVerdict",
+    "ContinuousReconciliationCoordinator",
     "DataGapRecord",
     "DataSourceType",
     "DisconnectReason",
+    "DiscrepancyRecord",
+    "DiscrepancySeverity",
     "FeedProvenanceToken",
     "FillExecutionType",
     "ForensicReplayVerifier",
@@ -99,6 +110,9 @@ __all__ = [
     "QueueOverflowPolicy",
     "RealisticFillRecord",
     "RealisticShadowExecutionEngine",
+    "ReconciliationActionTaken",
+    "ReconciliationAuditCycle",
+    "ReconciliationTriggerType",
     "ReconnectEvent",
     "ReconnectPolicy",
     "ReconnectStateMachine",
