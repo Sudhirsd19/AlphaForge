@@ -114,7 +114,9 @@ class MarketStreamEvent(BaseModel):
     contract_id: str = Field(description="Authoritative contract identifier, e.g. NIFTY26SEPFUT")
     sequence_no: int = Field(ge=0, description="Monotonically increasing sequence number")
     ingestion_sequence_no: int | None = Field(
-        default=None, ge=0, description="AlphaForge internal ingestion sequence number (NOT exchange sequence)"
+        default=None,
+        ge=0,
+        description="AlphaForge internal ingestion sequence number (NOT exchange sequence)",
     )
     provider: str | None = Field(
         default=None, description="Market data provider identifier (e.g. UPSTOX)"

@@ -28,16 +28,18 @@ import logging
 import random
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from alphaforge.shadow_validation.models import MarketStreamEvent
 
 logger = logging.getLogger(__name__)
 
 
-class StreamConnectionState(str, Enum):
+class StreamConnectionState(StrEnum):
     """Explicit 8-state connection lifecycle."""
 
     DISCONNECTED = "DISCONNECTED"
@@ -50,7 +52,7 @@ class StreamConnectionState(str, Enum):
     HALTED = "HALTED"
 
 
-class DisconnectReason(str, Enum):
+class DisconnectReason(StrEnum):
     """Classified disconnection and degradation reasons."""
 
     CLEAN_SHUTDOWN = "CLEAN_SHUTDOWN"
@@ -126,7 +128,9 @@ class ReconnectPolicy:
         if attempt <= 0:
             return 0.0
         exp_delay = min(self.max_delay_seconds, self.base_delay_seconds * (2 ** (attempt - 1)))
-        jitter = random.uniform(-self.jitter_factor * exp_delay, self.jitter_factor * exp_delay)
+        jitter = random.uniform(  # noqa: S311
+            -self.jitter_factor * exp_delay, self.jitter_factor * exp_delay
+        )
         return float(max(self.base_delay_seconds, min(self.max_delay_seconds, exp_delay + jitter)))
 
 
@@ -350,7 +354,8 @@ class ReconnectStateMachine:
             if msg_age > self._policy.stale_data_timeout_seconds:
                 return (
                     False,
-                    f"Stale market data: {msg_age:.1f}s > {self._policy.stale_data_timeout_seconds}s",
+                    f"Stale market data: {msg_age:.1f}s > "
+                    f"{self._policy.stale_data_timeout_seconds}s",
                 )
 
         return True, None
@@ -478,7 +483,9 @@ class ReconnectStateMachine:
 
         if delta_seconds > (expected_seconds + tolerance_seconds):
             missing_estimate = max(1, int(round(delta_seconds / expected_seconds)) - 1)
-            gap_id = f"GAP-{event.contract_id}-{int(prev_ts.timestamp())}-{int(curr_ts.timestamp())}"
+            t_prev = int(prev_ts.timestamp())
+            t_curr = int(curr_ts.timestamp())
+            gap_id = f"GAP-{event.contract_id}-{t_prev}-{t_curr}"
             return DataGapRecord(
                 gap_id=gap_id,
                 symbol=event.symbol,
@@ -520,10 +527,8 @@ class ReconnectStateMachine:
                 return False
 
         # Check end coverage
-        if (end_ts - sorted_events[-1].exchange_timestamp).total_seconds() > expected_interval_seconds:
-            return False
-
-        return True
+        end_coverage = (end_ts - sorted_events[-1].exchange_timestamp).total_seconds()
+        return end_coverage <= expected_interval_seconds
 
     def _check_counter_reset(self, now: datetime) -> None:
         """Reset reconnect attempt counter after sustained stability."""

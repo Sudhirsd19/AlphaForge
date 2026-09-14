@@ -431,7 +431,7 @@
         <div class="chart-container">
           <canvas id="marketChartCanvas" class="chart-canvas"></canvas>
           <div id="chart-empty-state" class="empty-state-card" style="display: none; position: absolute; inset: 20px;">
-            <div class="empty-state-title">NO REAL-MARKET SESSION ACTIVE</div>
+            <div class="empty-state-title">WAITING FOR MARKET DATA</div>
             <div class="empty-state-desc">Live WebSocket is not streaming. Launch an Upstox shadow session during active NSE market hours (09:15–15:30 IST) to accumulate Level C real-market data.</div>
           </div>
         </div>
@@ -442,7 +442,7 @@
         <div class="op-panel">
           <div class="op-panel-header">
             <span class="op-panel-title">Signal Engine Intelligence</span>
-            <span class="status-tag tag-cyan" id="ov-sig-state">WAIT_CONFIRMATION</span>
+            <span class="status-tag tag-cyan" id="ov-sig-state">NO ACTIVE SIGNAL</span>
           </div>
           <div class="kv-grid" style="margin-bottom: 10px;">
             <div class="kv-item">
@@ -636,7 +636,7 @@
         <div class="chart-container" style="height: 420px;">
           <canvas id="primaryMarketChart" class="chart-canvas"></canvas>
           <div id="primary-chart-empty" class="empty-state-card" style="position: absolute; inset: 30px;">
-            <div class="empty-state-title">NO REAL-MARKET SESSION ACTIVE</div>
+            <div class="empty-state-title">WAITING FOR MARKET DATA</div>
             <div class="empty-state-desc">Live WebSocket is currently disconnected. Run <code>scripts/run_upstox_shadow_session.py</code> during NSE market hours to stream live ticks and candles.</div>
           </div>
         </div>
@@ -670,7 +670,7 @@
         <div class="grid-row-3" style="margin-top: 10px;">
           <div class="kv-item"><div class="kv-label">Volatility Band</div><div class="kv-value" id="sig-tab-vol">NORMAL</div></div>
           <div class="kv-item"><div class="kv-label">Risk Authorization</div><div class="kv-value green" id="sig-tab-risk">PASS</div></div>
-          <div class="kv-item"><div class="kv-label">Authoritative Decision</div><div class="kv-value amber" id="sig-tab-decision">NO TRADE</div></div>
+          <div class="kv-item"><div class="kv-label">Authoritative Decision</div><div class="kv-value amber" id="sig-tab-decision">NO ACTIVE SIGNAL</div></div>
         </div>
       </div>
 

@@ -25,14 +25,13 @@ import hashlib
 import json
 import logging
 import os
-import ssl
-import uuid
 import queue
+import ssl
 import threading
-from collections.abc import AsyncIterator, Iterator
+import uuid
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from alphaforge.contract.enums import ContractStatus
@@ -48,10 +47,11 @@ from alphaforge.shadow_validation.reconnect import (
     DisconnectReason,
     ReconnectPolicy,
     ReconnectStateMachine,
-    StreamConnectionState,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Iterator
+
     from alphaforge.contract.models import ContractMaster
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 # --- Queue and Stream Policies ---
 
 
-class QueueOverflowPolicy(str, Enum):
+class QueueOverflowPolicy(StrEnum):
     """Policy governing bounded event queue overflow during message bursts."""
 
     FAIL_CLOSED = "FAIL_CLOSED"
@@ -784,7 +784,7 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                         aclose = getattr(stream, "aclose", None)
                         if callable(aclose):
                             await aclose()
-                    except Exception:
+                    except Exception:  # noqa: S110
                         pass
                     event_queue.put(None)  # Sentinel to terminate generator
 

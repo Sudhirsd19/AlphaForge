@@ -198,7 +198,7 @@ class AlphaForgeState:
 
         # Strategy Signal State
         self.signal_state: dict[str, Any] = {
-            "strategy_state": "WAIT_CONFIRMATION",
+            "strategy_state": "NO ACTIVE SIGNAL",
             "trend": "NEUTRAL",
             "momentum": "WAIT",
             "breakout_status": "NOT_CONFIRMED",
@@ -206,9 +206,9 @@ class AlphaForgeState:
             "volatility_state": "NORMAL",
             "risk_gate": "PASS",
             "contract_gate": "VALID",
-            "last_decision": "NO TRADE",
+            "last_decision": "NO ACTIVE SIGNAL",
             "decision_timestamp": datetime.now(UTC).isoformat(),
-            "decision_reason": "No active market stream evaluation",
+            "decision_reason": "NO ACTIVE SIGNAL: Waiting for live market feed evaluation",
         }
 
         # Decision Explainer History (populated solely from runtime evaluations)
@@ -1007,7 +1007,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                 # Generate realistic synthetic NIFTY candles with cyclic market trend
                 base_time = datetime(2026, 9, 12, 9, 15, tzinfo=UTC)
                 candles: list[MarketCandle] = []
-                cur_p = Decimal("24500.00")
+                cur_p = Decimal(str(payload.get("start_price", "25000.00")))
                 for i in range(count):
                     wave = (i % 20) - 10
                     delta = Decimal(str(wave * 2.5))
