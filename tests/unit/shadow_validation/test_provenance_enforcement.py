@@ -144,7 +144,7 @@ def test_provenance_verifier_tamper_detection() -> None:
 
     raw_hash = hashlib.sha256(raw_payload).hexdigest()
 
-    sig = ProvenanceVerifier.generate_ingress_signature(
+    sig = ProvenanceVerifier.generate_attestation_hmac(
         provider="DHAN_HQ_STREAM",
         session_id="SESS-12345",
         raw_payload_hash=raw_hash,
@@ -152,10 +152,11 @@ def test_provenance_verifier_tamper_detection() -> None:
 
     token = FeedProvenanceToken(
         provider="DHAN_HQ_STREAM",
+        provider_authenticated=True,
         connection_session_id="SESS-12345",
         source_timestamp=now,
         raw_payload_hash=raw_hash,
-        ingress_signature=sig,
+        alpha_forge_attestation_hmac=sig,
         is_live_external=True,
     )
 
@@ -180,11 +181,11 @@ def test_provenance_verifier_tamper_detection() -> None:
     assert reason is None
 
     # Tampered signature
-    bad_token = token.model_copy(update={"ingress_signature": "bad_signature"})
+    bad_token = token.model_copy(update={"alpha_forge_attestation_hmac": "bad_signature"})
     bad_event = event.model_copy(update={"provenance": bad_token})
     is_valid_bad, reason_bad = ProvenanceVerifier.verify_provenance(bad_event)
     assert is_valid_bad is False
-    assert "CORRUPTED_SIGNATURE" in str(reason_bad)
+    assert "CORRUPTED_ATTESTATION" in str(reason_bad)
 
 
 def test_live_adapter_fail_closed_missing_credentials(sample_contract: ContractMaster) -> None:

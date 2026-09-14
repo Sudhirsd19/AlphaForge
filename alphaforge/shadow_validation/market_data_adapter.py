@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 AUTHORIZED_LIVE_PROVIDERS: frozenset[str] = frozenset(
     {
+        "UPSTOX",
         "NSE_COLO_DIRECT",
         "DHAN_HQ_STREAM",
         "ZERODHA_KITE_STREAM",
@@ -42,13 +43,13 @@ class ProvenanceVerifier:
     SECRET_SALT = b"alphaforge-provenance-salt-2026"
 
     @classmethod
-    def generate_ingress_signature(
+    def generate_attestation_hmac(
         cls,
         provider: str,
         session_id: str,
         raw_payload_hash: str,
     ) -> str:
-        """Generate HMAC signature proving adapter verified ingress."""
+        """Generate AlphaForge internal attestation HMAC (NOT a provider signature)."""
         msg = f"{provider}:{session_id}:{raw_payload_hash}".encode()
         return hmac.new(cls.SECRET_SALT, msg, hashlib.sha256).hexdigest()
 
@@ -68,6 +69,9 @@ class ProvenanceVerifier:
         if not token.is_live_external:
             return False, "INACTIVE_LIVE_FLAG: Token is_live_external is False."
 
+        if not token.provider_authenticated:
+            return False, "UNAUTHENTICATED_PROVIDER: provider_authenticated is False."
+
         if token.provider not in AUTHORIZED_LIVE_PROVIDERS:
             msg = (
                 f"UNAUTHORIZED_PROVIDER: Provider '{token.provider}' not in "
@@ -75,13 +79,13 @@ class ProvenanceVerifier:
             )
             return False, msg
 
-        expected_sig = cls.generate_ingress_signature(
+        expected_sig = cls.generate_attestation_hmac(
             token.provider,
             token.connection_session_id,
             token.raw_payload_hash,
         )
-        if not hmac.compare_digest(token.ingress_signature, expected_sig):
-            return False, "CORRUPTED_SIGNATURE: Ingress signature mismatch."
+        if not hmac.compare_digest(token.alpha_forge_attestation_hmac, expected_sig):
+            return False, "CORRUPTED_ATTESTATION: AlphaForge internal attestation HMAC mismatch."
 
         return True, None
 
@@ -223,7 +227,7 @@ class AuthorizedLiveStreamAdapter(AbstractMarketDataStreamAdapter):
             raise DataIntegrityError(msg)
 
         raw_hash = hashlib.sha256(raw_payload).hexdigest()
-        sig = ProvenanceVerifier.generate_ingress_signature(
+        sig = ProvenanceVerifier.generate_attestation_hmac(
             provider=self._provider_name,
             session_id=self._session_id,
             raw_payload_hash=raw_hash,
@@ -231,11 +235,12 @@ class AuthorizedLiveStreamAdapter(AbstractMarketDataStreamAdapter):
 
         return FeedProvenanceToken(
             provider=self._provider_name,
+            provider_authenticated=True,
             connection_session_id=self._session_id,
             source_timestamp=source_ts,
             provider_event_id=provider_event_id,
             raw_payload_hash=raw_hash,
-            ingress_signature=sig,
+            alpha_forge_attestation_hmac=sig,
             is_live_external=True,
         )
 

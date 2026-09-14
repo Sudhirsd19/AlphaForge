@@ -43,6 +43,7 @@ from alphaforge.shadow_validation.shadow_guard import ShadowExecutionOnlyGuard
 from alphaforge.shadow_validation.state_reconstruction_engine import (
     StateReconstructionEngine,
 )
+from alphaforge.shadow_validation.upstox_adapter import UpstoxMarketDataAdapter
 
 __all__ = [
     "AUTHORIZED_LIVE_PROVIDERS",
@@ -74,4 +75,5 @@ __all__ = [
     "ShadowSignalRecord",
     "StateReconstructionEngine",
     "SyntheticFeedAdapter",
+    "UpstoxMarketDataAdapter",
 ]
