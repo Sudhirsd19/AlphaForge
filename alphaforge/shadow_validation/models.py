@@ -113,6 +113,18 @@ class MarketStreamEvent(BaseModel):
     symbol: str = Field(description="Trading symbol, e.g. NIFTY")
     contract_id: str = Field(description="Authoritative contract identifier, e.g. NIFTY26SEPFUT")
     sequence_no: int = Field(ge=0, description="Monotonically increasing sequence number")
+    ingestion_sequence_no: int | None = Field(
+        default=None, ge=0, description="AlphaForge internal ingestion sequence number (NOT exchange sequence)"
+    )
+    provider: str | None = Field(
+        default=None, description="Market data provider identifier (e.g. UPSTOX)"
+    )
+    instrument_key: str | None = Field(
+        default=None, description="Provider instrument key (e.g. NSE_FO|NIFTY26SEPFUT)"
+    )
+    raw_payload_hash: str | None = Field(
+        default=None, description="SHA-256 hash of raw wire payload"
+    )
     exchange_timestamp: datetime = Field(description="Exchange candle/tick timestamp")
     ingestion_timestamp: datetime = Field(description="Ingestion timestamp at network boundary")
     processing_timestamp: datetime = Field(description="Processing timestamp before evaluation")

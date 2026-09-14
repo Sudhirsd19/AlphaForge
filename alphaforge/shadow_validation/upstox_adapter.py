@@ -27,8 +27,12 @@ import logging
 import os
 import ssl
 import uuid
+import queue
+import threading
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from alphaforge.contract.enums import ContractStatus
@@ -40,13 +44,27 @@ from alphaforge.shadow_validation.market_data_adapter import (
     ProvenanceVerifier,
 )
 from alphaforge.shadow_validation.models import FeedProvenanceToken, MarketStreamEvent
+from alphaforge.shadow_validation.reconnect import (
+    DisconnectReason,
+    ReconnectPolicy,
+    ReconnectStateMachine,
+    StreamConnectionState,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from alphaforge.contract.models import ContractMaster
 
 logger = logging.getLogger(__name__)
+
+# --- Queue and Stream Policies ---
+
+
+class QueueOverflowPolicy(str, Enum):
+    """Policy governing bounded event queue overflow during message bursts."""
+
+    FAIL_CLOSED = "FAIL_CLOSED"
+    BACKPRESSURE = "BACKPRESSURE"
+
 
 # --- Constants ---
 UPSTOX_PROVIDER_NAME = "UPSTOX"
@@ -159,6 +177,9 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
         contract: ContractMaster,
         access_token: str | None = None,
         instrument_key: str | None = None,
+        queue_size: int = 1000,
+        overflow_policy: QueueOverflowPolicy = QueueOverflowPolicy.FAIL_CLOSED,
+        reconnect_policy: ReconnectPolicy | None = None,
     ) -> None:
         super().__init__(contract=contract, provider_name=UPSTOX_PROVIDER_NAME)
 
@@ -172,10 +193,19 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
             f"NSE_FO|{contract.contract_id}",
         )
 
-        # --- Connection state ---
+        # --- Connection and streaming state ---
         self._websocket_uri: str | None = None
         self._provider_authenticated: bool = False
         self._ws: Any = None  # websockets.WebSocketClientProtocol at runtime
+        self._queue_size = queue_size
+        self._overflow_policy = overflow_policy
+        self._reconnect_policy = reconnect_policy or ReconnectPolicy(
+            max_attempts=MAX_RECONNECT_ATTEMPTS,
+            base_delay_seconds=RECONNECT_BASE_DELAY_SECONDS,
+            max_delay_seconds=RECONNECT_MAX_DELAY_SECONDS,
+        )
+        self._reconnect_fsm = ReconnectStateMachine(policy=self._reconnect_policy)
+        self._ingestion_sequence_no: int = 0
 
         # --- Telemetry ---
         self._connection_start_ts: datetime | None = None
@@ -580,12 +610,18 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
             self._first_event_ts = exchange_ts
 
         processing_ts = datetime.now(UTC)
+        self._last_sequence_no += 1
+        self._ingestion_sequence_no = self._last_sequence_no
 
-        return MarketStreamEvent(
+        event = MarketStreamEvent(
             event_id=f"UPSTOX-{self._session_id}-{self._last_sequence_no}",
             symbol=self._contract.underlying_symbol,
             contract_id=self._contract.contract_id,
             sequence_no=self._last_sequence_no,
+            ingestion_sequence_no=self._ingestion_sequence_no,
+            provider=UPSTOX_PROVIDER_NAME,
+            instrument_key=self._instrument_key,
+            raw_payload_hash=provenance.raw_payload_hash,
             exchange_timestamp=exchange_ts,
             ingestion_timestamp=receive_ts,
             processing_timestamp=processing_ts,
@@ -599,6 +635,8 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
             is_session_valid=is_session,
             provenance=provenance,
         )
+        self._reconnect_fsm.on_event_received(event)
+        return event
 
     def _is_target_instrument(self, instrument_key: str) -> bool:
         """Check if the instrument key matches our configured subscription."""
@@ -607,42 +645,23 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
             and ("FO" in instrument_key or "FUT" in instrument_key)
         )
 
-    def stream_events(self) -> Iterator[MarketStreamEvent]:
+    @property
+    def reconnect_fsm(self) -> ReconnectStateMachine:
+        """Expose the reconnect and gap recovery state machine."""
+        return self._reconnect_fsm
+
+    async def stream_live_events(self) -> AsyncIterator[MarketStreamEvent]:
         """
-        Yield verified live market stream events from Upstox WebSocket.
+        True real-time asynchronous market data streaming pipeline.
 
-        Uses asyncio internally to consume the WebSocket feed and yields
-        MarketStreamEvent objects synchronously. Each event carries an authentic
-        FeedProvenanceToken with is_live_external=True.
-
-        Fails closed if:
-        - Not connected
-        - WebSocket disconnects without successful reconnect
-        - No synthetic fallback
+        Yields verified MarketStreamEvent immediately upon extraction and validation.
+        Does NOT accumulate events in memory.
         """
         if not self._is_connected:
             msg = "UpstoxMarketDataAdapter: Not connected. Call connect() first. Failing closed."
             raise UpstoxConnectionError(msg)
 
-        # Run the async event loop and yield events
-        try:
-            loop = asyncio.new_event_loop()
-            events = loop.run_until_complete(self._async_stream_events())
-            yield from events
-        except Exception:
-            logger.exception(
-                "UpstoxMarketDataAdapter: Stream error. "
-                "PHASE 17C BLOCKED — REAL MARKET DATA UNAVAILABLE."
-            )
-            raise
-        finally:
-            self.disconnect()
-
-    async def _async_stream_events(self) -> list[MarketStreamEvent]:
-        """Async WebSocket consumer that collects market events."""
         import websockets  # noqa: PLC0415
-
-        all_events: list[MarketStreamEvent] = []
 
         ssl_context = ssl.create_default_context()
 
@@ -652,7 +671,7 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                 ssl=ssl_context,
             ) as ws:
                 self._ws = ws
-                logger.info("UpstoxMarketDataAdapter: WebSocket stream active.")
+                logger.info("UpstoxMarketDataAdapter: WebSocket stream active (live pipeline).")
 
                 # Subscribe to instrument
                 await asyncio.sleep(1)
@@ -670,10 +689,10 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                 self._subscription_start_ts = datetime.now(UTC)
                 logger.info(f"UpstoxMarketDataAdapter: Subscribed to {self._instrument_key}.")
 
-                # Consume messages
                 async for message in ws:
                     receive_ts = datetime.now(UTC)
                     self._total_received_messages += 1
+                    self._reconnect_fsm.on_message_received()
 
                     if isinstance(message, str):
                         raw_bytes = message.encode("utf-8")
@@ -684,25 +703,116 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                     if decoded is None:
                         continue
 
-                    # Skip market_info / heartbeat messages
                     msg_type = decoded.get("type", "")
                     if msg_type == "market_info":
                         self._heartbeat_count += 1
+                        self._reconnect_fsm.on_heartbeat()
                         continue
 
                     events = self._extract_market_events_from_feed(decoded, raw_bytes, receive_ts)
-                    all_events.extend(events)
+                    for ev in events:
+                        yield ev
 
-        except websockets.ConnectionClosed:
+        except websockets.ConnectionClosed as exc:
             logger.warning("UpstoxMarketDataAdapter: WebSocket connection closed by server.")
-        except Exception:
+            self._reconnect_fsm.on_disconnect(
+                DisconnectReason.SOCKET_DISCONNECT, details={"error": str(exc)}
+            )
+        except Exception as exc:
             logger.exception("UpstoxMarketDataAdapter: WebSocket stream error.")
+            self._reconnect_fsm.on_disconnect(
+                DisconnectReason.UNEXPECTED_TERMINATION, details={"error": str(exc)}
+            )
             raise
 
-        return all_events
+    def stream_events(self) -> Iterator[MarketStreamEvent]:
+        """
+        True real-time synchronous streaming pipeline with bounded queue.
+
+        Consumes events from the async stream in real time and yields them immediately
+        to downstream consumers without full-session memory accumulation.
+
+        Maintains bounded queue with explicit overflow behavior (FAIL_CLOSED / BACKPRESSURE).
+        Never silently discards market events.
+        """
+        if not self._is_connected:
+            msg = "UpstoxMarketDataAdapter: Not connected. Call connect() first. Failing closed."
+            raise UpstoxConnectionError(msg)
+
+        event_queue: queue.Queue[MarketStreamEvent | Exception | None] = queue.Queue(
+            maxsize=self._queue_size
+        )
+        stop_event = threading.Event()
+
+        def _worker() -> None:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            async def _consume() -> None:
+                stream = self.stream_live_events()
+                try:
+                    async for event in stream:
+                        if stop_event.is_set():
+                            break
+
+                        if self._overflow_policy == QueueOverflowPolicy.FAIL_CLOSED:
+                            try:
+                                event_queue.put_nowait(event)
+                            except queue.Full:
+                                msg = (
+                                    f"QUEUE_OVERFLOW: Ingestion queue capacity of "
+                                    f"{self._queue_size} exceeded. Failing closed."
+                                )
+                                event_queue.put(DataIntegrityError(msg))
+                                break
+                        else:
+                            # BACKPRESSURE
+                            try:
+                                event_queue.put(event, timeout=5.0)
+                            except queue.Full:
+                                msg = (
+                                    f"QUEUE_BACKPRESSURE_TIMEOUT: Downstream consumer "
+                                    f"blocked for >5.0s. Queue capacity {self._queue_size}. "
+                                    f"Failing closed."
+                                )
+                                event_queue.put(DataIntegrityError(msg))
+                                break
+                except Exception as exc:
+                    event_queue.put(exc)
+                finally:
+                    try:
+                        await stream.aclose()
+                    except Exception:
+                        pass
+                    event_queue.put(None)  # Sentinel to terminate generator
+
+            try:
+                loop.run_until_complete(_consume())
+            finally:
+                loop.close()
+
+        worker_thread = threading.Thread(
+            target=_worker,
+            name="UpstoxLiveStreamWorker",
+            daemon=True,
+        )
+        worker_thread.start()
+
+        try:
+            while True:
+                item = event_queue.get()
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                yield item
+        finally:
+            stop_event.set()
+            self.disconnect()
+            worker_thread.join(timeout=2.0)
 
     def get_connection_telemetry(self) -> dict[str, Any]:
-        """Comprehensive connection and data quality telemetry."""
+        """Comprehensive connection, data quality, and streaming telemetry."""
         base = super().get_connection_telemetry()
         base.update(
             {
@@ -710,6 +820,13 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                 "provider_authenticated": self._provider_authenticated,
                 "is_live_external": self._is_connected and self._provider_authenticated,
                 "instrument_key": self._instrument_key,
+                "ingestion_sequence_no": self._ingestion_sequence_no,
+                "reconnect_state": self._reconnect_fsm.current_state.value,
+                "reconnect_attempts": self._reconnect_fsm.attempt_count,
+                "is_evaluation_allowed": self._reconnect_fsm.is_evaluation_allowed,
+                "detected_gaps_count": len(self._reconnect_fsm.gaps),
+                "queue_size": self._queue_size,
+                "overflow_policy": self._overflow_policy.value,
                 "connection_start": (
                     self._connection_start_ts.isoformat() if self._connection_start_ts else None
                 ),
@@ -740,3 +857,4 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
             }
         )
         return base
+
