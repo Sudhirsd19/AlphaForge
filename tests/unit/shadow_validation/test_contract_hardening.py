@@ -2,9 +2,10 @@
 Unit tests for Phase 18-C Authoritative Contract Hardening & Dynamic Rollover.
 
 Verifies:
-1. Authority precedence: Tier 1 (Live Broker) > Tier 2 (Runtime) > Tier 3 (Last Known Good) > Tier 4 (Canonical Reference).
+1. Authority precedence: Tier 1 (Live Broker) > Tier 2 (Runtime) >
+   Tier 3 (Last Known Good) > Tier 4 (Canonical Reference).
 2. Canonical package snapshot is explicitly identified as REFERENCE ONLY.
-3. Strict validation: lot_size > 0, tick_size > 0, start <= end, listing <= expiry, segment in NFO/NSE_FO.
+3. Strict validation: lot_size > 0, tick_size > 0, start <= end, listing <= expiry.
 4. Dynamic rollover: when front contract expires, next contract automatically resolves as active.
 5. Expired contracts without a replacement resolve to UNAVAILABLE/EXPIRED.
 6. SHA-256 snapshot hash generation and integrity verification.
@@ -13,19 +14,21 @@ Verifies:
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from alphaforge.contract.models import ContractMaster
 from alphaforge.core.exceptions import DataIntegrityError
 from alphaforge.shadow_validation.contract_source import (
     AuthoritativeContractSource,
     ContractAuthorityTier,
     parse_contract_record,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _sample_contract_dict(
@@ -123,7 +126,7 @@ def test_canonical_reference_snapshot_tier_and_hash(tmp_path: Path) -> None:
 
 
 def test_authority_precedence_tier_1_over_tier_4(tmp_path: Path) -> None:
-    """Verifies an explicit live snapshot (Tier 1) takes precedence over package reference (Tier 4)."""
+    """Verifies live snapshot (Tier 1) takes precedence over package reference (Tier 4)."""
     custom_snap = tmp_path / "live_broker_instruments.json"
     contracts_data = [
         _sample_contract_dict(
@@ -147,7 +150,7 @@ def test_authority_precedence_tier_1_over_tier_4(tmp_path: Path) -> None:
 
 
 def test_dynamic_rollover_when_front_contract_expires() -> None:
-    """Verifies that as time advances past front-month expiry, next month contract becomes active."""
+    """Verifies that as time advances past front expiry, next contract becomes active."""
     source = AuthoritativeContractSource()
 
     # Before Sept expiry: NIFTY26SEPFUT is active

@@ -14,7 +14,7 @@ import logging
 import os
 from datetime import UTC, datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -37,12 +37,13 @@ logger = logging.getLogger(__name__)
 ENV_CONTRACT_SNAPSHOT = "ALPHAFORGE_CONTRACT_SNAPSHOT_PATH"
 ENV_UPSTOX_INSTRUMENTS = "UPSTOX_INSTRUMENTS_PATH"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+LIVE_BROKER_SNAPSHOT = REPO_ROOT / "runtime" / "contracts" / "live_broker_instruments.json"
 RUNTIME_SNAPSHOT = REPO_ROOT / "runtime" / "contracts" / "nifty_contracts.json"
 LAST_KNOWN_GOOD_SNAPSHOT = REPO_ROOT / "runtime" / "contracts" / "last_known_good_contracts.json"
 PACKAGE_SNAPSHOT = Path(__file__).resolve().parent / "canonical_contracts.json"
 
 
-class ContractAuthorityTier(str, Enum):
+class ContractAuthorityTier(StrEnum):
     """Authoritative hierarchy tiers for contract metadata."""
 
     TIER_1_LIVE_BROKER = "TIER_1_LIVE_BROKER_MASTER"
@@ -322,7 +323,8 @@ class AuthoritativeContractSource:
                 self._source_tier = tier
                 self._source_description = f"{source_label}:{path.name}"
                 logger.info(
-                    f"AuthoritativeContractSource [{tier.value}]: Loaded {count} contracts from {path}"
+                    f"AuthoritativeContractSource [{tier.value}]: "
+                    f"Loaded {count} contracts from {path}"
                 )
             return count
         except Exception as exc:
