@@ -40,11 +40,22 @@ from alphaforge.shadow_validation.network_resilience_coordinator import (
 from alphaforge.shadow_validation.realistic_execution_engine import (
     RealisticShadowExecutionEngine,
 )
+from alphaforge.shadow_validation.reconnect import (
+    DataGapRecord,
+    DisconnectReason,
+    ReconnectEvent,
+    ReconnectPolicy,
+    ReconnectStateMachine,
+    StreamConnectionState,
+)
 from alphaforge.shadow_validation.shadow_guard import ShadowExecutionOnlyGuard
 from alphaforge.shadow_validation.state_reconstruction_engine import (
     StateReconstructionEngine,
 )
-from alphaforge.shadow_validation.upstox_adapter import UpstoxMarketDataAdapter
+from alphaforge.shadow_validation.upstox_adapter import (
+    QueueOverflowPolicy,
+    UpstoxMarketDataAdapter,
+)
 
 __all__ = [
     "AUTHORIZED_LIVE_PROVIDERS",
@@ -57,7 +68,9 @@ __all__ = [
     "CertificationLevelStatus",
     "CertificationReporter",
     "CertificationVerdict",
+    "DataGapRecord",
     "DataSourceType",
+    "DisconnectReason",
     "FeedProvenanceToken",
     "FillExecutionType",
     "ForensicReplayVerifier",
@@ -71,11 +84,16 @@ __all__ = [
     "PerformanceMetrics",
     "ProcessLifecycleState",
     "ProvenanceVerifier",
+    "QueueOverflowPolicy",
     "RealisticFillRecord",
     "RealisticShadowExecutionEngine",
+    "ReconnectEvent",
+    "ReconnectPolicy",
+    "ReconnectStateMachine",
     "ShadowExecutionOnlyGuard",
     "ShadowSignalRecord",
     "StateReconstructionEngine",
+    "StreamConnectionState",
     "SyntheticFeedAdapter",
     "UpstoxMarketDataAdapter",
 ]
