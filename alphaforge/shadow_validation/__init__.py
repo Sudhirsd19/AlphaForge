@@ -4,6 +4,7 @@ AlphaForge Extended Real-Market Shadow Validation & Certification Package (Phase
 
 from alphaforge.shadow_validation.causal_certifier import CausalCertifier
 from alphaforge.shadow_validation.certification_reporter import CertificationReporter
+from alphaforge.shadow_validation.contract_source import AuthoritativeContractSource
 from alphaforge.shadow_validation.enums import (
     CertificationLevelStatus,
     CertificationVerdict,
@@ -48,6 +49,7 @@ from alphaforge.shadow_validation.upstox_adapter import UpstoxMarketDataAdapter
 __all__ = [
     "AUTHORIZED_LIVE_PROVIDERS",
     "AbstractMarketDataStreamAdapter",
+    "AuthoritativeContractSource",
     "AuthorizedLiveStreamAdapter",
     "CanonicalStateSnapshot",
     "CausalCertifier",

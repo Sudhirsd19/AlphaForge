@@ -28,7 +28,6 @@ import logging
 import subprocess
 import sys
 from datetime import UTC, datetime
-from decimal import Decimal
 from pathlib import Path
 
 # Ensure repository root is on sys.path
@@ -93,9 +92,9 @@ def main() -> None:
 
     # --- Import AlphaForge components ---
     try:
-        from alphaforge.contract.enums import ContractStatus, SettlementType  # noqa: PLC0415
-        from alphaforge.contract.models import ContractMaster  # noqa: PLC0415
-        from alphaforge.data.enums import InstrumentType  # noqa: PLC0415
+        from alphaforge.shadow_validation.contract_source import (
+            AuthoritativeContractSource,  # noqa: PLC0415
+        )
         from alphaforge.shadow_validation.upstox_adapter import (  # noqa: PLC0415
             UpstoxMarketDataAdapter,
         )
@@ -103,29 +102,22 @@ def main() -> None:
         logger.error("FATAL: Cannot import AlphaForge components — %s", exc)
         sys.exit(1)
 
-    # --- Build active contract ---
-    # NOTE: This should be updated to the current active NIFTY Futures contract
-    contract = ContractMaster(
-        exchange="NSE",
-        segment="NFO",
-        underlying_symbol="NIFTY",
-        contract_id="NIFTY26SEPFUT",
-        instrument_type=InstrumentType.FUTURES,
-        expiry_datetime=datetime(2026, 9, 24, 10, 0, tzinfo=UTC),
-        listing_datetime=datetime(2026, 6, 1, 3, 45, tzinfo=UTC),
-        trading_start_datetime=datetime(2026, 6, 1, 3, 45, tzinfo=UTC),
-        trading_end_datetime=datetime(2026, 9, 24, 10, 0, tzinfo=UTC),
-        lot_size=50,
-        tick_size=Decimal("0.05"),
-        contract_multiplier=Decimal("1"),
-        price_decimal_places=2,
-        currency="INR",
-        settlement_type=SettlementType.CASH,
-        status=ContractStatus.ACTIVE,
-        data_source="NSE_MASTER",
-    )
+    # --- Authoritative active contract resolution ---
+    contract_source = AuthoritativeContractSource()
+    contract = contract_source.get_active_contract()
+    if contract is None:
+        logger.error(
+            "FATAL: No active authoritative NIFTY Futures contract available. Failing closed."
+        )
+        logger.error("CONTRACT STATUS = UNAVAILABLE / TRADABLE = FALSE")
+        sys.exit(1)
 
-    logger.info("Contract: %s (expiry: %s)", contract.contract_id, contract.expiry_datetime)
+    logger.info(
+        "Contract: %s (expiry: %s, source: %s)",
+        contract.contract_id,
+        contract.expiry_datetime,
+        contract.data_source,
+    )
 
     # --- Create adapter ---
     try:

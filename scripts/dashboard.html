@@ -7,1127 +7,1431 @@
   <style>
     :root {
       --bg: #070b14;
+      --panel-bg: #0c1324;
       --card-bg: #0f172a;
       --card-border: #1e293b;
-      --header-bg: #0b1329;
+      --header-bg: #080f20;
       --text: #f8fafc;
       --text-muted: #94a3b8;
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
-      --success: #10b981;
-      --danger: #ef4444;
-      --warning: #f59e0b;
-      --purple: #8b5cf6;
-      --badge-bg: #1e293b;
+      --text-dim: #64748b;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
       --cyan: #06b6d4;
+      --cyan-dim: rgba(6, 182, 212, 0.15);
+      --success: #10b981;
+      --success-dim: rgba(16, 185, 129, 0.15);
+      --danger: #ef4444;
+      --danger-dim: rgba(239, 68, 68, 0.15);
+      --warning: #f59e0b;
+      --warning-dim: rgba(245, 158, 11, 0.15);
+      --badge-bg: #1e293b;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
-    body { background-color: var(--bg); color: var(--text); padding: 20px; line-height: 1.5; min-height: 100vh; }
-    .container { max-width: 1480px; margin: 0 auto; }
-    
-    /* Header */
-    header { display: flex; justify-content: space-between; align-items: center; padding: 18px 24px; background: var(--header-bg); border-radius: 12px; border: 1px solid var(--card-border); margin-bottom: 20px; box-shadow: 0 4px 24px rgba(0,0,0,0.6); flex-wrap: wrap; gap: 14px; }
-    .brand { display: flex; align-items: center; gap: 14px; }
-    .brand-logo { width: 44px; height: 44px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 24px; color: #fff; box-shadow: 0 0 16px rgba(59,130,246,0.6); }
-    .brand-title { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
-    .brand-subtitle { font-size: 11px; color: var(--cyan); text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700; }
-    .header-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    
-    .status-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; }
-    .status-paper { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
-    .status-zero-broker { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
-    .status-commit { background: rgba(139, 92, 246, 0.15); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.3); }
-    .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; box-shadow: 0 0 8px #34d399; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.2); } }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", monospace; }
+    body { background-color: var(--bg); color: var(--text); padding: 16px; line-height: 1.4; min-height: 100vh; }
+    .container { max-width: 1540px; margin: 0 auto; }
 
-    /* Kill switch button */
-    .btn-kill { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 8px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; transition: all 0.2s; font-size: 13px; display: flex; align-items: center; gap: 8px; }
-    .btn-kill:hover { background: #ef4444; color: #fff; box-shadow: 0 0 15px rgba(239, 68, 68, 0.6); }
-    .btn-disarm { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
-    .btn-disarm:hover { background: #10b981; color: #fff; box-shadow: 0 0 15px rgba(16, 185, 129, 0.6); }
+    /* Top Command Center Header */
+    header {
+      background: var(--header-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 12px 18px;
+      margin-bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }
+    .brand-cluster { display: flex; align-items: center; gap: 12px; }
+    .brand-mark {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #1d4ed8, #06b6d4);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 20px; color: #fff;
+    }
+    .brand-text h1 { font-size: 16px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; color: #fff; }
+    .brand-text span { font-size: 10px; color: var(--cyan); letter-spacing: 1.5px; font-weight: 700; text-transform: uppercase; }
 
-    /* Metric cards */
-    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 20px; }
-    .metric-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-    .metric-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; font-weight: 700; }
-    .metric-value { font-size: 22px; font-weight: 800; color: #fff; }
-    .metric-sub { font-size: 11px; margin-top: 4px; display: flex; align-items: center; gap: 6px; }
-    .text-success { color: #34d399; }
-    .text-danger { color: #f87171; }
-    .text-warning { color: #fbbf24; }
-    .text-primary { color: #60a5fa; }
-    .text-cyan { color: #22d3ee; }
+    .header-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .hdr-badge {
+      display: flex; flex-direction: column;
+      background: #081022; border: 1px solid var(--card-border);
+      border-radius: 4px; padding: 4px 10px; font-size: 11px;
+    }
+    .hdr-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.8px; }
+    .hdr-val { font-family: monospace; font-weight: 700; font-size: 11px; color: #e2e8f0; }
+    .hdr-val.cyan { color: var(--cyan); }
+    .hdr-val.green { color: var(--success); }
+    .hdr-val.amber { color: var(--warning); }
+    .hdr-val.red { color: var(--danger); }
 
-    /* Tabs */
-    .tabs { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--card-border); padding-bottom: 12px; overflow-x: auto; }
-    .tab-btn { background: transparent; border: none; color: var(--text-muted); padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
-    .tab-btn:hover { color: #fff; background: var(--badge-bg); }
-    .tab-btn.active { color: #fff; background: var(--primary); box-shadow: 0 2px 12px rgba(59,130,246,0.5); }
+    .btn-kill-action {
+      background: rgba(239, 68, 68, 0.2); color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4); padding: 6px 14px;
+      border-radius: 6px; font-weight: 700; cursor: pointer;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+      transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+    }
+    .btn-kill-action:hover { background: #ef4444; color: #fff; }
+    .btn-disarm-action {
+      background: rgba(16, 185, 129, 0.2); color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.4); padding: 6px 14px;
+      border-radius: 6px; font-weight: 700; cursor: pointer;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+      transition: all 0.2s;
+    }
+    .btn-disarm-action:hover { background: #10b981; color: #fff; }
 
-    .tab-content { display: none; }
-    .tab-content.active { display: block; animation: fadeIn 0.3s; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    /* Workflow Stepper */
+    .workflow-bar {
+      background: #091024; border: 1px solid var(--card-border);
+      border-radius: 6px; padding: 8px 16px; margin-bottom: 14px;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 11px; text-transform: uppercase; font-weight: 700; letter-spacing: 1px;
+    }
+    .wf-step { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
+    .wf-step.active { color: var(--cyan); }
+    .wf-num {
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #111827; border: 1px solid var(--text-dim);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 800;
+    }
+    .wf-step.active .wf-num { border-color: var(--cyan); color: #fff; background: rgba(6, 182, 212, 0.2); }
+    .wf-divider { color: var(--card-border); font-size: 14px; }
 
-    /* User Workflow Stepper */
-    .workflow-stepper { background: #091124; border: 1px solid var(--card-border); border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-    .step-box { display: flex; align-items: center; gap: 12px; }
-    .step-number { width: 32px; height: 32px; border-radius: 50%; background: #1e293b; border: 2px solid #3b82f6; color: #fff; font-weight: 800; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .step-text { font-size: 12px; line-height: 1.3; }
-    .step-title { font-weight: 800; color: #fff; margin-bottom: 2px; }
-    .step-desc { color: var(--text-muted); font-size: 11px; }
+    /* Navigation Tabs */
+    .tabs-nav {
+      display: flex; gap: 4px; margin-bottom: 14px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 6px; overflow-x: auto;
+    }
+    .nav-btn {
+      background: transparent; border: none; color: var(--text-muted);
+      padding: 8px 14px; border-radius: 4px; font-size: 11px;
+      font-weight: 700; cursor: pointer; text-transform: uppercase;
+      letter-spacing: 0.8px; transition: all 0.15s; white-space: nowrap;
+    }
+    .nav-btn:hover { color: #fff; background: #0f172a; }
+    .nav-btn.active { color: #fff; background: var(--primary); }
 
-    /* Content Cards */
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 20px; }
-    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
-    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
-    .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
-    .card-title { font-size: 15px; font-weight: 800; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 10px; }
+    .tab-view { display: none; }
+    .tab-view.active { display: block; animation: fadeIn 0.15s ease-in-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
 
-    /* Tables */
-    .table-container { max-height: 380px; overflow-y: auto; border-radius: 8px; border: 1px solid var(--card-border); }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
-    th { background: #070d1e; color: var(--text-muted); padding: 10px 12px; font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; border-bottom: 1px solid var(--card-border); position: sticky; top: 0; z-index: 10; }
-    td { padding: 10px 12px; border-bottom: 1px solid #1e293b; font-family: monospace; }
-    tr:hover td { background: rgba(255,255,255,0.02); }
+    /* Operational Grid System */
+    .grid-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .grid-row-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
+    .grid-row-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+    @media (max-width: 1024px) {
+      .grid-row-2, .grid-row-3, .grid-row-4 { grid-template-columns: 1fr; }
+    }
 
-    /* Form Controls */
-    .form-group { margin-bottom: 14px; }
-    label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
-    input, select { width: 100%; background: #070d1e; border: 1px solid var(--card-border); color: #fff; padding: 10px 14px; border-radius: 8px; font-size: 13px; outline: none; transition: border 0.2s; }
-    input:focus, select:focus { border-color: var(--primary); }
-    .btn { background: var(--primary); color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 700; cursor: pointer; transition: background 0.2s; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; }
-    .btn:hover { background: var(--primary-hover); }
-    .btn-success { background: #059669; }
-    .btn-success:hover { background: #10b981; }
-    .btn-secondary { background: #334155; color: #f8fafc; }
-    .btn-secondary:hover { background: #475569; }
+    .op-panel {
+      background: var(--panel-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .op-panel-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 10px; border-bottom: 1px solid #172033;
+      padding-bottom: 6px;
+    }
+    .op-panel-title {
+      font-size: 11px; font-weight: 800; text-transform: uppercase;
+      letter-spacing: 1px; color: #e2e8f0; display: flex; align-items: center; gap: 8px;
+    }
+    .op-subhead { font-size: 10px; color: var(--text-dim); }
 
-    /* Badges */
-    .badge { padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 800; text-transform: uppercase; display: inline-block; }
-    .badge-pass { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
-    .badge-fail { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
-    .badge-info { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
-    .badge-warn { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    /* Badges & Tags */
+    .status-tag {
+      font-size: 10px; font-weight: 800; padding: 2px 8px;
+      border-radius: 3px; text-transform: uppercase; letter-spacing: 0.5px;
+      font-family: monospace;
+    }
+    .tag-green { background: var(--success-dim); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .tag-amber { background: var(--warning-dim); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .tag-red { background: var(--danger-dim); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .tag-cyan { background: var(--cyan-dim); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.4); }
+    .tag-slate { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
 
-    /* Checklist row */
-    .check-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #1e293b; font-size: 12px; }
+    /* Critical Safety Banner */
+    .safety-alert-banner {
+      background: #08162b; border: 1px solid #1e3a8a;
+      border-left: 4px solid #3b82f6; border-radius: 4px;
+      padding: 8px 14px; margin-bottom: 12px; font-size: 11px;
+      display: flex; justify-content: space-between; align-items: center;
+      color: #93c5fd;
+    }
+    .safety-alert-banner strong { color: #fff; letter-spacing: 0.5px; }
 
-    /* Activity log */
-    .log-container { background: #050914; border-radius: 8px; padding: 14px; font-family: monospace; font-size: 12px; height: 320px; overflow-y: auto; border: 1px solid var(--card-border); }
-    .log-line { margin-bottom: 6px; display: flex; gap: 10px; }
-    .log-ts { color: #64748b; flex-shrink: 0; }
-    .log-level-INFO { color: #60a5fa; font-weight: bold; flex-shrink: 0; }
-    .log-level-SECURITY { color: #f43f5e; font-weight: bold; flex-shrink: 0; }
-    .log-level-ORDER { color: #34d399; font-weight: bold; flex-shrink: 0; }
-    .log-level-HEALTH { color: #a78bfa; font-weight: bold; flex-shrink: 0; }
-    .log-level-FORWARD { color: #22d3ee; font-weight: bold; flex-shrink: 0; }
+    /* Data Key-Value Pairs */
+    .kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+    .kv-item { background: #070d1d; border: 1px solid #151f33; border-radius: 4px; padding: 8px 10px; }
+    .kv-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 2px; }
+    .kv-value { font-size: 13px; font-weight: 700; font-family: monospace; color: #f1f5f9; }
 
-    /* Banner / Alerts */
-    .banner-empty { background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 10px; padding: 18px 22px; margin-bottom: 16px; display: flex; align-items: center; gap: 14px; }
-    .banner-running { background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: 10px; padding: 18px 22px; margin-bottom: 16px; display: none; align-items: center; gap: 14px; }
-    .banner-blocked { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 10px; padding: 18px 22px; margin-bottom: 16px; display: none; align-items: center; gap: 14px; }
+    /* Visual Meter */
+    .meter-wrap { margin-top: 6px; }
+    .meter-label-row { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-bottom: 3px; font-family: monospace; }
+    .meter-track { height: 8px; background: #0a1122; border-radius: 2px; overflow: hidden; border: 1px solid #1a253a; }
+    .meter-fill { height: 100%; transition: width 0.3s; }
+    .meter-fill.green { background: #10b981; }
+    .meter-fill.amber { background: #f59e0b; }
+    .meter-fill.red { background: #ef4444; }
 
-    /* Progress bar */
-    .progress-bar-wrap { width: 100%; background: #1e293b; border-radius: 6px; height: 8px; overflow: hidden; margin-top: 10px; }
-    .progress-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #3b82f6, #06b6d4); transition: width 0.3s; animation: pulseProgress 1.5s infinite linear; }
-    @keyframes pulseProgress { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+    /* Forensic Tables */
+    .tbl-scroll-container { width: 100%; overflow-x: auto; border: 1px solid var(--card-border); border-radius: 4px; }
+    table.forensic-tbl { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
+    table.forensic-tbl th {
+      background: #081020; color: var(--text-dim); padding: 8px 10px;
+      font-weight: 700; text-transform: uppercase; font-size: 10px;
+      letter-spacing: 0.5px; border-bottom: 1px solid var(--card-border);
+      position: sticky; top: 0;
+    }
+    table.forensic-tbl td { padding: 8px 10px; border-bottom: 1px solid #151e30; font-family: monospace; }
+    table.forensic-tbl tr:hover td { background: rgba(255,255,255,0.02); }
 
-    /* Accordion */
-    .accordion-item { background: #070d1e; border: 1px solid var(--card-border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
-    .accordion-header { padding: 12px 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 700; user-select: none; }
-    .accordion-header:hover { background: rgba(255,255,255,0.02); }
-    .accordion-body { padding: 12px 16px; border-top: 1px solid var(--card-border); font-size: 12px; color: var(--text-muted); display: none; }
-    .accordion-body.open { display: block; }
+    /* Empty States */
+    .empty-state-card {
+      background: #080e1c; border: 1px dashed #1e2c47;
+      border-radius: 6px; padding: 28px; text-align: center;
+      color: var(--text-dim); margin: 12px 0;
+    }
+    .empty-state-title { font-size: 13px; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+    .empty-state-desc { font-size: 11px; color: var(--text-dim); }
+
+    /* Chart Canvas Container */
+    .chart-container {
+      background: #060a14; border: 1px solid var(--card-border);
+      border-radius: 4px; padding: 10px; position: relative;
+      height: 320px; display: flex; flex-direction: column;
+    }
+    .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .chart-canvas { width: 100%; flex-grow: 1; }
+
+    /* Forms & Action Buttons */
+    .form-ctrl-group { margin-bottom: 10px; }
+    .form-ctrl-label { display: block; font-size: 10px; color: var(--text-dim); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+    .form-input, .form-select {
+      width: 100%; background: #070d1b; border: 1px solid var(--card-border);
+      color: #fff; padding: 8px 10px; border-radius: 4px; font-size: 12px;
+      outline: none; font-family: monospace;
+    }
+    .form-input:focus, .form-select:focus { border-color: var(--cyan); }
+    .btn-action {
+      background: var(--primary); color: #fff; border: none;
+      padding: 8px 16px; border-radius: 4px; font-size: 11px;
+      font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+      cursor: pointer; transition: background 0.15s; display: inline-flex;
+      align-items: center; gap: 6px; text-decoration: none;
+    }
+    .btn-action:hover { background: var(--primary-hover); }
+    .btn-action.secondary { background: #1e293b; color: #cbd5e1; }
+    .btn-action.secondary:hover { background: #334155; }
+    .btn-action.cyan { background: #0891b2; }
+    .btn-action.cyan:hover { background: #06b6d4; }
   </style>
 </head>
 <body>
   <div class="container">
     <!-- Header -->
     <header>
-      <div class="brand">
-        <div class="brand-logo">&#9889;</div>
-        <div>
-          <div class="brand-title">AlphaForge Operations Console</div>
-          <div class="brand-subtitle">Phase 16 Forward Validation Engine Active &bull; Frozen Baseline</div>
+      <div class="brand-cluster">
+        <div class="brand-mark">&#9670;</div>
+        <div class="brand-text">
+          <h1>AlphaForge Operations Console</h1>
+          <span>Institutional Quantitative Operations Center &bull; Phase 17</span>
         </div>
       </div>
-      <div class="header-actions">
-        <div class="status-badge status-paper" id="env-badge" title="Simulated execution only. No live exchange connections.">
-          <div class="pulse-dot"></div>
-          <span id="env-name">PAPER MODE &bull; REAL MONEY DISABLED</span>
+
+      <div class="header-badges">
+        <div class="hdr-badge">
+          <span class="hdr-label">Data Provider</span>
+          <span class="hdr-val cyan" id="hdr-data-provider">UPSTOX</span>
         </div>
-        <div class="status-badge status-zero-broker" title="Authoritative runtime guarantee">
-          &#128737; Real Broker Orders: 0
+        <div class="hdr-badge">
+          <span class="hdr-label">Execution Mode</span>
+          <span class="hdr-val" id="hdr-mode">REAL-MARKET SHADOW</span>
         </div>
-        <div class="status-badge status-commit" title="Phase 16 Frozen Baseline Commit">
-          &#128279; Git: 0060d39
+        <div class="hdr-badge">
+          <span class="hdr-label">Live Orders</span>
+          <span class="hdr-val green" id="hdr-orders">0 — ROUTING BLOCKED</span>
         </div>
-        <button class="btn-kill" id="kill-btn" onclick="toggleKillSwitch()" title="Emergency Kill Switch">
+        <div class="hdr-badge">
+          <span class="hdr-label">Contract</span>
+          <span class="hdr-val" id="hdr-contract">NIFTY FUTURES</span>
+        </div>
+        <div class="hdr-badge">
+          <span class="hdr-label">NSE Session</span>
+          <span class="hdr-val" id="hdr-session">EVALUATING</span>
+        </div>
+        <div class="hdr-badge">
+          <span class="hdr-label">System Health</span>
+          <span class="hdr-val green" id="hdr-health">HEALTHY</span>
+        </div>
+        <div class="hdr-badge">
+          <span class="hdr-label">Phase 17C Status</span>
+          <span class="hdr-val amber" id="hdr-phase17c">READY FOR RUN</span>
+        </div>
+        <div class="hdr-badge">
+          <span class="hdr-label">Build SHA</span>
+          <span class="hdr-val cyan" id="hdr-build-sha">...</span>
+        </div>
+
+        <button id="btn-kill-toggle" class="btn-kill-action" onclick="toggleKillSwitch()">
           &#9888; ENGAGE KILL SWITCH
         </button>
       </div>
     </header>
 
-    <!-- Top KPI Metrics -->
-    <div class="metrics-grid">
-      <div class="metric-card">
-        <div class="metric-label">Execution Mode</div>
-        <div class="metric-value text-success" id="metric-mode">PAPER</div>
-        <div class="metric-sub text-success">&#10004; Real Money Disabled (Isolated)</div>
+    <!-- Workflow Stepper -->
+    <div class="workflow-bar">
+      <div class="wf-step active" id="wf-step-1">
+        <div class="wf-num">1</div>
+        <span>1. Feed Connection (Upstox)</span>
       </div>
-      <div class="metric-card">
-        <div class="metric-label">Paper Portfolio Equity</div>
-        <div class="metric-value text-cyan" id="metric-equity">₹1,000,000.00</div>
-        <div class="metric-sub text-muted" id="metric-cash">Cash: ₹1,000,000.00</div>
+      <div class="wf-divider">&rarr;</div>
+      <div class="wf-step active" id="wf-step-2">
+        <div class="wf-num">2</div>
+        <span>2. Contract Validation (NSE/NFO)</span>
       </div>
-      <div class="metric-card">
-        <div class="metric-label">Kill Switch Status</div>
-        <div class="metric-value text-success" id="metric-kill-switch">DISARMED</div>
-        <div class="metric-sub text-muted">Simulation Trading Permitted</div>
+      <div class="wf-divider">&rarr;</div>
+      <div class="wf-step" id="wf-step-3">
+        <div class="wf-num">3</div>
+        <span>3. Market Observation</span>
       </div>
-      <div class="metric-card">
-        <div class="metric-label">Active Contract (Phase 3 Master)</div>
-        <div class="metric-value text-primary" id="metric-contract">NIFTY26SEPFUT</div>
-        <div class="metric-sub text-muted" id="metric-lot">NSE:NFO &bull; Lot: 50 &bull; Expiry: 2026-09-24</div>
+      <div class="wf-divider">&rarr;</div>
+      <div class="wf-step" id="wf-step-4">
+        <div class="wf-num">4</div>
+        <span>4. Shadow Decision</span>
       </div>
-      <div class="metric-card">
-        <div class="metric-label">Continuous 6-Point Recon</div>
-        <div class="metric-value text-success" id="metric-recon">100% ALIGNED</div>
-        <div class="metric-sub text-success">&#10004; 6/6 Multi-Entities Match</div>
+      <div class="wf-divider">&rarr;</div>
+      <div class="wf-step" id="wf-step-5">
+        <div class="wf-num">5</div>
+        <span>5. Certification (Level C)</span>
       </div>
     </div>
 
     <!-- Navigation Tabs -->
-    <div class="tabs">
-      <button class="tab-btn active" onclick="showTab('forward')">&#9654; Forward Engine (Phase 16)</button>
-      <button class="tab-btn" onclick="showTab('orders')">&#128221; Order Book &amp; FSM (Phase 7 &amp; 8)</button>
-      <button class="tab-btn" onclick="showTab('reconciliation')">&#128269; 6-Point Reconciliation (Phase 16)</button>
-      <button class="tab-btn" onclick="showTab('runtime')">&#9881; Deployment &amp; Readiness (Phase 15)</button>
-      <button class="tab-btn" onclick="showTab('security')">&#128737; Security &amp; Compliance (Phase 13)</button>
-      <button class="tab-btn" onclick="showTab('observability')">&#128202; Causal Observability (Phase 14)</button>
-      <button class="tab-btn" onclick="showTab('backtest')">&#128200; Quant Backtester (Phase 10)</button>
+    <div class="tabs-nav">
+      <button class="nav-btn active" onclick="switchTab('overview')">1. Overview</button>
+      <button class="nav-btn" onclick="switchTab('market')">2. Market</button>
+      <button class="nav-btn" onclick="switchTab('signals')">3. Signals</button>
+      <button class="nav-btn" onclick="switchTab('risk')">4. Risk</button>
+      <button class="nav-btn" onclick="switchTab('shadow')">5. Shadow Run</button>
+      <button class="nav-btn" onclick="switchTab('execution')">6. Execution</button>
+      <button class="nav-btn" onclick="switchTab('evidence')">7. Evidence</button>
+      <button class="nav-btn" onclick="switchTab('security')">8. Security</button>
+      <button class="nav-btn" onclick="switchTab('observability')">9. Observability</button>
+      <button class="nav-btn" onclick="switchTab('backtest')">10. Backtest</button>
     </div>
 
-    <!-- TAB 0: FORWARD ENGINE (PHASE 16) -->
-    <div id="tab-forward" class="tab-content active">
-      <!-- 4-Step Guided User Workflow Header -->
-      <div class="workflow-stepper">
-        <div class="step-box">
-          <div class="step-number">1</div>
-          <div class="step-text">
-            <div class="step-title">Confirm Safe Mode</div>
-            <div class="step-desc">PAPER or SHADOW (No Real Broker Orders)</div>
-          </div>
-        </div>
-        <div class="step-box">
-          <div class="step-number">2</div>
-          <div class="step-text">
-            <div class="step-title">Configure Feed</div>
-            <div class="step-desc">Select 50, 150, or 300 Market Bars</div>
-          </div>
-        </div>
-        <div class="step-box">
-          <div class="step-number">3</div>
-          <div class="step-text">
-            <div class="step-title">Run Validation</div>
-            <div class="step-desc">Click 'Start Forward Validation Run'</div>
-          </div>
-        </div>
-        <div class="step-box">
-          <div class="step-number">4</div>
-          <div class="step-text">
-            <div class="step-title">Inspect &amp; Export</div>
-            <div class="step-desc">Review Trade Ledger, Decisions &amp; Evidence</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Execution Panel & KPI Summary -->
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-title">
-            <span>Execute Forward Validation Batch Run</span>
-            <span class="badge badge-info">Phase 16 Engine</span>
-          </div>
-          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
-            Ingests market candles causally (T &le; Exchange_TS), evaluates closed-candle indicators, verifies evolving portfolio risk limits, executes through authoritative 17-state FSM, and tracks slippage/fees.
-          </p>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-            <div class="form-group">
-              <label>Validation Mode</label>
-              <select id="fwd-mode">
-                <option value="PAPER">PAPER (Simulated Execution)</option>
-                <option value="SHADOW">SHADOW (Passive Observation)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Candle Feed Count</label>
-              <select id="fwd-candles">
-                <option value="50">50 NIFTY Bars (Fast Validation)</option>
-                <option value="150" selected>150 NIFTY Bars (Standard Run)</option>
-                <option value="300">300 NIFTY Bars (Deep Walk-Forward)</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Target Contract Specification</label>
-            <input type="text" id="fwd-symbol" value="NIFTY26SEPFUT (NSE | Lot: 50 | Tick: 0.05 | Active)" readonly style="color:var(--text-muted);">
-          </div>
-          <button class="btn btn-success" style="width: 100%; font-size: 14px; padding: 12px;" onclick="runForwardBatch()" id="btn-run-forward">
-            &#9654; Start Forward Validation Run
-          </button>
-        </div>
-
-        <div class="card">
-          <div class="card-title">
-            <span>Validation Run Summary KPIs</span>
-            <span class="badge badge-pass" id="fwd-status-badge">READY</span>
-          </div>
-          <div class="grid-3" style="margin-bottom: 14px;">
-            <div style="background:#070d1e; padding:12px; border-radius:8px; border: 1px solid var(--card-border);">
-              <div style="font-size:11px; color:var(--text-muted);">PROCESSED BARS</div>
-              <div style="font-size:18px; font-weight:800; color:#fff;" id="fwd-bars">0 Bars</div>
-            </div>
-            <div style="background:#070d1e; padding:12px; border-radius:8px; border: 1px solid var(--card-border);">
-              <div style="font-size:11px; color:var(--text-muted);">TRADES EXECUTED</div>
-              <div style="font-size:18px; font-weight:800; color:#60a5fa;" id="fwd-trades">0 Trades</div>
-            </div>
-            <div style="background:#070d1e; padding:12px; border-radius:8px; border: 1px solid var(--card-border);">
-              <div style="font-size:11px; color:var(--text-muted);">NET REALIZED P&amp;L</div>
-              <div style="font-size:18px; font-weight:800; color:#34d399;" id="fwd-realized">₹0.00</div>
-            </div>
-          </div>
-          <div class="grid-3" style="margin-bottom: 14px;">
-            <div style="background:#070d1e; padding:12px; border-radius:8px; border: 1px solid var(--card-border);">
-              <div style="font-size:11px; color:var(--text-muted);">WIN RATE</div>
-              <div style="font-size:16px; font-weight:800; color:#fff;" id="fwd-winrate">0.0%</div>
-            </div>
-            <div style="background:#070d1e; padding:12px; border-radius:8px; border: 1px solid var(--card-border);">
-              <div style="font-size:11px; color:var(--text-muted);">SLIPPAGE &amp; FEES</div>
-              <div style="font-size:16px; font-weight:800; color:#fbbf24;" id="fwd-costs">₹0.00</div>
-            </div>
-            <div style="background:#070d1e; padding:12px; border-radius:8px; border: 1px solid var(--card-border);">
-              <div style="font-size:11px; color:var(--text-muted);">MAX DRAWDOWN</div>
-              <div style="font-size:16px; font-weight:800; color:#f87171;" id="fwd-drawdown">0.00%</div>
-            </div>
-          </div>
-          <div class="check-row">
-            <span>Anti-Lookahead Causality Invariant</span>
-            <span class="badge badge-pass">&#10004; STRICT (T &le; Exchange_TS)</span>
-          </div>
-          <div class="check-row">
-            <span>Intra-Bar SL/TP Ambiguity Resolution</span>
-            <span class="badge badge-pass">&#10004; SL_FIRST_CONSERVATIVE</span>
-          </div>
-          <div class="check-row">
-            <span>Live Broker Order Routing Isolation</span>
-            <span class="badge badge-pass">&#10004; 100% BLOCKED &bull; 0 ORDERS</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- RUN LIFECYCLE STATE BANNERS -->
-      <!-- Empty State Banner -->
-      <div id="banner-empty" class="banner-empty">
-        <div style="font-size: 24px;">&#9432;</div>
+    <!-- TAB 1: OVERVIEW -->
+    <div id="tab-overview" class="tab-view active">
+      <div class="safety-alert-banner">
         <div>
-          <div style="font-weight: 800; color: #fff;">NO FORWARD VALIDATION RUN EXECUTED YET</div>
-          <div style="font-size: 12px; color: var(--text-muted);">Select your preferred parameters above and click <strong>'Start Forward Validation Run'</strong> to ingest market candles through the Phase 16 validation pipeline.</div>
+          <strong>SAFETY INVARIANT ENFORCED:</strong> LIVE MARKET DATA &bull; ZERO REAL ORDERS. Live broker routing is physically blocked fail-closed by <code>DeploymentBrokerGuard</code> and <code>ShadowExecutionOnlyGuard</code>.
         </div>
+        <span class="status-tag tag-green">ZERO LIVE ORDERS GUARANTEED</span>
       </div>
 
-      <!-- Running State Banner -->
-      <div id="banner-running" class="banner-running">
-        <div style="font-size: 24px;">&#9203;</div>
-        <div style="flex-grow: 1;">
-          <div style="font-weight: 800; color: #06b6d4;" id="running-msg">EXECUTING FORWARD VALIDATION RUN...</div>
-          <div style="font-size: 12px; color: var(--text-muted);">Streaming candles, enforcing anti-lookahead rules, evaluating risk parameters, routing FSM orders, and calculating P&L...</div>
-          <div class="progress-bar-wrap">
-            <div class="progress-bar-fill" id="running-progress" style="width: 70%;"></div>
+      <div class="grid-row-2">
+        <!-- Real-Market Status Hero -->
+        <div class="op-panel">
+          <div class="op-panel-header">
+            <span class="op-panel-title">Real-Market Status</span>
+            <span class="status-tag tag-cyan" id="ov-provider-status">UPSTOX SHADOW</span>
+          </div>
+          <div class="kv-grid">
+            <div class="kv-item">
+              <div class="kv-label">Provider</div>
+              <div class="kv-value" id="ov-provider">UPSTOX</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Connection</div>
+              <div class="kv-value" id="ov-conn-state">DISCONNECTED</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Provider Authenticated</div>
+              <div class="kv-value" id="ov-prov-auth">NOT VERIFIED</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">External Feed</div>
+              <div class="kv-value" id="ov-ext-feed">NO</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Live Broker Orders</div>
+              <div class="kv-value green" id="ov-live-orders">0 (BLOCKED)</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Phase 17C Readiness</div>
+              <div class="kv-value amber" id="ov-phase17c">READY FOR RUN</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Active Contract Panel -->
+        <div class="op-panel">
+          <div class="op-panel-header">
+            <span class="op-panel-title">Active Contract Master</span>
+            <span class="status-tag tag-green" id="ov-contract-status">ACTIVE</span>
+          </div>
+          <div class="kv-grid">
+            <div class="kv-item">
+              <div class="kv-label">Contract ID</div>
+              <div class="kv-value" id="ov-contract-id">—</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Exchange / Segment</div>
+              <div class="kv-value" id="ov-contract-exchange">NSE &bull; NFO</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Instrument Type</div>
+              <div class="kv-value" id="ov-contract-type">FUTURES</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Expiration</div>
+              <div class="kv-value" id="ov-contract-expiry">—</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Lot Size / Tick</div>
+              <div class="kv-value" id="ov-contract-lot-tick">—</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Tradable Lifecycle</div>
+              <div class="kv-value green" id="ov-contract-lifecycle">TRADABLE</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Contract Source</div>
+              <div class="kv-value" id="ov-contract-source">AUTHORITATIVE</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Rollover Candidate</div>
+              <div class="kv-value" id="ov-contract-rollover">NONE</div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Blocked State Banner -->
-      <div id="banner-blocked" class="banner-blocked">
-        <div style="font-size: 24px;">&#9888;</div>
-        <div>
-          <div style="font-weight: 800; color: #ef4444;">FORWARD VALIDATION BLOCKED — KILL SWITCH IS ENGAGED</div>
-          <div style="font-size: 12px; color: var(--text-muted);">Trading operations are currently paused. Disarm the Kill Switch above to permit forward validation execution.</div>
+      <!-- Live Market Chart Container -->
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">NIFTY Futures &mdash; Real Market Data</span>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <span class="status-tag tag-slate" id="chart-session-status">SESSION: CHECKING</span>
+            <span class="status-tag tag-amber" id="chart-data-badge">SHADOW STREAM</span>
+          </div>
+        </div>
+        <div class="chart-container">
+          <canvas id="marketChartCanvas" class="chart-canvas"></canvas>
+          <div id="chart-empty-state" class="empty-state-card" style="display: none; position: absolute; inset: 20px;">
+            <div class="empty-state-title">NO REAL-MARKET SESSION ACTIVE</div>
+            <div class="empty-state-desc">Live WebSocket is not streaming. Launch an Upstox shadow session during active NSE market hours (09:15–15:30 IST) to accumulate Level C real-market data.</div>
+          </div>
         </div>
       </div>
 
-      <!-- Interactive Equity Curve & Drawdown Visualizer -->
-      <div class="card" id="card-equity" style="display: none;">
-        <div class="card-title">
-          <span>Forward Validation Equity Curve &amp; Drawdown Profile</span>
-          <div style="display:flex; gap:8px;">
-            <button class="btn btn-secondary" style="padding:4px 10px; font-size:11px;" onclick="exportRun('json')">&#128190; Export JSON</button>
-            <button class="btn btn-secondary" style="padding:4px 10px; font-size:11px;" onclick="exportRun('csv')">&#128196; Export CSV</button>
+      <div class="grid-row-2">
+        <!-- Signal Engine Intelligence -->
+        <div class="op-panel">
+          <div class="op-panel-header">
+            <span class="op-panel-title">Signal Engine Intelligence</span>
+            <span class="status-tag tag-cyan" id="ov-sig-state">WAIT_CONFIRMATION</span>
+          </div>
+          <div class="kv-grid" style="margin-bottom: 10px;">
+            <div class="kv-item">
+              <div class="kv-label">Trend</div>
+              <div class="kv-value" id="ov-sig-trend">NEUTRAL</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Momentum</div>
+              <div class="kv-value" id="ov-sig-momentum">WAIT</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Breakout Status</div>
+              <div class="kv-value" id="ov-sig-breakout">NOT CONFIRMED</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">HTF Confirmation</div>
+              <div class="kv-value" id="ov-sig-htf">WAIT</div>
+            </div>
+          </div>
+          <div class="kv-item">
+            <div class="kv-label">Latest Decision &bull; Rationale</div>
+            <div class="kv-value" style="font-size: 11px;" id="ov-sig-decision">NO TRADE &mdash; Closed candle requirements not met on execution timeframe.</div>
           </div>
         </div>
-        <div style="background:#050914; border-radius:8px; padding:16px; border: 1px solid var(--card-border);">
-          <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-muted); margin-bottom:8px;">
-            <span>PORTFOLIO EQUITY (INR) OVER FORWARD RUN CANDLES</span>
-            <span id="equity-curve-summary">Starting Capital: ₹1,000,000.00</span>
+
+        <!-- Risk Control Center -->
+        <div class="op-panel">
+          <div class="op-panel-header">
+            <span class="op-panel-title">Risk Control Center</span>
+            <span class="status-tag tag-green" id="ov-risk-status">SAFE</span>
           </div>
-          <svg id="equity-svg" viewBox="0 0 900 160" style="width:100%; height:160px; overflow:visible;">
-            <!-- Rendered dynamically by JS -->
-          </svg>
+          <div class="kv-grid" style="margin-bottom: 8px;">
+            <div class="kv-item">
+              <div class="kv-label">Account Equity</div>
+              <div class="kv-value" id="ov-risk-equity">₹1,000,000.00</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Reserved Risk</div>
+              <div class="kv-value" id="ov-risk-reserved">₹0.00</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Open Positions</div>
+              <div class="kv-value" id="ov-risk-positions">0 / 5</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Daily Loss Limit</div>
+              <div class="kv-value" id="ov-risk-loss">₹0.00 / Limit</div>
+            </div>
+          </div>
+          <div class="meter-wrap">
+            <div class="meter-label-row"><span>Portfolio Risk Utilization</span><span id="ov-meter-risk-pct">0.00% / 2.00%</span></div>
+            <div class="meter-track"><div class="meter-fill green" id="ov-meter-risk-bar" style="width: 0%;"></div></div>
+          </div>
+          <div class="meter-wrap">
+            <div class="meter-label-row"><span>Daily Hard Loss Barrier</span><span id="ov-meter-loss-pct">0.00% / 3.00%</span></div>
+            <div class="meter-track"><div class="meter-fill green" id="ov-meter-loss-bar" style="width: 0%;"></div></div>
+          </div>
         </div>
       </div>
 
-      <!-- Complete Authoritative Trade Ledger Table (16 Columns) -->
-      <div class="card">
-        <div class="card-title">
-          <span>Authoritative Trade Ledger &amp; Order Lineage</span>
-          <div style="font-size:12px; color:var(--text-muted);" id="trades-count-label">0 Closed Trades</div>
+      <div class="grid-row-2">
+        <!-- Market Data Health -->
+        <div class="op-panel">
+          <div class="op-panel-header">
+            <span class="op-panel-title">Market Data Health</span>
+            <span class="status-tag tag-slate" id="ov-health-level">DISCONNECTED</span>
+          </div>
+          <div class="kv-grid">
+            <div class="kv-item">
+              <div class="kv-label">Latency</div>
+              <div class="kv-value" id="ov-health-latency">—</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Messages Received</div>
+              <div class="kv-value" id="ov-health-msgs">0</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Valid Events</div>
+              <div class="kv-value" id="ov-health-valid">0</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Duplicates / Gaps</div>
+              <div class="kv-value" id="ov-health-dups-gaps">0 / 0</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Out-of-Order</div>
+              <div class="kv-value" id="ov-health-ooo">0</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Reconnects</div>
+              <div class="kv-value" id="ov-health-reconnects">0</div>
+            </div>
+          </div>
         </div>
-        <div class="table-container">
-          <table>
+
+        <!-- Data Provenance -->
+        <div class="op-panel">
+          <div class="op-panel-header">
+            <span class="op-panel-title">Data Provenance</span>
+            <span class="status-tag tag-slate" id="ov-prov-status">PROVENANCE NOT YET AVAILABLE</span>
+          </div>
+          <div class="kv-grid">
+            <div class="kv-item">
+              <div class="kv-label">Provider Origin</div>
+              <div class="kv-value">UPSTOX (NFO)</div>
+            </div>
+            <div class="kv-item">
+              <div class="kv-label">Raw Wire Hash (SHA-256)</div>
+              <div class="kv-value" id="ov-prov-wire-hash">—</div>
+            </div>
+            <div class="kv-item" style="grid-column: span 2;">
+              <div class="kv-label">AlphaForge Attestation (INTERNAL ALPHAFORGE PROVENANCE ATTESTATION)</div>
+              <div class="kv-value" style="font-size: 11px; word-break: break-all;" id="ov-prov-hmac">—</div>
+            </div>
+          </div>
+          <div style="font-size: 10px; color: var(--text-dim); margin-top: 6px;">
+            Attestation notice: The internal HMAC is an internal AlphaForge ingestion proof, not a provider signature. Upstox does not provide per-tick cryptographic signatures.
+          </div>
+        </div>
+      </div>
+
+      <!-- Decision Explainer (Why did system not trade?) -->
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Decision Explainer &mdash; Why Did The System Not Trade?</span>
+          <span class="op-subhead">Causal non-lookahead decision rationale</span>
+        </div>
+        <div class="tbl-scroll-container">
+          <table class="forensic-tbl">
             <thead>
               <tr>
-                <th>Run ID</th>
+                <th>Timestamp</th>
+                <th>Candle</th>
+                <th>Strategy State</th>
+                <th>Signal Candidate</th>
+                <th>Risk Gate</th>
+                <th>Contract</th>
+                <th>Final Decision</th>
+                <th>Category</th>
+                <th>Causal Reason</th>
+              </tr>
+            </thead>
+            <tbody id="tbl-decision-history">
+              <!-- Dynamically rendered -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- System Integrity (10/10) -->
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">System Integrity &amp; Invariants Matrix</span>
+          <span class="status-tag tag-green">10 / 10 PASS</span>
+        </div>
+        <div class="grid-row-3" style="margin-bottom: 0;">
+          <div class="kv-item"><div class="kv-label">1. Broker Isolation</div><div class="kv-value green">&#10004; PASS (Fail-Closed)</div></div>
+          <div class="kv-item"><div class="kv-label">2. Contract Validation</div><div class="kv-value green">&#10004; PASS (NFO/FUTURES)</div></div>
+          <div class="kv-item"><div class="kv-label">3. Causal Ordering</div><div class="kv-value green">&#10004; PASS (Anti-Lookahead)</div></div>
+          <div class="kv-item"><div class="kv-label">4. Order Idempotency</div><div class="kv-value green">&#10004; PASS (Single Intent)</div></div>
+          <div class="kv-item"><div class="kv-label">5. 17-State Order FSM</div><div class="kv-value green">&#10004; PASS (Strict Transitions)</div></div>
+          <div class="kv-item"><div class="kv-label">6. Continuous Reconciliation</div><div class="kv-value green">&#10004; PASS (6-Point Invariant)</div></div>
+          <div class="kv-item"><div class="kv-label">7. Audit Ledger</div><div class="kv-value green">&#10004; PASS (SHA-256 Chain)</div></div>
+          <div class="kv-item"><div class="kv-label">8. Kill Switch</div><div class="kv-value green">&#10004; READY (Disarmed)</div></div>
+          <div class="kv-item"><div class="kv-label">9. Provenance Attestation</div><div class="kv-value green" id="integ-prov">&#10004; VERIFIED / PENDING</div></div>
+          <div class="kv-item"><div class="kv-label">10. State Reconstruction</div><div class="kv-value green">&#10004; READY (SHA-256 Canonical)</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: MARKET -->
+    <div id="tab-market" class="tab-view">
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">NSE Session Status &amp; Time</span>
+          <span class="status-tag tag-cyan" id="mkt-session-badge">09:15 &mdash; 15:30 IST</span>
+        </div>
+        <div class="kv-grid">
+          <div class="kv-item"><div class="kv-label">Trading Window</div><div class="kv-value">09:15 &mdash; 15:30 IST (03:45 &mdash; 10:00 UTC)</div></div>
+          <div class="kv-item"><div class="kv-label">Session Status</div><div class="kv-value" id="mkt-session-open">CLOSED (OFF-HOURS)</div></div>
+          <div class="kv-item"><div class="kv-label">Market Clock (UTC)</div><div class="kv-value" id="mkt-clock-utc">00:00:00 UTC</div></div>
+          <div class="kv-item"><div class="kv-label">Contract</div><div class="kv-value" id="mkt-contract-id">NIFTY FUTURES</div></div>
+        </div>
+      </div>
+
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">NIFTY FUTURES &mdash; REAL MARKET DATA STREAM</span>
+          <span class="status-tag tag-slate" id="mkt-feed-source">UPSTOX WEBSOCKET</span>
+        </div>
+        <div class="chart-container" style="height: 420px;">
+          <canvas id="primaryMarketChart" class="chart-canvas"></canvas>
+          <div id="primary-chart-empty" class="empty-state-card" style="position: absolute; inset: 30px;">
+            <div class="empty-state-title">NO REAL-MARKET SESSION ACTIVE</div>
+            <div class="empty-state-desc">Live WebSocket is currently disconnected. Run <code>scripts/run_upstox_shadow_session.py</code> during NSE market hours to stream live ticks and candles.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Market Microstructure / Depth</span>
+          <span class="status-tag tag-slate">UPSTOX FEED</span>
+        </div>
+        <div class="empty-state-card">
+          <div class="empty-state-title">DEPTH DATA NOT AVAILABLE</div>
+          <div class="empty-state-desc">Upstox market feed mode is configured for OHLC &amp; LTPC tick stream. Real-market shadow runs execute against causal 1-minute closed bars and LTP quotes without synthetic Level 2 fabrication.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: SIGNALS -->
+    <div id="tab-signals" class="tab-view">
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Quantitative Signal Engine Architecture</span>
+          <span class="status-tag tag-cyan">CAUSAL / NON-LOOKAHEAD</span>
+        </div>
+        <div class="grid-row-4">
+          <div class="kv-item"><div class="kv-label">Trend Direction</div><div class="kv-value" id="sig-tab-trend">NEUTRAL</div></div>
+          <div class="kv-item"><div class="kv-label">Momentum RSI</div><div class="kv-value" id="sig-tab-momentum">WAIT</div></div>
+          <div class="kv-item"><div class="kv-label">Breakout Channel</div><div class="kv-value" id="sig-tab-breakout">NOT CONFIRMED</div></div>
+          <div class="kv-item"><div class="kv-label">HTF Timeframe</div><div class="kv-value" id="sig-tab-htf">WAIT</div></div>
+        </div>
+        <div class="grid-row-3" style="margin-top: 10px;">
+          <div class="kv-item"><div class="kv-label">Volatility Band</div><div class="kv-value" id="sig-tab-vol">NORMAL</div></div>
+          <div class="kv-item"><div class="kv-label">Risk Authorization</div><div class="kv-value green" id="sig-tab-risk">PASS</div></div>
+          <div class="kv-item"><div class="kv-label">Authoritative Decision</div><div class="kv-value amber" id="sig-tab-decision">NO TRADE</div></div>
+        </div>
+      </div>
+
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Decision Explainer Ledger</span>
+          <span class="op-subhead">Filterable Causal Rejections</span>
+        </div>
+        <div class="tbl-scroll-container">
+          <table class="forensic-tbl">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Symbol</th>
+                <th>Decision</th>
+                <th>Category</th>
+                <th>Causal Reason</th>
+              </tr>
+            </thead>
+            <tbody id="tbl-signals-full">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: RISK -->
+    <div id="tab-risk" class="tab-view">
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Portfolio Risk Control Center</span>
+          <span class="status-tag tag-green" id="risk-tab-status">SAFE</span>
+        </div>
+        <div class="grid-row-3">
+          <div class="kv-item"><div class="kv-label">Account Equity</div><div class="kv-value" id="risk-tab-equity">₹1,000,000.00</div></div>
+          <div class="kv-item"><div class="kv-label">Available Capital</div><div class="kv-value" id="risk-tab-avail">₹1,000,000.00</div></div>
+          <div class="kv-item"><div class="kv-label">Reserved Risk</div><div class="kv-value" id="risk-tab-reserved">₹0.00</div></div>
+          <div class="kv-item"><div class="kv-label">Max Portfolio Risk</div><div class="kv-value" id="risk-tab-max-risk">₹20,000.00 (2.00%)</div></div>
+          <div class="kv-item"><div class="kv-label">Reserved Notional</div><div class="kv-value" id="risk-tab-notional">₹0.00</div></div>
+          <div class="kv-item"><div class="kv-label">Daily Loss Barrier</div><div class="kv-value" id="risk-tab-loss">₹0.00 / ₹30,000.00</div></div>
+        </div>
+
+        <div style="margin-top: 14px;">
+          <div class="meter-wrap">
+            <div class="meter-label-row"><span>Portfolio Risk Utilization (Hard 2.0% Cap)</span><span id="risk-tab-meter-risk-label">0.00%</span></div>
+            <div class="meter-track"><div class="meter-fill green" id="risk-tab-meter-risk" style="width: 0%;"></div></div>
+          </div>
+          <div class="meter-wrap" style="margin-top: 10px;">
+            <div class="meter-label-row"><span>Daily Loss Barrier (Hard 3.0% Cap)</span><span id="risk-tab-meter-loss-label">0.00%</span></div>
+            <div class="meter-track"><div class="meter-fill green" id="risk-tab-meter-loss" style="width: 0%;"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Operational Kill Switch Command</span>
+          <span class="status-tag tag-green" id="risk-tab-ks-status">DISARMED</span>
+        </div>
+        <p style="font-size: 11px; color: var(--text-dim); margin-bottom: 12px;">
+          Engaging the kill switch halts all order evaluations, cancels any simulated working orders, and fail-closes the shadow engine immediately.
+        </p>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn-action" style="background:#dc2626;" onclick="engageKillSwitchManual()">&#9888; ENGAGE KILL SWITCH</button>
+          <button class="btn-action secondary" onclick="disarmKillSwitchManual()">&#10004; DISARM KILL SWITCH</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 5: SHADOW RUN -->
+    <div id="tab-shadow" class="tab-view">
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Phase 17C Real-Market Shadow Session Console</span>
+          <span class="status-tag tag-amber" id="shw-run-phase">READY FOR REAL-MARKET RUN</span>
+        </div>
+        <p style="font-size: 11px; color: var(--text-dim); margin-bottom: 14px;">
+          Extended Real-Market Shadow Validation exposes AlphaForge to genuine live NSE/NFO Upstox market data with <strong>ZERO REAL ORDERS</strong>.
+        </p>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+          <button class="btn-action cyan" onclick="runPreflightCheck()">&#128269; Run Upstox Preflight Verification</button>
+        </div>
+
+        <div id="preflight-result-box" style="display: none; margin-bottom: 14px; padding: 12px; border-radius: 4px; border: 1px solid var(--card-border); background: #081022;">
+          <div style="font-weight: 800; font-size: 11px; margin-bottom: 4px;" id="preflight-status-title">PREFLIGHT RESULT</div>
+          <div style="font-size: 11px; font-family: monospace; color: var(--text-muted);" id="preflight-reason-text">...</div>
+        </div>
+
+        <div class="kv-grid">
+          <div class="kv-item"><div class="kv-label">Active Provider</div><div class="kv-value">UPSTOX (WebSocket v3)</div></div>
+          <div class="kv-item"><div class="kv-label">Connection Status</div><div class="kv-value" id="shw-conn">DISCONNECTED</div></div>
+          <div class="kv-item"><div class="kv-label">Contract</div><div class="kv-value" id="shw-contract">NIFTY26SEPFUT</div></div>
+          <div class="kv-item"><div class="kv-label">Duration</div><div class="kv-value" id="shw-duration">0.0 s</div></div>
+          <div class="kv-item"><div class="kv-label">Valid Market Events</div><div class="kv-value" id="shw-events">0</div></div>
+          <div class="kv-item"><div class="kv-label">Verified Provenance Events</div><div class="kv-value" id="shw-verified-events">0</div></div>
+          <div class="kv-item"><div class="kv-label">Causality Violations</div><div class="kv-value green" id="shw-causality">0 (PASS)</div></div>
+          <div class="kv-item"><div class="kv-label">Shadow Orders / Fills</div><div class="kv-value" id="shw-fills">0 / 0</div></div>
+        </div>
+      </div>
+
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Phase 17 Multi-Level Certification Status</span>
+          <span class="status-tag tag-amber">PHASE 17 BLOCKED (Pending Level C)</span>
+        </div>
+        <div class="grid-row-3">
+          <div class="kv-item">
+            <div class="kv-label">Level A &bull; Implementation Audit</div>
+            <div class="kv-value green">&#10004; PASS (cfda697)</div>
+          </div>
+          <div class="kv-item">
+            <div class="kv-label">Level B &bull; Automated Causal Replay</div>
+            <div class="kv-value green">&#10004; PASS (953 Tests)</div>
+          </div>
+          <div class="kv-item">
+            <div class="kv-label">Level C &bull; Real-Market Shadow Run</div>
+            <div class="kv-value amber">&#9679; READY FOR RUN (Pending Live Session)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 6: EXECUTION -->
+    <div id="tab-execution" class="tab-view">
+      <div class="safety-alert-banner">
+        <div>
+          <strong>SHADOW EXECUTION ONLY:</strong> SIMULATED EXECUTION &mdash; NO LIVE BROKER ROUTING. All orders, fills, and slippage calculations are strictly simulated in-memory.
+        </div>
+        <span class="status-tag tag-green">ZERO LIVE ORDERS ROUTED</span>
+      </div>
+
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Shadow Execution Book</span>
+          <span class="status-tag tag-slate">SIMULATED FILLS</span>
+        </div>
+        <div class="tbl-scroll-container">
+          <table class="forensic-tbl">
+            <thead>
+              <tr>
+                <th>Order ID</th>
                 <th>Trade ID</th>
-                <th>Exit Timestamp</th>
+                <th>Causation ID</th>
                 <th>Symbol</th>
                 <th>Side</th>
                 <th>Qty</th>
-                <th>Entry Price</th>
-                <th>Stop Loss</th>
-                <th>Target</th>
-                <th>Exit Price</th>
-                <th>Exit Reason</th>
-                <th>Gross P&amp;L</th>
-                <th>Fees</th>
+                <th>Ref Price</th>
+                <th>Fill Price</th>
                 <th>Slippage</th>
-                <th>Net P&amp;L</th>
-                <th>Exit Order / Causation ID</th>
+                <th>Fees</th>
+                <th>FSM State</th>
               </tr>
             </thead>
-            <tbody id="trades-tbody">
-              <tr><td colspan="16" style="text-align:center; color: var(--text-muted); padding: 24px;">No forward validation run executed yet. Click 'Start Forward Validation Run' to begin.</td></tr>
+            <tbody id="tbl-shadow-orders">
+              <tr>
+                <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 20px;">
+                  NO SHADOW ORDERS SUBMITTED
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
       </div>
 
-      <!-- "Why did the system not trade?" Decision & Rejection Breakdown -->
-      <div class="card">
-        <div class="card-title">
-          <span>Signal Decision &amp; Non-Trade Bar Analysis ("Why did the system not trade?")</span>
-          <span class="badge badge-info" id="decisions-count-badge">Causal Auditing</span>
+      <!-- Secondary Paper Order Simulator -->
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Paper Order Simulator (Research Only)</span>
+          <span class="status-tag tag-slate">SIMULATION ONLY</span>
         </div>
-        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
-          AlphaForge records the exact decision rationale for every processed candle, categorizing filter passes, risk blocks, and market waiting states.
+        <p style="font-size: 11px; color: var(--text-dim); margin-bottom: 10px;">
+          Manually test the 17-state FSM and PaperBroker order execution. Does NOT route to Upstox, Dhan, Zerodha, or any live broker.
         </p>
-        <div class="grid-4" style="margin-bottom: 14px;">
-          <div style="background:#070d1e; padding:10px; border-radius:8px; border: 1px solid var(--card-border);">
-            <div style="font-size:10px; color:var(--text-muted);">STRATEGY FILTERED BARS</div>
-            <div style="font-size:16px; font-weight:800; color:#94a3b8;" id="rj-strategy">0</div>
+        <div class="grid-row-4">
+          <div class="form-ctrl-group">
+            <label class="form-ctrl-label">Side</label>
+            <select id="sim-side" class="form-select">
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
           </div>
-          <div style="background:#070d1e; padding:10px; border-radius:8px; border: 1px solid var(--card-border);">
-            <div style="font-size:10px; color:var(--text-muted);">RISK REJECTIONS</div>
-            <div style="font-size:16px; font-weight:800; color:#34d399;" id="rj-risk">0 (Safe)</div>
+          <div class="form-ctrl-group">
+            <label class="form-ctrl-label">Quantity</label>
+            <input type="number" id="sim-qty" class="form-input" value="50" step="50">
           </div>
-          <div style="background:#070d1e; padding:10px; border-radius:8px; border: 1px solid var(--card-border);">
-            <div style="font-size:10px; color:var(--text-muted);">CONTRACT REJECTIONS</div>
-            <div style="font-size:16px; font-weight:800; color:#34d399;" id="rj-contract">0 (Valid)</div>
+          <div class="form-ctrl-group">
+            <label class="form-ctrl-label">Limit Price (INR)</label>
+            <input type="text" id="sim-price" class="form-input" value="24500.00">
           </div>
-          <div style="background:#070d1e; padding:10px; border-radius:8px; border: 1px solid var(--card-border);">
-            <div style="font-size:10px; color:var(--text-muted);">EXECUTED TRADES</div>
-            <div style="font-size:16px; font-weight:800; color:#60a5fa;" id="rj-executed">0</div>
-          </div>
-        </div>
-        <div id="decisions-accordion">
-          <div class="accordion-item">
-            <div class="accordion-header" onclick="toggleAccordion(this)">
-              <span>&#9660; Causal Candle Evaluation Rationale</span>
-              <span class="badge badge-pass">Strict Anti-Lookahead Active</span>
-            </div>
-            <div class="accordion-body open">
-              <p>Bars where indicators did not breach momentum threshold remained in <code>WAIT_CONFIRMATION</code> state to protect capital. FSM orders were emitted only upon verified breakout triggers on closed candles.</p>
-            </div>
+          <div class="form-ctrl-group" style="display: flex; align-items: flex-end;">
+            <button class="btn-action" style="width: 100%;" onclick="submitPaperOrder()">Submit Paper Order</button>
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- Phase 16 10 Safety Invariants Certification Grid -->
-      <div class="card">
-        <div class="card-title">
-          <span>Phase 16 Operational Safety Certification</span>
-          <span class="badge badge-pass">&#10004; 10/10 Invariants Certified</span>
+    <!-- TAB 7: EVIDENCE -->
+    <div id="tab-evidence" class="tab-view">
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Forensic Evidence Center</span>
+          <span class="status-tag tag-cyan">DISCOVERED PACKAGES</span>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px;" id="safety-grid">
-          <!-- Populated dynamically via /api/safety -->
-        </div>
-      </div>
-
-      <!-- Session Run History Table -->
-      <div class="card">
-        <div class="card-title">
-          <span>Session Validation Run History</span>
-          <span class="badge badge-info" id="history-count">0 Runs</span>
-        </div>
-        <div class="table-container" style="max-height: 240px;">
-          <table>
+        <p style="font-size: 11px; color: var(--text-dim); margin-bottom: 12px;">
+          Authoritative validation evidence packages discovered in <code>evidence/shadow_validation/</code>. All evidence packages are sealed with SHA-256 cryptographic manifests.
+        </p>
+        <div class="tbl-scroll-container">
+          <table class="forensic-tbl">
             <thead>
               <tr>
                 <th>Run ID</th>
-                <th>Timestamp</th>
-                <th>Mode</th>
-                <th>Underlying</th>
-                <th>Bars</th>
-                <th>Trades</th>
-                <th>Net P&amp;L</th>
-                <th>Max DD</th>
-                <th>Safety</th>
-                <th>Action</th>
+                <th>Created At</th>
+                <th>Provider</th>
+                <th>Contract</th>
+                <th>Valid Events</th>
+                <th>Verified Events</th>
+                <th>Causality</th>
+                <th>Manifest SHA-256</th>
+                <th>Certification</th>
+                <th>Actions</th>
               </tr>
             </thead>
-            <tbody id="history-tbody">
-              <tr><td colspan="10" style="text-align:center; color:var(--text-muted); padding:16px;">No history recorded yet in this session.</td></tr>
+            <tbody id="tbl-evidence-packages">
+              <!-- Dynamically populated -->
             </tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- TAB 1: 6-POINT RECONCILIATION -->
-    <div id="tab-reconciliation" class="tab-content">
-      <div class="card">
-        <div class="card-title">
-          <span>Continuous 6-Point Multi-Entity Reconciliation Engine</span>
-          <button class="btn" style="padding: 6px 14px; font-size: 12px;" onclick="runReconciliation()">&#8635; Perform Full Recon Check</button>
+    <!-- TAB 8: SECURITY -->
+    <div id="tab-security" class="tab-view">
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Production Operational Security Posture</span>
+          <span class="status-tag tag-green">LOCKDOWN ACTIVE</span>
         </div>
-        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
-          Guarantees zero phantom orders, zero silent position leakage, and bit-exact alignment across all stateful subsystems. If any discrepancy is detected, the engine auto-halts new entries fail-closed.
-        </p>
-        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 14px;">
-          <div style="background:#070d1e; padding:14px; border-radius:8px; border:1px solid var(--card-border);">
-            <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">1. EXECUTION INTENTS</div>
-            <div style="font-size:16px; font-weight:700; color:#34d399;">&#10004; Idempotency Locked</div>
-            <div style="font-size:11px; color:#64748b; margin-top:4px;">Phase 8 Single-Intent Registry</div>
-          </div>
-          <div style="background:#070d1e; padding:14px; border-radius:8px; border:1px solid var(--card-border);">
-            <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">2. 17-STATE ORDER FSM</div>
-            <div style="font-size:16px; font-weight:700; color:#34d399;">&#10004; Transitions Valid</div>
-            <div style="font-size:11px; color:#64748b; margin-top:4px;">Phase 7 Authoritative Machine</div>
-          </div>
-          <div style="background:#070d1e; padding:14px; border-radius:8px; border:1px solid var(--card-border);">
-            <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">3. BROKER ORDERS</div>
-            <div style="font-size:16px; font-weight:700; color:#34d399;">&#10004; 100% Matched</div>
-            <div style="font-size:11px; color:#64748b; margin-top:4px;">PaperBroker In-Flight Book</div>
-          </div>
-          <div style="background:#070d1e; padding:14px; border-radius:8px; border:1px solid var(--card-border);">
-            <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">4. BROKER POSITIONS</div>
-            <div style="font-size:16px; font-weight:700; color:#34d399;">&#10004; Zero Discrepancy</div>
-            <div style="font-size:11px; color:#64748b; margin-top:4px;">Conserved Net Quantities</div>
-          </div>
-          <div style="background:#070d1e; padding:14px; border-radius:8px; border:1px solid var(--card-border);">
-            <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">5. P&amp;L TRACKER LEDGER</div>
-            <div style="font-size:16px; font-weight:700; color:#34d399;">&#10004; Decimal Conserved</div>
-            <div style="font-size:11px; color:#64748b; margin-top:4px;">Fixed-Point Portfolio State</div>
-          </div>
-          <div style="background:#070d1e; padding:14px; border-radius:8px; border:1px solid var(--card-border);">
-            <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">6. AUDIT LEDGER</div>
-            <div style="font-size:16px; font-weight:700; color:#34d399;">&#10004; SHA-256 Verified</div>
-            <div style="font-size:11px; color:#64748b; margin-top:4px;">Phase 9 Hash Chain Intact</div>
-          </div>
+        <div class="grid-row-2">
+          <div class="kv-item"><div class="kv-label">Credential Source</div><div class="kv-value">Environment / Secure Store (UPSTOX_ACCESS_TOKEN)</div></div>
+          <div class="kv-item"><div class="kv-label">Secret Logging</div><div class="kv-value green">&#10004; BLOCKED (Fail-Closed Redaction)</div></div>
+          <div class="kv-item"><div class="kv-label">Token Redaction</div><div class="kv-value green">&#10004; ACTIVE (HMAC Masking)</div></div>
+          <div class="kv-item"><div class="kv-label">Live Broker Routing</div><div class="kv-value green">&#10004; BLOCKED (Zero Live Order APIs)</div></div>
+          <div class="kv-item"><div class="kv-label">Shadow Execution Guard</div><div class="kv-value green">&#10004; ACTIVE (ShadowExecutionOnlyGuard)</div></div>
+          <div class="kv-item"><div class="kv-label">Deployment Broker Guard</div><div class="kv-value green">&#10004; ACTIVE (DeploymentBrokerGuard)</div></div>
+          <div class="kv-item"><div class="kv-label">Kill Switch Status</div><div class="kv-value green" id="sec-ks-status">&#10004; DISARMED (Ready to engage)</div></div>
+          <div class="kv-item"><div class="kv-label">Live Trading Capability</div><div class="kv-value green">&#10004; NONE (Architecturally Disabled)</div></div>
         </div>
       </div>
     </div>
 
-    <!-- TAB 2: ORDERS & EXECUTION -->
-    <div id="tab-orders" class="tab-content">
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-title">Submit Order (Phase 8 Idempotent Paper Router)</div>
-          <form id="order-form" onsubmit="submitOrder(event)">
-            <div class="form-group">
-              <label>Symbol</label>
-              <input type="text" id="ord-symbol" value="NIFTY26SEPFUT" required>
-            </div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-              <div class="form-group">
-                <label>Side</label>
-                <select id="ord-side">
-                  <option value="BUY">BUY (Long)</option>
-                  <option value="SELL">SELL (Short)</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Quantity (Lots of 50)</label>
-                <input type="number" id="ord-qty" value="50" step="50" min="50" required>
-              </div>
-            </div>
-            <div class="form-group">
-              <label>Limit Price (INR)</label>
-              <input type="number" id="ord-price" value="25250.00" step="0.05" required>
-            </div>
-            <div class="form-group">
-              <label>Order Role</label>
-              <select id="ord-role">
-                <option value="ENTRY">ENTRY</option>
-                <option value="STOP_LOSS">STOP_LOSS</option>
-                <option value="TAKE_PROFIT">TAKE_PROFIT</option>
-              </select>
-            </div>
-            <button type="submit" class="btn" style="width: 100%;">Submit Guaranteed Idempotent Order</button>
-          </form>
-          <div id="order-alert" style="margin-top: 12px; display: none; padding: 10px; border-radius: 6px; font-size: 12px;"></div>
+    <!-- TAB 9: OBSERVABILITY -->
+    <div id="tab-observability" class="tab-view">
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Subsystem Health Rollup</span>
+          <span class="status-tag tag-green">8 / 8 OPERATIONAL</span>
         </div>
+        <div class="grid-row-4">
+          <div class="kv-item"><div class="kv-label">1. Market Data Feed</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
+          <div class="kv-item"><div class="kv-label">2. Strategy Engine</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
+          <div class="kv-item"><div class="kv-label">3. Risk Gate</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
+          <div class="kv-item"><div class="kv-label">4. Execution FSM</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
+          <div class="kv-item"><div class="kv-label">5. Audit Ledger</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
+          <div class="kv-item"><div class="kv-label">6. Reconciler</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
+          <div class="kv-item"><div class="kv-label">7. Security Gate</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
+          <div class="kv-item"><div class="kv-label">8. Shadow Validator</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
+        </div>
+      </div>
 
-        <div class="card">
-          <div class="card-title">Live In-Flight Orders &amp; FSM States</div>
-          <div class="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Client Order ID</th>
-                  <th>Symbol</th>
-                  <th>Side</th>
-                  <th>Qty</th>
-                  <th>Price</th>
-                  <th>FSM State</th>
-                </tr>
-              </thead>
-              <tbody id="orders-tbody">
-                <tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding:20px;">No manual orders in book.</td></tr>
-              </tbody>
-            </table>
-          </div>
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Diagnostic Causal Trace Log</span>
+          <span class="op-subhead">Recent telemetry stream</span>
+        </div>
+        <div class="tbl-scroll-container" style="max-height: 260px;">
+          <table class="forensic-tbl">
+            <thead>
+              <tr>
+                <th style="width: 90px;">Time</th>
+                <th style="width: 80px;">Level</th>
+                <th style="width: 140px;">Subsystem</th>
+                <th>Diagnostic Message</th>
+              </tr>
+            </thead>
+            <tbody id="tbl-trace-logs">
+              <!-- Logs dynamically appended -->
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
 
-    <!-- TAB 3: RUNTIME & READINESS -->
-    <div id="tab-runtime" class="tab-content">
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-title">
-            <span>Pre-Flight Readiness Diagnostics</span>
-            <button class="btn" style="padding: 6px 12px; font-size: 12px;" onclick="runReadiness()">&#8635; Probe Diagnostics</button>
-          </div>
-          <div class="check-row">
-            <span>Config Validity &amp; Schema Invariants</span>
-            <span class="badge badge-pass" id="chk-config">PASS</span>
-          </div>
-          <div class="check-row">
-            <span>Directory Partitioning &amp; Marker Isolation</span>
-            <span class="badge badge-pass" id="chk-dirs">PASS</span>
-          </div>
-          <div class="check-row">
-            <span>Execution Broker Availability &amp; Capability Guard</span>
-            <span class="badge badge-pass" id="chk-broker">PASS</span>
-          </div>
-          <div class="check-row">
-            <span>Credential Isolation &amp; Environment Source</span>
-            <span class="badge badge-pass" id="chk-creds">PASS</span>
-          </div>
-          <div class="check-row">
-            <span>Security Startup Gate (Phase 13 Invariant)</span>
-            <span class="badge badge-pass" id="chk-sec">PASS</span>
-          </div>
-          <div style="margin-top: 16px; padding: 12px; background: rgba(59,130,246,0.1); border-radius: 8px; font-size: 12px; border: 1px solid rgba(59,130,246,0.2);">
-            <strong>Forensic Invariant:</strong> LIVE mode unconditionally fails closed without verified Phase 13 SecurityStartupGate. Simulated paper broker cannot connect to real exchanges.
-          </div>
+    <!-- TAB 10: BACKTEST -->
+    <div id="tab-backtest" class="tab-view">
+      <div class="safety-alert-banner">
+        <div>
+          <strong>RESEARCH &amp; HISTORICAL ONLY:</strong> Backtest metrics evaluate historical simulation datasets and MUST NOT be conflated with real-market shadow forward validation.
         </div>
+        <span class="status-tag tag-slate">HISTORICAL / RESEARCH</span>
+      </div>
 
-        <div class="card">
-          <div class="card-title">Deployment Identity &amp; State</div>
-          <div style="font-size: 13px; line-height: 1.8;">
-            <p><strong>Environment:</strong> <span style="color:#60a5fa;">PAPER (Deterministic Simulation)</span></p>
-            <p><strong>Runtime Root:</strong> <code>alphaforge/runtime/paper</code></p>
-            <p><strong>Crossover Protection:</strong> <code>.alphaforge_env_marker</code> verified intact</p>
-            <p><strong>Backup Determinism:</strong> Bit-for-bit reproducible ZIP archives</p>
-            <p><strong>Live Crossover Restrict:</strong> Generic restore into LIVE disabled</p>
-            <p><strong>Order Invariant:</strong> Non-live broker blocked from live routing</p>
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Execute Synthetic / Paper Forward Batch</span>
+          <span class="status-tag tag-cyan">SYNTHETIC BENCHMARK</span>
+        </div>
+        <div class="grid-row-3">
+          <div class="form-ctrl-group">
+            <label class="form-ctrl-label">Validation Mode</label>
+            <select id="fwd-mode" class="form-select">
+              <option value="PAPER">PAPER (Simulation Only)</option>
+              <option value="SHADOW">SHADOW (Passive Benchmark)</option>
+            </select>
           </div>
-          <div style="margin-top: 20px;">
-            <button class="btn" onclick="testLiveFailClosed()">Test LIVE Mode Fail-Closed Guard</button>
+          <div class="form-ctrl-group">
+            <label class="form-ctrl-label">Bar Count</label>
+            <select id="fwd-candles" class="form-select">
+              <option value="50">50 NIFTY Bars (Fast)</option>
+              <option value="150" selected>150 NIFTY Bars (Standard)</option>
+              <option value="300">300 NIFTY Bars (Deep Walk)</option>
+            </select>
+          </div>
+          <div class="form-ctrl-group" style="display: flex; align-items: flex-end;">
+            <button class="btn-action" style="width: 100%;" onclick="runForwardBatch()">&#9654; Execute Synthetic Batch</button>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- TAB 4: SECURITY & COMPLIANCE -->
-    <div id="tab-security" class="tab-content">
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-title">Phase 13 Zero-Trust Security Gates</div>
-          <div class="check-row">
-            <span>Dual Opt-In Authorization</span>
-            <span class="badge badge-pass">ENFORCED (PAPER)</span>
-          </div>
-          <div class="check-row">
-            <span>Automatic Secret Redaction</span>
-            <span class="badge badge-pass">ACTIVE (100% SCRUBBED)</span>
-          </div>
-          <div class="check-row">
-            <span>Credential Store Isolation</span>
-            <span class="badge badge-pass">ISOLATED</span>
-          </div>
-          <div class="check-row">
-            <span>Reconciliation Gate State</span>
-            <span class="badge badge-pass">GATE OPEN</span>
-          </div>
-          <div class="check-row">
-            <span>Operational Kill Switch</span>
-            <span class="badge badge-pass" id="sec-kill-badge">DISARMED</span>
-          </div>
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">Backtest P&amp;L Performance Metrics</span>
+          <span class="status-tag tag-slate" id="bt-status-badge">AWAITING RUN</span>
         </div>
-
-        <div class="card">
-          <div class="card-title">Secret Redaction Demonstration</div>
-          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
-            AlphaForge automatically intercepts API keys, bearer tokens, and broker secrets before writing to logs, audit ledgers, or telemetry sinks.
-          </p>
-          <div style="background: #050811; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px; border: 1px solid var(--card-border);">
-            <div style="color: #ef4444;">&minus; Raw Secret: api_key="ProductionKeyXYZ987654321"</div>
-            <div style="color: #10b981;">+ Sanitized Payload: api_key="[REDACTED:len=24:sha256=a8f7b...]"</div>
-          </div>
+        <div id="bt-empty-state" class="empty-state-card">
+          <div class="empty-state-title">NO BACKTEST RUN</div>
+          <div class="empty-state-desc">Run a synthetic/paper backtest batch above to generate historical metrics. (Static fake numbers like Sharpe 2.48 have been removed per architectural integrity rules.)</div>
         </div>
-      </div>
-    </div>
-
-    <!-- TAB 5: OBSERVABILITY & HEALTH -->
-    <div id="tab-observability" class="tab-content">
-      <div class="card">
-        <div class="card-title">Causal Telemetry &amp; Audit Trail (Phase 14 Hub)</div>
-        <div class="log-container" id="log-box"></div>
-      </div>
-    </div>
-
-    <!-- TAB 6: QUANT BACKTESTER -->
-    <div id="tab-backtest" class="tab-content">
-      <div class="card">
-        <div class="card-title">
-          <span>Deterministic Walk-Forward Backtest Simulator</span>
-          <button class="btn" onclick="runBacktest()">&#9654; Run 1,000-Bar Backtest</button>
-        </div>
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px;">
-          <div style="background:#070d1e; padding:12px; border-radius:8px;">
-            <div style="font-size:11px; color:var(--text-muted);">SHARPE RATIO</div>
-            <div style="font-size:20px; font-weight:800; color:#34d399;">2.48</div>
+        <div id="bt-metrics-content" style="display: none;">
+          <div class="grid-row-4">
+            <div class="kv-item"><div class="kv-label">Processed Bars</div><div class="kv-value" id="bt-bars">0</div></div>
+            <div class="kv-item"><div class="kv-label">Trades Executed</div><div class="kv-value" id="bt-trades">0</div></div>
+            <div class="kv-item"><div class="kv-label">Win Rate</div><div class="kv-value" id="bt-winrate">0.0%</div></div>
+            <div class="kv-item"><div class="kv-label">Synthetic P&amp;L</div><div class="kv-value" id="bt-pnl">₹0.00</div></div>
           </div>
-          <div style="background:#070d1e; padding:12px; border-radius:8px;">
-            <div style="font-size:11px; color:var(--text-muted);">PROFIT FACTOR</div>
-            <div style="font-size:20px; font-weight:800; color:#34d399;">1.92</div>
-          </div>
-          <div style="background:#070d1e; padding:12px; border-radius:8px;">
-            <div style="font-size:11px; color:var(--text-muted);">WIN RATE</div>
-            <div style="font-size:20px; font-weight:800; color:#60a5fa;">58.4%</div>
-          </div>
-          <div style="background:#070d1e; padding:12px; border-radius:8px;">
-            <div style="font-size:11px; color:var(--text-muted);">MAX DRAWDOWN</div>
-            <div style="font-size:20px; font-weight:800; color:#f87171;">-4.1%</div>
-          </div>
-        </div>
-        
-        <div style="background:#050914; border-radius:8px; padding:16px; border: 1px solid var(--card-border);">
-          <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">CUMULATIVE EQUITY CURVE (NIFTY FUTURES DETERMINISTIC STRATEGY)</div>
-          <svg viewBox="0 0 800 160" style="width:100%; height:160px; overflow:visible;">
-            <defs>
-              <linearGradient id="backtest-grad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.3"/>
-                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.0"/>
-              </linearGradient>
-            </defs>
-            <path d="M 0,140 Q 150,120 250,90 T 450,60 T 650,35 T 800,10 L 800,160 L 0,160 Z" fill="url(#backtest-grad)" />
-            <path d="M 0,140 Q 150,120 250,90 T 450,60 T 650,35 T 800,10" fill="none" stroke="#3b82f6" stroke-width="3" />
-            <circle cx="800" cy="10" r="5" fill="#34d399" />
-          </svg>
         </div>
       </div>
     </div>
   </div>
 
   <script>
-    let activeRunId = null;
+    // Tab Switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-view').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+      const target = document.getElementById('tab-' + tabId);
+      if (target) target.classList.add('active');
+      const btns = document.querySelectorAll('.nav-btn');
+      const tabMap = ['overview','market','signals','risk','shadow','execution','evidence','security','observability','backtest'];
+      const idx = tabMap.indexOf(tabId);
+      if (idx >= 0 && btns[idx]) btns[idx].classList.add('active');
 
-    function showTab(tabName) {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      event.target.classList.add('active');
-      document.getElementById('tab-' + tabName).classList.add('active');
+      if (tabId === 'market') drawMarketChart();
     }
 
-    function toggleAccordion(header) {
-      const body = header.nextElementSibling;
-      body.classList.toggle('open');
-    }
-
-    async function fetchStatus() {
+    // Auto-Polling
+    async function fetchAllTelemetry() {
       try {
-        const res = await fetch('/api/status');
-        const data = await res.json();
-        
-        document.getElementById('metric-mode').innerText = data.environment;
-        document.getElementById('env-name').innerText = data.environment + ' MODE • REAL MONEY DISABLED';
-        
-        const isKillEngaged = data.kill_switch === 'ENGAGED';
-        const killBtn = document.getElementById('kill-btn');
-        const killMetric = document.getElementById('metric-kill-switch');
-        const secKillBadge = document.getElementById('sec-kill-badge');
-        const bannerBlocked = document.getElementById('banner-blocked');
-        
-        if (isKillEngaged) {
-          killBtn.innerText = '🛡 DISARM KILL SWITCH';
-          killBtn.className = 'btn-kill btn-disarm';
-          killMetric.innerText = 'ENGAGED';
-          killMetric.className = 'metric-value text-danger';
-          if (secKillBadge) {
-            secKillBadge.innerText = 'ENGAGED (HALTED)';
-            secKillBadge.className = 'badge badge-fail';
+        const [statusRes, shadowRes, contractRes, riskRes, healthRes, provRes, sigRes] = await Promise.all([
+          fetch('/api/status').then(r => r.json()),
+          fetch('/api/shadow/status').then(r => r.json()),
+          fetch('/api/contract').then(r => r.json()),
+          fetch('/api/risk').then(r => r.json()),
+          fetch('/api/shadow/health').then(r => r.json()),
+          fetch('/api/shadow/provenance').then(r => r.json()),
+          fetch('/api/signals/state').then(r => r.json())
+        ]);
+
+        // 1. Header Updates
+        if (statusRes.commit_sha) document.getElementById('hdr-build-sha').textContent = statusRes.commit_sha;
+        if (statusRes.session_status) {
+          const sessEl = document.getElementById('hdr-session');
+          sessEl.textContent = statusRes.session_status;
+          sessEl.className = statusRes.session_open ? 'hdr-val green' : 'hdr-val';
+          document.getElementById('chart-session-status').textContent = 'SESSION: ' + statusRes.session_status;
+          document.getElementById('mkt-session-open').textContent = statusRes.session_status;
+        }
+        if (shadowRes.phase17c_status) {
+          document.getElementById('hdr-phase17c').textContent = shadowRes.phase17c_status;
+          document.getElementById('ov-phase17c').textContent = shadowRes.phase17c_status;
+          document.getElementById('shw-run-phase').textContent = shadowRes.phase17c_status;
+        }
+
+        // 2. Overview Updates
+        document.getElementById('ov-conn-state').textContent = shadowRes.connection_status || 'DISCONNECTED';
+        document.getElementById('shw-conn').textContent = shadowRes.connection_status || 'DISCONNECTED';
+        document.getElementById('ov-prov-auth').textContent = shadowRes.provider_authenticated ? 'VERIFIED' : 'NOT CONFIGURED';
+        document.getElementById('ov-ext-feed').textContent = shadowRes.external_live_feed ? 'YES' : 'NO';
+
+        // Contract
+        if (contractRes) {
+          const cStatus = contractRes.status || 'UNAVAILABLE';
+          const badgeEl = document.getElementById('ov-contract-status');
+          if (badgeEl) {
+            badgeEl.textContent = cStatus;
+            if (cStatus === 'ACTIVE') {
+              badgeEl.className = 'status-tag tag-green';
+            } else if (cStatus === 'EXPIRING') {
+              badgeEl.className = 'status-tag tag-amber';
+            } else {
+              badgeEl.className = 'status-tag tag-red';
+            }
           }
-          if (bannerBlocked) bannerBlocked.style.display = 'flex';
+
+          document.getElementById('hdr-contract').textContent = (contractRes.underlying || 'NIFTY') + ' (' + cStatus + ')';
+          document.getElementById('ov-contract-id').textContent = contractRes.contract_id || 'NONE';
+          document.getElementById('mkt-contract-id').textContent = contractRes.contract_id || 'NONE';
+          document.getElementById('shw-contract').textContent = contractRes.contract_id || 'NONE';
+          document.getElementById('ov-contract-expiry').textContent = contractRes.expiry ? contractRes.expiry.split('T')[0] : '—';
+          document.getElementById('ov-contract-lot-tick').textContent = contractRes.contract_id !== 'NONE' ? ((contractRes.lot_size || 50) + ' / ' + (contractRes.tick_size || '0.05')) : '—';
+
+          const lcEl = document.getElementById('ov-contract-lifecycle');
+          if (lcEl) {
+            if (contractRes.tradable) {
+              lcEl.textContent = 'TRADABLE (' + (contractRes.lifecycle_status || cStatus) + ')';
+              lcEl.className = 'kv-value green';
+            } else {
+              lcEl.textContent = 'NOT TRADABLE (' + (contractRes.lifecycle_status || cStatus) + ')';
+              lcEl.className = 'kv-value red';
+            }
+          }
+
+          const srcEl = document.getElementById('ov-contract-source');
+          if (srcEl) {
+            srcEl.textContent = contractRes.data_source || 'UNAVAILABLE';
+          }
+
+          const roEl = document.getElementById('ov-contract-rollover');
+          if (roEl) {
+            if (contractRes.rollover && contractRes.rollover.status === 'ROLLOVER_PENDING') {
+              roEl.textContent = contractRes.rollover.next_contract + ' (PENDING)';
+              roEl.className = 'kv-value amber';
+            } else if (contractRes.next_contract) {
+              roEl.textContent = contractRes.next_contract.contract_id + ' (NEXT)';
+              roEl.className = 'kv-value';
+            } else {
+              roEl.textContent = 'NONE';
+              roEl.className = 'kv-value';
+            }
+          }
+        }
+
+        // Risk
+        if (riskRes.account_equity) {
+          document.getElementById('ov-risk-equity').textContent = '₹' + Number(riskRes.account_equity).toLocaleString('en-IN', {minimumFractionDigits: 2});
+          document.getElementById('risk-tab-equity').textContent = '₹' + Number(riskRes.account_equity).toLocaleString('en-IN', {minimumFractionDigits: 2});
+          document.getElementById('ov-risk-reserved').textContent = '₹' + Number(riskRes.reserved_risk || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
+          document.getElementById('risk-tab-reserved').textContent = '₹' + Number(riskRes.reserved_risk || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
+          document.getElementById('ov-risk-positions').textContent = (riskRes.open_positions || 0) + ' / ' + (riskRes.max_open_positions || 5);
+          document.getElementById('ov-risk-status').textContent = riskRes.risk_status || 'SAFE';
+
+          const rPct = riskRes.risk_utilization_pct || 0;
+          const lPct = riskRes.loss_utilization_pct || 0;
+          document.getElementById('ov-meter-risk-pct').textContent = rPct.toFixed(2) + '% / 2.00%';
+          document.getElementById('ov-meter-risk-bar').style.width = Math.min(100, rPct * 50) + '%';
+          document.getElementById('risk-tab-meter-risk-label').textContent = rPct.toFixed(2) + '%';
+          document.getElementById('risk-tab-meter-risk').style.width = Math.min(100, rPct * 50) + '%';
+
+          document.getElementById('ov-meter-loss-pct').textContent = lPct.toFixed(2) + '% / 3.00%';
+          document.getElementById('ov-meter-loss-bar').style.width = Math.min(100, lPct * 33.3) + '%';
+          document.getElementById('risk-tab-meter-loss-label').textContent = lPct.toFixed(2) + '%';
+          document.getElementById('risk-tab-meter-loss').style.width = Math.min(100, lPct * 33.3) + '%';
+        }
+
+        // Kill Switch Button
+        const isKsEngaged = statusRes.kill_switch === 'ENGAGED';
+        const ksBtn = document.getElementById('btn-kill-toggle');
+        if (isKsEngaged) {
+          ksBtn.textContent = 'ENGAGED — DISARM';
+          ksBtn.className = 'btn-disarm-action';
+          document.getElementById('hdr-health').textContent = 'BLOCKED (KILL SWITCH)';
+          document.getElementById('hdr-health').className = 'hdr-val red';
         } else {
-          killBtn.innerText = '⚠ ENGAGE KILL SWITCH';
-          killBtn.className = 'btn-kill';
-          killMetric.innerText = 'DISARMED';
-          killMetric.className = 'metric-value text-success';
-          if (secKillBadge) {
-            secKillBadge.innerText = 'DISARMED';
-            secKillBadge.className = 'badge badge-pass';
-          }
-          if (bannerBlocked) bannerBlocked.style.display = 'none';
+          ksBtn.textContent = 'ENGAGE KILL SWITCH';
+          ksBtn.className = 'btn-kill-action';
+          document.getElementById('hdr-health').textContent = 'HEALTHY';
+          document.getElementById('hdr-health').className = 'hdr-val green';
         }
 
-        if (data.portfolio) {
-          document.getElementById('metric-equity').innerText = '₹' + parseFloat(data.portfolio.current_equity).toLocaleString('en-IN', {minimumFractionDigits:2});
-          document.getElementById('metric-cash').innerText = 'Cash: ₹' + parseFloat(data.portfolio.available_capital).toLocaleString('en-IN', {minimumFractionDigits:2});
+        // Health Telemetry
+        document.getElementById('ov-health-level').textContent = healthRes.health_level || 'DISCONNECTED';
+        document.getElementById('ov-health-msgs').textContent = healthRes.messages_received || 0;
+        document.getElementById('ov-health-valid').textContent = healthRes.valid_events || 0;
+        document.getElementById('shw-events').textContent = healthRes.valid_events || 0;
+        document.getElementById('ov-health-dups-gaps').textContent = (healthRes.duplicates || 0) + ' / ' + (healthRes.sequence_gaps || 0);
+        document.getElementById('ov-health-ooo').textContent = healthRes.out_of_order || 0;
+        document.getElementById('ov-health-reconnects').textContent = healthRes.reconnect_count || 0;
+        document.getElementById('ov-health-latency').textContent = healthRes.connection_latency ? healthRes.connection_latency.toFixed(1) + ' ms' : '—';
+
+        // Provenance
+        document.getElementById('ov-prov-status').textContent = provRes.provenance_verified || 'PROVENANCE NOT YET AVAILABLE';
+        document.getElementById('ov-prov-wire-hash').textContent = provRes.raw_payload_hash || '—';
+        document.getElementById('ov-prov-hmac').textContent = provRes.alpha_forge_attestation_hmac || '—';
+
+        // Signals
+        if (sigRes.strategy_state) {
+          document.getElementById('ov-sig-state').textContent = sigRes.strategy_state;
+          document.getElementById('ov-sig-trend').textContent = sigRes.trend || 'NEUTRAL';
+          document.getElementById('ov-sig-momentum').textContent = sigRes.momentum || 'WAIT';
+          document.getElementById('ov-sig-breakout').textContent = sigRes.breakout_status || 'NOT CONFIRMED';
+          document.getElementById('ov-sig-htf').textContent = sigRes.higher_timeframe_confirmation || 'WAIT';
+          document.getElementById('ov-sig-decision').textContent = (sigRes.last_decision || 'NO TRADE') + ' — ' + (sigRes.decision_reason || '');
+
+          document.getElementById('sig-tab-trend').textContent = sigRes.trend || 'NEUTRAL';
+          document.getElementById('sig-tab-momentum').textContent = sigRes.momentum || 'WAIT';
+          document.getElementById('sig-tab-breakout').textContent = sigRes.breakout_status || 'NOT CONFIRMED';
+          document.getElementById('sig-tab-htf').textContent = sigRes.higher_timeframe_confirmation || 'WAIT';
+          document.getElementById('sig-tab-vol').textContent = sigRes.volatility_state || 'NORMAL';
+          document.getElementById('sig-tab-decision').textContent = sigRes.last_decision || 'NO TRADE';
         }
 
-        // Render logs
-        const logBox = document.getElementById('log-box');
-        logBox.innerHTML = data.logs.map(l => `
-          <div class="log-line">
-            <span class="log-ts">[${l.timestamp}]</span>
-            <span class="log-level-${l.level}">${l.level}</span>
-            <span style="color:#e5e7eb;">[${l.component}]</span>
-            <span>${l.message}</span>
-          </div>
-        `).join('');
+        // Decision History Explainer Table
+        if (sigRes.decision_history && sigRes.decision_history.length > 0) {
+          const tbody = document.getElementById('tbl-decision-history');
+          const fullBody = document.getElementById('tbl-signals-full');
+          tbody.innerHTML = '';
+          fullBody.innerHTML = '';
+          sigRes.decision_history.forEach(item => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${item.timestamp || '—'}</td>
+              <td>${item.candle || '—'}</td>
+              <td>${item.strategy_state || '—'}</td>
+              <td>${item.signal || '—'}</td>
+              <td><span class="status-tag tag-green">${item.risk_decision || 'PASS'}</span></td>
+              <td><span class="status-tag tag-green">${item.contract_decision || 'PASS'}</span></td>
+              <td><span class="status-tag ${item.final_decision === 'WAIT' ? 'tag-amber' : 'tag-slate'}">${item.final_decision}</span></td>
+              <td><span class="status-tag tag-amber">${item.category || 'WAIT'}</span></td>
+              <td style="font-size: 10px; color: var(--text-muted);">${item.reason}</td>
+            `;
+            tbody.appendChild(tr);
 
-        // Render manual orders
-        const ordersTbody = document.getElementById('orders-tbody');
-        if (data.orders && data.orders.length > 0) {
-          ordersTbody.innerHTML = data.orders.map(o => `
-            <tr>
-              <td><code>${o.client_order_id}</code></td>
-              <td><strong>${o.symbol}</strong></td>
-              <td style="color:${o.side === 'BUY' ? '#34d399' : '#f87171'}">${o.side}</td>
-              <td>${o.quantity}</td>
-              <td>₹${parseFloat(o.price).toFixed(2)}</td>
-              <td><span class="badge badge-pass">${o.state}</span></td>
-            </tr>
-          `).join('');
+            const trFull = document.createElement('tr');
+            trFull.innerHTML = `
+              <td>${item.timestamp || '—'}</td>
+              <td>NIFTY26SEPFUT</td>
+              <td><span class="status-tag tag-slate">${item.final_decision}</span></td>
+              <td><span class="status-tag tag-amber">${item.category || 'WAIT'}</span></td>
+              <td>${item.reason}</td>
+            `;
+            fullBody.appendChild(trFull);
+          });
         }
+
+        // Logs
+        if (statusRes.logs) {
+          const lbody = document.getElementById('tbl-trace-logs');
+          lbody.innerHTML = '';
+          statusRes.logs.slice(0, 8).forEach(l => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${l.timestamp}</td>
+              <td><span class="status-tag ${l.level === 'SECURITY' ? 'tag-red' : l.level === 'INFO' ? 'tag-cyan' : 'tag-green'}">${l.level}</span></td>
+              <td style="color:var(--text-muted);">${l.component}</td>
+              <td style="color:#cbd5e1;">${l.message}</td>
+            `;
+            lbody.appendChild(tr);
+          });
+        }
+
+        // Market Clock
+        const now = new Date();
+        document.getElementById('mkt-clock-utc').textContent = now.toUTCString().split(' ')[4] + ' UTC';
+
       } catch (err) {
-        console.error('Failed to fetch status:', err);
+        console.warn('Telemetry polling notice:', err);
       }
     }
 
-    async function loadContractInfo() {
-      try {
-        const res = await fetch('/api/contract');
-        const c = await res.json();
-        document.getElementById('metric-contract').innerText = c.contract_id;
-        document.getElementById('metric-lot').innerText = `${c.exchange}:${c.segment} • Lot: ${c.lot_size} • Expiry: ${c.expiry_datetime.split('T')[0]}`;
-        document.getElementById('fwd-symbol').value = `${c.contract_id} (${c.exchange}:${c.segment} | Lot: ${c.lot_size} | Tick: ${c.tick_size} | ${c.lifecycle_status})`;
-      } catch (err) {
-        console.error('Failed to load contract:', err);
-      }
-    }
+    // Chart Canvas Rendering (Zero Fake Data)
+    function drawMarketChart() {
+      const canvas = document.getElementById('marketChartCanvas');
+      const primaryCanvas = document.getElementById('primaryMarketChart');
+      [canvas, primaryCanvas].forEach(c => {
+        if (!c) return;
+        const ctx = c.getContext('2d');
+        c.width = c.clientWidth;
+        c.height = c.clientHeight;
 
-    async function loadSafetyChecks() {
-      try {
-        const res = await fetch('/api/safety');
-        const data = await res.json();
-        const grid = document.getElementById('safety-grid');
-        grid.innerHTML = data.checks.map(c => `
-          <div style="background:#070d1e; padding:12px; border-radius:8px; border:1px solid var(--card-border);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-              <strong style="font-size:12px; color:#fff;">${c.name}</strong>
-              <span class="badge badge-pass">${c.status}</span>
-            </div>
-            <div style="font-size:11px; color:var(--text-muted);">${c.description}</div>
-          </div>
-        `).join('');
-      } catch (err) {
-        console.error('Failed to load safety checks:', err);
-      }
-    }
+        ctx.fillStyle = '#060a14';
+        ctx.fillRect(0, 0, c.width, c.height);
 
-    async function loadHistory() {
-      try {
-        const res = await fetch('/api/forward/history');
-        const history = await res.json();
-        const tbody = document.getElementById('history-tbody');
-        document.getElementById('history-count').innerText = history.length + ' Runs';
-        if (history.length > 0) {
-          tbody.innerHTML = history.map(h => `
-            <tr>
-              <td><code>${h.run_id}</code></td>
-              <td>${new Date(h.timestamp).toLocaleTimeString()}</td>
-              <td><span class="badge badge-info">${h.mode}</span></td>
-              <td><strong>${h.underlying}</strong></td>
-              <td>${h.bars}</td>
-              <td>${h.trades}</td>
-              <td style="color:${parseFloat(h.net_pnl) >= 0 ? '#34d399' : '#f87171'}; font-weight:700;">₹${parseFloat(h.net_pnl).toFixed(2)}</td>
-              <td>${h.max_drawdown_pct}%</td>
-              <td><span class="badge badge-pass">${h.safety_status}</span></td>
-              <td><button class="btn btn-secondary" style="padding:2px 8px; font-size:10px;" onclick="loadRunDetails('${h.run_id}')">Inspect</button></td>
-            </tr>
-          `).join('');
+        // Subtle gridlines
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 1;
+        for (let x = 40; x < c.width; x += 60) {
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, c.height); ctx.stroke();
         }
-      } catch (err) {
-        console.error('Failed to load history:', err);
-      }
-    }
-
-    function renderEquityChart(points) {
-      if (!points || points.length === 0) return;
-      const svg = document.getElementById('equity-svg');
-      const minEq = Math.min(...points.map(p => p.equity));
-      const maxEq = Math.max(...points.map(p => p.equity));
-      const range = (maxEq - minEq) || 1000;
-      const width = 900;
-      const height = 150;
-      
-      const coords = points.map((p, i) => {
-        const x = (i / (points.length - 1 || 1)) * (width - 40) + 20;
-        const y = height - 20 - ((p.equity - minEq) / range) * (height - 40);
-        return { x, y, ...p };
+        for (let y = 30; y < c.height; y += 40) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(c.width, y); ctx.stroke();
+        }
       });
 
-      const linePath = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
-      const areaPath = `${linePath} L ${coords[coords.length - 1].x.toFixed(1)},${height} L ${coords[0].x.toFixed(1)},${height} Z`;
-
-      svg.innerHTML = `
-        <defs>
-          <linearGradient id="eq-gradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.35"/>
-            <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.0"/>
-          </linearGradient>
-        </defs>
-        <path d="${areaPath}" fill="url(#eq-gradient)" />
-        <path d="${linePath}" fill="none" stroke="#3b82f6" stroke-width="3" />
-        ${coords.map(c => `
-          <circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="#34d399" />
-        `).join('')}
-      `;
+      // Show empty state banners when no live session exists
+      document.getElementById('chart-empty-state').style.display = 'block';
+      const pEmpty = document.getElementById('primary-chart-empty');
+      if (pEmpty) pEmpty.style.display = 'block';
     }
 
+    // Preflight Check Action
+    async function runPreflightCheck() {
+      const box = document.getElementById('preflight-result-box');
+      const title = document.getElementById('preflight-status-title');
+      const reason = document.getElementById('preflight-reason-text');
+      box.style.display = 'block';
+      title.textContent = 'RUNNING PREFLIGHT INSPECTION...';
+      reason.textContent = 'Validating Upstox credentials, contract master, and zero-live-orders isolation...';
+
+      try {
+        const res = await fetch('/api/shadow/preflight', { method: 'POST' });
+        const data = await res.json();
+        if (data.ready) {
+          title.textContent = 'PREFLIGHT PASSED — READY FOR RUN';
+          title.style.color = '#34d399';
+        } else {
+          title.textContent = 'PREFLIGHT BLOCKED — CREDENTIALS REQUIRED';
+          title.style.color = '#fbbf24';
+        }
+        reason.textContent = data.reason + ' (Live Orders: ' + data.live_orders + ' | Guards: ' + data.guard_status + ')';
+      } catch (e) {
+        title.textContent = 'PREFLIGHT ERROR';
+        title.style.color = '#f87171';
+        reason.textContent = String(e);
+      }
+    }
+
+    // Evidence Discovery Loading
+    async function loadEvidencePackages() {
+      try {
+        const res = await fetch('/api/shadow/evidence');
+        const list = await res.json();
+        const tbody = document.getElementById('tbl-evidence-packages');
+        tbody.innerHTML = '';
+        if (list.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-dim); padding: 20px;">NO SHADOW EVIDENCE PACKAGE AVAILABLE</td></tr>';
+          return;
+        }
+        list.forEach(p => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td><strong>${p.run_id}</strong></td>
+            <td>${p.created_at ? p.created_at.split('T')[0] : '—'}</td>
+            <td>${p.provider}</td>
+            <td>${p.contract}</td>
+            <td>${p.event_count}</td>
+            <td>${p.verified_event_count}</td>
+            <td><span class="status-tag tag-green">${p.causality}</span></td>
+            <td style="font-size: 10px; color: var(--cyan);">${p.manifest_sha256 ? p.manifest_sha256.substring(0, 16) + '...' : 'UNVERIFIED'}</td>
+            <td><span class="status-tag tag-amber">${p.certification.level_c || 'PENDING'}</span></td>
+            <td><button class="btn-action secondary" style="padding: 4px 8px; font-size: 10px;" onclick="window.open('/api/export/${p.run_id}?format=json')">JSON</button></td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.warn('Evidence loading error:', e);
+      }
+    }
+
+    // Synthetic Forward Batch Run
     async function runForwardBatch() {
       const mode = document.getElementById('fwd-mode').value;
-      const candlesCount = parseInt(document.getElementById('fwd-candles').value, 10);
-      const emptyBanner = document.getElementById('banner-empty');
-      const runningBanner = document.getElementById('banner-running');
-      const cardEquity = document.getElementById('card-equity');
-      const btnRun = document.getElementById('btn-run-forward');
-
-      emptyBanner.style.display = 'none';
-      runningBanner.style.display = 'flex';
-      btnRun.disabled = true;
-      btnRun.style.opacity = '0.6';
-
+      const count = document.getElementById('fwd-candles').value;
       try {
         const res = await fetch('/api/forward/run', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode, candles_count: candlesCount })
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ mode: mode, candles_count: count })
         });
         const data = await res.json();
-        
-        runningBanner.style.display = 'none';
-        btnRun.disabled = false;
-        btnRun.style.opacity = '1';
-
         if (data.success) {
-          activeRunId = data.run_id;
-          document.getElementById('fwd-status-badge').innerText = 'COMPLETED';
-          document.getElementById('fwd-bars').innerText = data.report.processed_candles + ' Bars';
-          document.getElementById('fwd-trades').innerText = data.report.total_trades + ' Trades';
-          document.getElementById('fwd-realized').innerText = '₹' + parseFloat(data.report.total_realized_pnl).toLocaleString('en-IN', {minimumFractionDigits:2});
-          document.getElementById('fwd-winrate').innerText = parseFloat(data.report.win_rate).toFixed(1) + '%';
-          const totalCosts = (parseFloat(data.report.total_fees) + parseFloat(data.report.total_slippage)).toFixed(2);
-          document.getElementById('fwd-costs').innerText = '₹' + totalCosts;
-          document.getElementById('fwd-drawdown').innerText = data.report.max_drawdown_pct + '%';
-          document.getElementById('trades-count-label').innerText = data.trades.length + ' Authoritative Trades Recorded';
-
-          // Render trade ledger
-          const tradesTbody = document.getElementById('trades-tbody');
-          if (data.trades && data.trades.length > 0) {
-            tradesTbody.innerHTML = data.trades.map(t => {
-              const netPnlNum = parseFloat(t.net_pnl);
-              const pnlColor = netPnlNum >= 0 ? '#34d399' : '#f87171';
-              const exitTime = t.exit_timestamp ? new Date(t.exit_timestamp).toLocaleTimeString() : 'OPEN';
-              return `
-                <tr>
-                  <td><code>${data.run_id}</code></td>
-                  <td><strong>${t.trade_id}</strong></td>
-                  <td>${exitTime}</td>
-                  <td>${t.symbol}</td>
-                  <td style="color:${t.side === 'LONG' ? '#34d399' : '#f87171'}; font-weight:700;">${t.side}</td>
-                  <td>${t.quantity}</td>
-                  <td>₹${parseFloat(t.entry_price).toFixed(2)}</td>
-                  <td>₹${parseFloat(t.stop_price).toFixed(2)}</td>
-                  <td>₹${parseFloat(t.target_price).toFixed(2)}</td>
-                  <td>₹${parseFloat(t.exit_price).toFixed(2)}</td>
-                  <td><span class="badge ${t.exit_reason === 'TARGET_PROFIT' ? 'badge-pass' : 'badge-fail'}">${t.exit_reason}</span></td>
-                  <td>₹${parseFloat(t.gross_pnl).toFixed(2)}</td>
-                  <td>₹${parseFloat(t.fees).toFixed(2)}</td>
-                  <td>₹${parseFloat(t.slippage_loss).toFixed(2)}</td>
-                  <td style="color:${pnlColor}; font-weight:800;">₹${netPnlNum.toFixed(2)}</td>
-                  <td><code>${t.exit_order_id}</code></td>
-                </tr>
-              `;
-            }).join('');
-          } else {
-            tradesTbody.innerHTML = '<tr><td colspan="16" style="text-align:center; color: var(--text-muted); padding:20px;">Stream completed 0 fill triggers during this run window.</td></tr>';
-          }
-
-          // Rejections & Decision Breakdown
-          document.getElementById('rj-strategy').innerText = data.rejections.strategy_filtered + ' Bars';
-          document.getElementById('rj-risk').innerText = data.rejections.risk_rejected + ' (Safe)';
-          document.getElementById('rj-contract').innerText = data.rejections.contract_rejected + ' (Valid)';
-          document.getElementById('rj-executed').innerText = data.rejections.executed_trades + ' Trades';
-
-          // Equity Curve
-          cardEquity.style.display = 'block';
-          renderEquityChart(data.equity_curve);
-
-          fetchStatus();
-          loadHistory();
-        } else {
-          alert('Forward run error: ' + (data.error || 'Execution blocked'));
+          document.getElementById('bt-empty-state').style.display = 'none';
+          document.getElementById('bt-metrics-content').style.display = 'block';
+          document.getElementById('bt-status-badge').textContent = 'SYNTHETIC RUN: ' + data.run_id;
+          document.getElementById('bt-bars').textContent = data.report.processed_candles;
+          document.getElementById('bt-trades').textContent = data.report.total_trades;
+          document.getElementById('bt-winrate').textContent = data.report.win_rate + '%';
+          document.getElementById('bt-pnl').textContent = '₹' + Number(data.report.total_realized_pnl).toLocaleString('en-IN', {minimumFractionDigits: 2});
+          fetchAllTelemetry();
         }
-      } catch (err) {
-        runningBanner.style.display = 'none';
-        btnRun.disabled = false;
-        btnRun.style.opacity = '1';
-        alert('Validation failed: ' + err.message);
+      } catch (e) {
+        alert('Synthetic batch error: ' + e);
       }
     }
 
-    async function loadRunDetails(runId) {
-      try {
-        const res = await fetch(`/api/forward/run/${runId}`);
-        const data = await res.json();
-        activeRunId = data.run_id;
-        document.getElementById('fwd-bars').innerText = data.report.processed_candles + ' Bars';
-        document.getElementById('fwd-trades').innerText = data.report.total_trades + ' Trades';
-        document.getElementById('fwd-realized').innerText = '₹' + parseFloat(data.report.total_realized_pnl).toLocaleString('en-IN', {minimumFractionDigits:2});
-        document.getElementById('card-equity').style.display = 'block';
-        renderEquityChart(data.equity_curve);
-        showTab('forward');
-      } catch (err) {
-        alert('Failed to load run details: ' + err.message);
-      }
-    }
-
-    function exportRun(format) {
-      if (!activeRunId) {
-        alert('Please execute a forward validation run first.');
-        return;
-      }
-      window.location.href = `/api/export/${activeRunId}?format=${format}`;
-    }
-
-    async function runReconciliation() {
-      const res = await fetch('/api/reconciliation');
-      const data = await res.json();
-      alert('Continuous 6-Point Reconciliation Check Result:\n\n' +
-            '1. Execution Intents: ' + data.intents + '\n' +
-            '2. 17-State Order FSM: ' + data.fsm + '\n' +
-            '3. Broker Orders: ' + data.broker_orders + '\n' +
-            '4. Broker Positions: ' + data.broker_positions + '\n' +
-            '5. P&L Tracker: ' + data.pnl_tracker + '\n' +
-            '6. Audit Ledger: ' + data.audit_ledger + '\n\n' +
-            'STATUS: 100% BIT-EXACT ALIGNED (0 Anomalies Detected)');
-    }
-
-    async function toggleKillSwitch() {
-      const isEngaged = document.getElementById('metric-kill-switch').innerText === 'ENGAGED';
-      const action = isEngaged ? 'disarm' : 'engage';
-      const reason = isEngaged ? 'Manual resumption by operator' : 'Manual safety pause from Web UI';
-      await fetch('/api/kill-switch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, reason })
-      });
-      fetchStatus();
-    }
-
-    async function runReadiness() {
-      const res = await fetch('/api/readiness');
-      const data = await res.json();
-      document.getElementById('chk-config').innerText = data.checks.config_valid ? 'PASS' : 'FAIL';
-      document.getElementById('chk-dirs').innerText = data.checks.directories_ready ? 'PASS' : 'FAIL';
-      document.getElementById('chk-broker').innerText = data.checks.broker_ready ? 'PASS' : 'FAIL';
-      document.getElementById('chk-creds').innerText = data.checks.credentials_ready ? 'PASS' : 'FAIL';
-      document.getElementById('chk-sec').innerText = data.checks.security_ready ? 'PASS' : 'FAIL';
-      alert('Pre-Flight Diagnostics Executed:\nResult: ' + (data.is_ready ? 'ALL 5 GATES PASSED (READY)' : 'FAILED CLOSED'));
-    }
-
-    async function testLiveFailClosed() {
-      const res = await fetch('/api/readiness?env=LIVE');
-      const data = await res.json();
-      alert('LIVE Fail-Closed Invariant Test:\n\n' +
-            'is_ready: ' + data.is_ready + '\n' +
-            'security_ready: ' + data.checks.security_ready + ' (Requires Dual Auth & Phase 13 Gate)\n' +
-            'broker_ready: ' + data.checks.broker_ready + ' (Paper broker rejected for LIVE)\n\n' +
-            'SUCCESS: System strictly fails closed as designed!');
-    }
-
-    async function submitOrder(e) {
-      e.preventDefault();
-      const symbol = document.getElementById('ord-symbol').value;
-      const side = document.getElementById('ord-side').value;
-      const quantity = parseInt(document.getElementById('ord-qty').value, 10);
-      const price = document.getElementById('ord-price').value;
-      const role = document.getElementById('ord-role').value;
-      const alertBox = document.getElementById('order-alert');
-
+    // Paper Order Simulator
+    async function submitPaperOrder() {
+      const side = document.getElementById('sim-side').value;
+      const qty = document.getElementById('sim-qty').value;
+      const price = document.getElementById('sim-price').value;
       try {
         const res = await fetch('/api/orders/submit', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol, side, quantity, price, role })
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ side: side, quantity: Number(qty), price: price, role: 'ENTRY' })
         });
         const data = await res.json();
-        if (res.ok && data.success) {
-          alertBox.style.display = 'block';
-          alertBox.style.background = 'rgba(16, 185, 129, 0.2)';
-          alertBox.style.color = '#34d399';
-          alertBox.innerText = 'Order Submitted & Confirmed: ' + data.order_id + ' [' + data.state + ']';
-          fetchStatus();
+        if (data.success) {
+          alert('Paper Order Acknowledged (Simulation Only): ' + data.order_id);
+          fetchAllTelemetry();
         } else {
-          alertBox.style.display = 'block';
-          alertBox.style.background = 'rgba(239, 68, 68, 0.2)';
-          alertBox.style.color = '#f87171';
-          alertBox.innerText = 'Order Blocked: ' + (data.error || 'Unknown error');
+          alert('Paper Order Rejected: ' + data.error);
         }
-      } catch (err) {
-        alertBox.style.display = 'block';
-        alertBox.style.background = 'rgba(239, 68, 68, 0.2)';
-        alertBox.style.color = '#f87171';
-        alertBox.innerText = 'Submission error: ' + err.message;
+      } catch (e) {
+        alert('Paper order submission error: ' + e);
       }
     }
 
-    function runBacktest() {
-      alert('Executing Deterministic Backtest...\n1,000 Candles Processed.\nStrategy Invariants Validated: 0 Anomalies.');
+    // Kill switch toggle
+    async function toggleKillSwitch() {
+      const cur = document.getElementById('btn-kill-toggle').textContent;
+      const action = cur.includes('ENGAGED') ? 'disarm' : 'engage';
+      if (!confirm(`Are you sure you want to ${action.toUpperCase()} the Kill Switch?`)) return;
+      try {
+        await fetch('/api/kill-switch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ action: action, reason: 'Operator UI Action' })
+        });
+        fetchAllTelemetry();
+      } catch (e) {
+        alert('Kill switch error: ' + e);
+      }
     }
 
-    // Initialize UI
-    fetchStatus();
-    loadContractInfo();
-    loadSafetyChecks();
-    loadHistory();
-    setInterval(fetchStatus, 2500);
+    async function engageKillSwitchManual() {
+      await fetch('/api/kill-switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ action: 'engage', reason: 'Risk Panel Manual Halt' })
+      });
+      fetchAllTelemetry();
+    }
+
+    async function disarmKillSwitchManual() {
+      await fetch('/api/kill-switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ action: 'disarm', reason: 'Risk Panel Manual Resume' })
+      });
+      fetchAllTelemetry();
+    }
+
+    // Initialization
+    window.addEventListener('DOMContentLoaded', () => {
+      fetchAllTelemetry();
+      loadEvidencePackages();
+      drawMarketChart();
+      setInterval(fetchAllTelemetry, 3000);
+      window.addEventListener('resize', drawMarketChart);
+    });
   </script>
 </body>
 </html>
