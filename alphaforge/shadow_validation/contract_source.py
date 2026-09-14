@@ -8,11 +8,13 @@ authoritative real-market contracts and synthetic/test contracts.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 from datetime import UTC, datetime
 from decimal import Decimal
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -27,15 +29,28 @@ from alphaforge.contract.lifecycle import (
 from alphaforge.contract.models import ContractMaster
 from alphaforge.contract.repository import InMemoryContractMasterRepository
 from alphaforge.contract.validation import validate_contract_master
+from alphaforge.core.exceptions import DataIntegrityError
 from alphaforge.data.enums import InstrumentType
 
 logger = logging.getLogger(__name__)
 
 ENV_CONTRACT_SNAPSHOT = "ALPHAFORGE_CONTRACT_SNAPSHOT_PATH"
 ENV_UPSTOX_INSTRUMENTS = "UPSTOX_INSTRUMENTS_PATH"
-PACKAGE_SNAPSHOT = Path(__file__).resolve().parent / "canonical_contracts.json"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 RUNTIME_SNAPSHOT = REPO_ROOT / "runtime" / "contracts" / "nifty_contracts.json"
+LAST_KNOWN_GOOD_SNAPSHOT = REPO_ROOT / "runtime" / "contracts" / "last_known_good_contracts.json"
+PACKAGE_SNAPSHOT = Path(__file__).resolve().parent / "canonical_contracts.json"
+
+
+class ContractAuthorityTier(str, Enum):
+    """Authoritative hierarchy tiers for contract metadata."""
+
+    TIER_1_LIVE_BROKER = "TIER_1_LIVE_BROKER_MASTER"
+    TIER_2_VERIFIED_RUNTIME = "TIER_2_VERIFIED_RUNTIME_SNAPSHOT"
+    TIER_3_LAST_KNOWN_GOOD = "TIER_3_LAST_KNOWN_GOOD"
+    TIER_4_CANONICAL_REFERENCE = "TIER_4_CANONICAL_REFERENCE_ONLY"
+    UNAVAILABLE = "UNAVAILABLE"
+
 
 
 def parse_contract_record(data: dict[str, Any]) -> ContractMaster:
@@ -88,18 +103,44 @@ def parse_contract_record(data: dict[str, Any]) -> ContractMaster:
         else SettlementType(str(raw_settlement))
     )
 
+    lot_size = int(data["lot_size"])
+    if lot_size <= 0:
+        raise DataIntegrityError(f"lot_size must be > 0, got {lot_size}")
+
+    tick_size = Decimal(str(data["tick_size"]))
+    if tick_size <= Decimal("0"):
+        raise DataIntegrityError(f"tick_size must be > 0, got {tick_size}")
+
+    if start_dt > end_dt:
+        raise DataIntegrityError(
+            f"trading_start_datetime ({start_dt}) cannot be after trading_end_datetime ({end_dt})"
+        )
+
+    if expiry_dt < listing_dt:
+        raise DataIntegrityError(
+            f"expiry_datetime ({expiry_dt}) cannot precede listing_datetime ({listing_dt})"
+        )
+
+    underlying = str(data["underlying_symbol"]).strip().upper()
+    if underlying != "NIFTY":
+        raise DataIntegrityError(f"underlying_symbol must be 'NIFTY', got '{underlying}'")
+
+    segment = str(data["segment"]).strip().upper()
+    if segment not in ("NFO", "NSE_FO"):
+        raise DataIntegrityError(f"segment must be 'NFO' or 'NSE_FO', got '{segment}'")
+
     contract = ContractMaster(
         exchange=str(data["exchange"]).strip().upper(),
-        segment=str(data["segment"]).strip().upper(),
-        underlying_symbol=str(data["underlying_symbol"]).strip().upper(),
+        segment=segment,
+        underlying_symbol=underlying,
         contract_id=str(data["contract_id"]).strip().upper(),
         instrument_type=inst_type,
         listing_datetime=listing_dt,
         trading_start_datetime=start_dt,
         trading_end_datetime=end_dt,
         expiry_datetime=expiry_dt,
-        lot_size=int(data["lot_size"]),
-        tick_size=Decimal(str(data["tick_size"])),
+        lot_size=lot_size,
+        tick_size=tick_size,
         contract_multiplier=Decimal(str(data.get("contract_multiplier", "1"))),
         price_decimal_places=int(data.get("price_decimal_places", 2)),
         quantity_decimal_places=int(data.get("quantity_decimal_places", 0)),
@@ -139,7 +180,10 @@ class AuthoritativeContractSource:
         self._allow_synthetic = allow_synthetic
         self._repository = repository or InMemoryContractMasterRepository()
         self._snapshot_path = snapshot_path
+        self._source_tier = ContractAuthorityTier.UNAVAILABLE
         self._source_description = "UNINITIALIZED"
+        self._snapshot_hash: str | None = None
+        self._snapshot_mtime: datetime | None = None
         self.load_contracts()
 
     @property
@@ -148,61 +192,102 @@ class AuthoritativeContractSource:
         return self._repository
 
     @property
+    def source_tier(self) -> ContractAuthorityTier:
+        """Return the authoritative tier of the active contract metadata."""
+        return self._source_tier
+
+    @property
     def source_description(self) -> str:
         """Return description of active contract metadata source."""
         return self._source_description
 
+    @property
+    def snapshot_hash(self) -> str | None:
+        """SHA-256 digest of loaded contract snapshot file."""
+        return self._snapshot_hash
+
+    @property
+    def snapshot_mtime(self) -> datetime | None:
+        """Filesystem modification timestamp of loaded contract snapshot."""
+        return self._snapshot_mtime
+
     def load_contracts(self) -> int:
         """
-        Load contract metadata into repository adhering to strict priority hierarchy.
-        Returns count of loaded contracts.
+        Load contract metadata into repository adhering to strict 4-tier priority hierarchy:
+        Tier 1: Live Broker / Exchange Instrument Master
+        Tier 2: Verified Runtime Snapshot
+        Tier 3: Last-Known-Good Persisted Snapshot
+        Tier 4: Canonical Package Snapshot (REFERENCE ONLY — NOT LIVE EXCHANGE TRUTH)
         """
-        # Priority 1: Explicitly provided snapshot path
+        # Tier 1: Explicitly provided snapshot path or live broker path
         if self._snapshot_path and self._snapshot_path.exists():
-            loaded = self._load_file(self._snapshot_path, "EXPLICIT_SNAPSHOT")
+            loaded = self._load_file(
+                self._snapshot_path,
+                ContractAuthorityTier.TIER_1_LIVE_BROKER,
+                "EXPLICIT_LIVE_BROKER_SNAPSHOT",
+            )
             if loaded > 0:
                 return loaded
 
-        # Priority 2: Environment variable snapshot path
-        env_snap = os.environ.get(ENV_CONTRACT_SNAPSHOT)
-        if env_snap and Path(env_snap).exists():
-            loaded = self._load_file(Path(env_snap), "ENV_SNAPSHOT")
-            if loaded > 0:
-                return loaded
-
-        # Priority 3: Upstox instruments snapshot path
         env_upstox = os.environ.get(ENV_UPSTOX_INSTRUMENTS)
         if env_upstox and Path(env_upstox).exists():
-            loaded = self._load_file(Path(env_upstox), "UPSTOX_INSTRUMENTS_SNAPSHOT")
+            loaded = self._load_file(
+                Path(env_upstox),
+                ContractAuthorityTier.TIER_1_LIVE_BROKER,
+                "UPSTOX_INSTRUMENTS_MASTER",
+            )
             if loaded > 0:
                 return loaded
 
-        # Priority 4: Existing populated repository
+        # Tier 2: Verified runtime directory persisted snapshot
+        if RUNTIME_SNAPSHOT.exists():
+            loaded = self._load_file(
+                RUNTIME_SNAPSHOT,
+                ContractAuthorityTier.TIER_2_VERIFIED_RUNTIME,
+                "RUNTIME_VERIFIED_SNAPSHOT",
+            )
+            if loaded > 0:
+                return loaded
+
+        # Tier 3: Last-known-good persisted snapshot
+        if LAST_KNOWN_GOOD_SNAPSHOT.exists():
+            loaded = self._load_file(
+                LAST_KNOWN_GOOD_SNAPSHOT,
+                ContractAuthorityTier.TIER_3_LAST_KNOWN_GOOD,
+                "LAST_KNOWN_GOOD_SNAPSHOT",
+            )
+            if loaded > 0:
+                return loaded
+
+        # Prior repository if explicitly prepopulated
         if self._repository.count() > 0:
-            self._source_description = "AUTHORITATIVE_REPOSITORY"
+            self._source_tier = ContractAuthorityTier.TIER_2_VERIFIED_RUNTIME
+            self._source_description = "IN_MEMORY_PREPOPULATED_REPOSITORY"
             return self._repository.count()
 
-        # Priority 5: Runtime directory persisted snapshot
-        if RUNTIME_SNAPSHOT.exists():
-            loaded = self._load_file(RUNTIME_SNAPSHOT, "RUNTIME_PERSISTED_SNAPSHOT")
-            if loaded > 0:
-                return loaded
-
-        # Priority 6: Package canonical snapshot
+        # Tier 4: Canonical package reference snapshot (FALLBACK REFERENCE ONLY)
         if PACKAGE_SNAPSHOT.exists():
-            loaded = self._load_file(PACKAGE_SNAPSHOT, "PACKAGE_CANONICAL_SNAPSHOT")
+            loaded = self._load_file(
+                PACKAGE_SNAPSHOT,
+                ContractAuthorityTier.TIER_4_CANONICAL_REFERENCE,
+                "PACKAGE_CANONICAL_SNAPSHOT (REFERENCE ONLY — NOT LIVE EXCHANGE TRUTH)",
+            )
             if loaded > 0:
                 return loaded
 
+        self._source_tier = ContractAuthorityTier.UNAVAILABLE
         self._source_description = "UNAVAILABLE"
         logger.warning(
             "AuthoritativeContractSource: No contract metadata source available. Failing closed."
         )
         return 0
 
-    def _load_file(self, path: Path, source_label: str) -> int:
+    def _load_file(self, path: Path, tier: ContractAuthorityTier, source_label: str) -> int:
         try:
-            content = path.read_text(encoding="utf-8")
+            raw_bytes = path.read_bytes()
+            content = raw_bytes.decode("utf-8")
+            self._snapshot_hash = hashlib.sha256(raw_bytes).hexdigest()
+            self._snapshot_mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
             raw_list = json.loads(content)
             if not isinstance(raw_list, list):
                 logger.error(
@@ -218,7 +303,6 @@ class AuthoritativeContractSource:
                     continue
                 try:
                     c = parse_contract_record(item)
-                    # Enforce synthetic separation
                     if not self._allow_synthetic and c.data_source.upper().startswith(
                         ("SYNTHETIC", "TEST")
                     ):
@@ -235,8 +319,11 @@ class AuthoritativeContractSource:
                     )
 
             if count > 0:
+                self._source_tier = tier
                 self._source_description = f"{source_label}:{path.name}"
-                logger.info(f"AuthoritativeContractSource: Loaded {count} contracts from {path}")
+                logger.info(
+                    f"AuthoritativeContractSource [{tier.value}]: Loaded {count} contracts from {path}"
+                )
             return count
         except Exception as exc:
             logger.error(f"AuthoritativeContractSource: Failed to read {path}: {exc}")
@@ -362,13 +449,22 @@ class AuthoritativeContractSource:
                     if next_c
                     else None
                 ),
+                "source_tier": self._source_tier.value,
                 "source_description": self._source_description,
+                "snapshot_hash": self._snapshot_hash,
+                "snapshot_freshness_seconds": (
+                    round((eval_ts - self._snapshot_mtime).total_seconds(), 1)
+                    if self._snapshot_mtime
+                    else None
+                ),
+                "is_reference_fallback": (
+                    self._source_tier == ContractAuthorityTier.TIER_4_CANONICAL_REFERENCE
+                ),
             }
 
         # If no active contract, check if there are known contracts that are expired
         all_underlying = self._repository.get_contracts_for_underlying(underlying_symbol)
         if all_underlying:
-            # Check the most recently expired contract
             latest_c = all_underlying[-1]
             st = evaluate_contract_lifecycle(latest_c, eval_ts)
             return {
@@ -396,7 +492,17 @@ class AuthoritativeContractSource:
                 "is_synthetic": False,
                 "rollover": None,
                 "next_contract": None,
+                "source_tier": self._source_tier.value,
                 "source_description": self._source_description,
+                "snapshot_hash": self._snapshot_hash,
+                "snapshot_freshness_seconds": (
+                    round((eval_ts - self._snapshot_mtime).total_seconds(), 1)
+                    if self._snapshot_mtime
+                    else None
+                ),
+                "is_reference_fallback": (
+                    self._source_tier == ContractAuthorityTier.TIER_4_CANONICAL_REFERENCE
+                ),
                 "error": (
                     f"Contract {latest_c.contract_id} is EXPIRED. "
                     "No subsequent active contract registered."
@@ -425,7 +531,11 @@ class AuthoritativeContractSource:
             "is_synthetic": False,
             "rollover": None,
             "next_contract": None,
+            "source_tier": self._source_tier.value,
             "source_description": "UNAVAILABLE",
+            "snapshot_hash": None,
+            "snapshot_freshness_seconds": None,
+            "is_reference_fallback": False,
             "error": (
                 "No contract metadata available. CONTRACT STATUS = UNAVAILABLE, TRADABLE = FALSE"
             ),
