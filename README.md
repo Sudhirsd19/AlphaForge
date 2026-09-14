@@ -4,8 +4,10 @@ AlphaForge is a deterministic, auditable, failure-tolerant, broker-reconcilable,
 
 ## Project Status
 
-- **Current Phase:** Phase 0 — Requirement Freeze (Complete & Frozen)
-- **Safety Setting:** `LIVE_TRADING = FALSE`
+- **Current Phase:** Phase 18 — Institutional Hardening & Quant Validation (Certified)
+- **Safety Setting:** `PAPER / REAL-MARKET SHADOW ONLY` (`LIVE_TRADING = FALSE`)
+- **Test Suite Status:** 1,030 / 1,030 passing (100%) | 0 mypy issues | 0 ruff issues
+- **Technical Quality Score:** 9.61 / 10.00
 - **Master Specification:** AlphaForge Development & Production-Ready Final Plan
 
 ## Core Architecture
@@ -32,12 +34,14 @@ Phase 13 = Security and Compliance
 Phase 14 = Observability
 Phase 15 = Deployment Environments
 Phase 16 = Paper / Shadow
-Phase 17 = Controlled Live
+Phase 17 = Real-Market Shadow / Certification
+Phase 18 = Institutional Hardening & Quant Validation
 ```
 
 ## Documentation Reference
 
 All formal system specifications and matrices are located in the `docs/` directory:
+- [Phase 18 Final Acceptance Report](docs/PHASE18_FINAL_REPORT.md)
 - [Requirement Freeze Specification](docs/REQUIREMENT_FREEZE.md)
 - [Formal Requirement Traceability Matrix](docs/FORMAL_REQUIREMENT_MATRIX.md)
 - [Open Design Decisions & Technical Proposals](docs/OPEN_DESIGN_DECISIONS.md)
