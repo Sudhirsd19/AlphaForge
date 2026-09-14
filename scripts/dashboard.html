@@ -860,7 +860,7 @@
           </div>
           <div class="form-ctrl-group">
             <label class="form-ctrl-label">Limit Price (INR)</label>
-            <input type="text" id="sim-price" class="form-input" value="24500.00">
+            <input type="text" id="sim-price" class="form-input" placeholder="e.g. 25000.00" value="">
           </div>
           <div class="form-ctrl-group" style="display: flex; align-items: flex-end;">
             <button class="btn-action" style="width: 100%;" onclick="submitPaperOrder()">Submit Paper Order</button>
@@ -1023,6 +1023,20 @@
   </div>
 
   <script>
+    let csrfToken = '';
+
+    async function initCsrfToken() {
+      try {
+        const res = await fetch('/api/security/csrf');
+        const data = await res.json();
+        if (data && data.csrf_token) {
+          csrfToken = data.csrf_token;
+        }
+      } catch (e) {
+        console.warn('Failed to retrieve CSRF token:', e);
+      }
+    }
+
     // Tab Switching
     function switchTab(tabId) {
       document.querySelectorAll('.tab-view').forEach(el => el.classList.remove('active'));
@@ -1291,7 +1305,11 @@
       reason.textContent = 'Validating Upstox credentials, contract master, and zero-live-orders isolation...';
 
       try {
-        const res = await fetch('/api/shadow/preflight', { method: 'POST' });
+        const res = await fetch('/api/shadow/preflight', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+          body: JSON.stringify({})
+        });
         const data = await res.json();
         if (data.ready) {
           title.textContent = 'PREFLIGHT PASSED — READY FOR RUN';
@@ -1347,7 +1365,7 @@
       try {
         const res = await fetch('/api/forward/run', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
           body: JSON.stringify({ mode: mode, candles_count: count })
         });
         const data = await res.json();
@@ -1374,7 +1392,7 @@
       try {
         const res = await fetch('/api/orders/submit', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
           body: JSON.stringify({ side: side, quantity: Number(qty), price: price, role: 'ENTRY' })
         });
         const data = await res.json();
@@ -1397,7 +1415,7 @@
       try {
         await fetch('/api/kill-switch', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
           body: JSON.stringify({ action: action, reason: 'Operator UI Action' })
         });
         fetchAllTelemetry();
@@ -1409,7 +1427,7 @@
     async function engageKillSwitchManual() {
       await fetch('/api/kill-switch', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
         body: JSON.stringify({ action: 'engage', reason: 'Risk Panel Manual Halt' })
       });
       fetchAllTelemetry();
@@ -1418,14 +1436,15 @@
     async function disarmKillSwitchManual() {
       await fetch('/api/kill-switch', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
         body: JSON.stringify({ action: 'disarm', reason: 'Risk Panel Manual Resume' })
       });
       fetchAllTelemetry();
     }
 
     // Initialization
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
+      await initCsrfToken();
       fetchAllTelemetry();
       loadEvidencePackages();
       drawMarketChart();

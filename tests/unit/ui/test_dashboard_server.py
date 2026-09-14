@@ -58,12 +58,23 @@ def _get(url: str) -> tuple[int, dict | str, dict]:
         return status, body, dict(resp.headers)
 
 
-def _post(url: str, payload: dict) -> tuple[int, dict, dict]:
+def _post(
+    url: str,
+    payload: dict,
+    csrf_token: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict, dict]:
+    token = csrf_token if csrf_token is not None else STATE.csrf_token
     data_bytes = json.dumps(payload).encode("utf-8")
+    req_headers = {"Content-Type": "application/json"}
+    if token:
+        req_headers["X-CSRF-Token"] = token
+    if headers:
+        req_headers.update(headers)
     req = urllib.request.Request(  # noqa: S310
         url,
         data=data_bytes,
-        headers={"Content-Type": "application/json"},
+        headers=req_headers,
         method="POST",
     )
     try:
@@ -293,6 +304,82 @@ def test_no_fake_provenance(server_url: str) -> None:
     assert status == 200
     if not STATE.shadow_session_active:
         assert data["provenance_verified"] != "VERIFIED"
+
+
+def test_csrf_endpoint_and_protection(server_url: str) -> None:
+    """Verifies CSRF endpoint returns token and POST fails closed without token."""
+    # 1. GET CSRF token
+    status, data, _ = _get(f"{server_url}/api/security/csrf")
+    assert status == 200
+    assert "csrf_token" in data
+    assert len(data["csrf_token"]) >= 32
+
+    # 2. POST without CSRF token is rejected with 403
+    status_no_token, data_no_token, _ = _post(
+        f"{server_url}/api/kill-switch",
+        {"action": "engage", "reason": "pytest no token"},
+        csrf_token="",
+    )
+    assert status_no_token == 403
+    assert "CSRF_FORBIDDEN" in data_no_token["error"]
+
+    # 3. POST with invalid CSRF token is rejected with 403
+    status_bad_token, data_bad_token, _ = _post(
+        f"{server_url}/api/kill-switch",
+        {"action": "engage", "reason": "pytest bad token"},
+        csrf_token="bad-csrf-token-123",
+    )
+    assert status_bad_token == 403
+    assert "CSRF_FORBIDDEN" in data_bad_token["error"]
+
+
+def test_cors_origin_restriction(server_url: str) -> None:
+    """Verifies CORS headers are restricted to localhost/127.0.0.1 and not wildcard *."""
+    req_local = urllib.request.Request(  # noqa: S310
+        f"{server_url}/api/status",
+        headers={"Origin": "http://localhost:8080"},
+        method="GET",
+    )
+    with urllib.request.urlopen(req_local) as resp:  # noqa: S310
+        assert resp.headers.get("Access-Control-Allow-Origin") == "http://localhost:8080"
+        assert resp.headers.get("X-Frame-Options") == "DENY"
+        assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+
+    req_external = urllib.request.Request(  # noqa: S310
+        f"{server_url}/api/status",
+        headers={"Origin": "https://malicious-site.com"},
+        method="GET",
+    )
+    with urllib.request.urlopen(req_external) as resp:  # noqa: S310
+        assert resp.headers.get("Access-Control-Allow-Origin") is None
+
+
+def test_secret_redaction(server_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies secrets like UPSTOX_ACCESS_TOKEN are scrubbed from responses and logs."""
+    fake_token = "SECRET_SUPER_CONFIDENTIAL_TOKEN_999"
+    monkeypatch.setenv("UPSTOX_ACCESS_TOKEN", fake_token)
+
+    STATE.log_event("TEST", "SECURITY", f"Connecting using {fake_token} now")
+    status, data, _ = _get(f"{server_url}/api/status")
+    assert status == 200
+    serialized = json.dumps(data)
+    assert fake_token not in serialized
+    assert "[REDACTED_SECRET]" in serialized
+
+
+def test_truthful_provenance_and_market_defaults(server_url: str) -> None:
+    """Verifies provenance and market endpoints return truthful null/NOT AVAILABLE when inactive."""
+    status_prov, prov_data, _ = _get(f"{server_url}/api/shadow/provenance")
+    assert status_prov == 200
+    if not STATE.shadow_session_active:
+        assert prov_data["raw_payload_hash"] == "NOT AVAILABLE"
+        assert prov_data["alpha_forge_attestation_hmac"] == "NOT AVAILABLE"
+        assert "SHA256:WIRE-PAYLOAD" not in str(prov_data)
+        assert "HMAC256:INTERNAL-ATTESTATION" not in str(prov_data)
+
+    status_mkt, mkt_data, _ = _get(f"{server_url}/api/shadow/market")
+    assert status_mkt == 200
+    assert mkt_data["overlays"] is None
 
 
 # --- Pre-existing Tests Preserved ---

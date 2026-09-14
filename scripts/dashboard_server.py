@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import hmac
 import io
 import json
 import os
+import secrets
 import subprocess
 import sys
 import threading
@@ -106,6 +108,22 @@ def is_nse_session_open(dt_utc: datetime | None = None) -> tuple[bool, str]:
     return False, "CLOSED (OFF-HOURS)"
 
 
+def redact_secrets(val: Any) -> Any:
+    """Scrub sensitive credentials (e.g. UPSTOX_ACCESS_TOKEN) from objects or strings."""
+    token = os.environ.get(UPSTOX_ACCESS_TOKEN_ENV)
+    if not token:
+        return val
+    if isinstance(val, str):
+        if token in val:
+            return val.replace(token, "[REDACTED_SECRET]")
+        return val
+    if isinstance(val, dict):
+        return {k: redact_secrets(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [redact_secrets(item) for item in val]
+    return val
+
+
 class AlphaForgeState:
     """Singleton operational state holding live backend components and run evidence."""
 
@@ -174,6 +192,8 @@ class AlphaForgeState:
             "last_exchange_timestamp": None,
             "last_ingestion_timestamp": None,
             "latency_ms": None,
+            "last_raw_payload_hash": None,
+            "last_attestation_hmac": None,
         }
 
         # Strategy Signal State
@@ -188,49 +208,14 @@ class AlphaForgeState:
             "contract_gate": "VALID",
             "last_decision": "NO TRADE",
             "decision_timestamp": datetime.now(UTC).isoformat(),
-            "decision_reason": (
-                "Closed candle indicator requirements not met on execution timeframe."
-            ),
+            "decision_reason": "No active market stream evaluation",
         }
 
-        # Decision Explainer History
-        self.decision_history: list[dict[str, Any]] = [
-            {
-                "timestamp": datetime.now(UTC).strftime("%H:%M:%S"),
-                "candle": "24,510.00",
-                "strategy_state": "WAIT_CONFIRMATION",
-                "signal": "NONE",
-                "risk_decision": "PASS",
-                "contract_decision": "PASS",
-                "final_decision": "WAIT",
-                "reason": "Higher-timeframe confirmation incomplete; waiting for closed bar.",
-                "category": "WAIT",
-            },
-            {
-                "timestamp": (datetime.now(UTC) - timedelta(minutes=1)).strftime("%H:%M:%S"),
-                "candle": "24,505.00",
-                "strategy_state": "EVALUATING",
-                "signal": "LONG_CANDIDATE",
-                "risk_decision": "PASS",
-                "contract_decision": "PASS",
-                "final_decision": "STRATEGY_REJECT",
-                "reason": "Breakout threshold not cleared by tick close filter.",
-                "category": "STRATEGY_REJECT",
-            },
-            {
-                "timestamp": (datetime.now(UTC) - timedelta(minutes=2)).strftime("%H:%M:%S"),
-                "candle": "24,498.00",
-                "strategy_state": "IDLE",
-                "signal": "NONE",
-                "risk_decision": "PASS",
-                "contract_decision": "PASS",
-                "final_decision": "WAIT",
-                "reason": "RSI inside neutral range; volatility band within tolerance.",
-                "category": "WAIT",
-            },
-        ]
+        # Decision Explainer History (populated solely from runtime evaluations)
+        self.decision_history: list[dict[str, Any]] = []
 
         self.run_history: list[dict] = []
+        self.csrf_token: str = secrets.token_hex(32)
 
         self.activity_log: list[dict] = [
             {
@@ -271,6 +256,7 @@ class AlphaForgeState:
         return self.contract_source.get_active_contract()
 
     def log_event(self, level: str, component: str, message: str) -> None:
+        clean_msg = str(redact_secrets(message))
         with self.lock:
             self.activity_log.insert(
                 0,
@@ -278,7 +264,7 @@ class AlphaForgeState:
                     "timestamp": datetime.now(UTC).strftime("%H:%M:%S"),
                     "level": level,
                     "component": component,
-                    "message": message,
+                    "message": clean_msg,
                 },
             )
             if len(self.activity_log) > 50:
@@ -319,12 +305,28 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args) -> None:  # noqa: A002
         pass
 
+    def _get_allowed_origin(self) -> str | None:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return None
+        parsed = urlparse(origin)
+        if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
+            return origin
+        return None
+
     def _send_json(self, status: int, data: dict | list) -> None:
-        payload = json.dumps(data, indent=2, default=str).encode("utf-8")
+        clean_data = redact_secrets(data)
+        payload = json.dumps(clean_data, indent=2, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        allowed_origin = self._get_allowed_origin()
+        if allowed_origin:
+            self.send_header("Access-Control-Allow-Origin", allowed_origin)
+            self.send_header("Vary", "Origin")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline';")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -333,9 +335,25 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Content-Length", str(len(data_bytes)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        allowed_origin = self._get_allowed_origin()
+        if allowed_origin:
+            self.send_header("Access-Control-Allow-Origin", allowed_origin)
+            self.send_header("Vary", "Origin")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline';")
         self.end_headers()
         self.wfile.write(data_bytes)
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self.send_response(204)
+        allowed_origin = self._get_allowed_origin()
+        if allowed_origin:
+            self.send_header("Access-Control-Allow-Origin", allowed_origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token")
+            self.send_header("Vary", "Origin")
+        self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
@@ -351,6 +369,10 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+            return
+
+        if parsed.path == "/api/security/csrf":
+            self._send_json(200, {"csrf_token": STATE.csrf_token})
             return
 
         if parsed.path == "/api/status":
@@ -466,25 +488,26 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/shadow/provenance":
             with STATE.lock:
                 has_token = bool(os.environ.get(UPSTOX_ACCESS_TOKEN_ENV))
+                raw_hash = STATE.shadow_telemetry.get("last_raw_payload_hash")
+                hmac_sig = STATE.shadow_telemetry.get("last_attestation_hmac")
+                is_active = STATE.shadow_session_active
                 data = {
                     "provider": UPSTOX_PROVIDER_NAME,
                     "provider_authenticated": has_token,
-                    "is_live_external": STATE.shadow_session_active,
+                    "is_live_external": is_active,
                     "connection_session_id": (
-                        "UPSTOX-LIVE-SESSION" if STATE.shadow_session_active else None
+                        "UPSTOX-LIVE-SESSION" if is_active else None
                     ),
                     "source_timestamp": (STATE.shadow_telemetry.get("last_exchange_timestamp")),
                     "provider_event_id": None,  # Upstox does not supply per-message IDs
-                    "raw_payload_hash": (
-                        "SHA256:WIRE-PAYLOAD" if STATE.shadow_session_active else None
-                    ),
+                    "raw_payload_hash": raw_hash if (is_active and raw_hash) else "NOT AVAILABLE",
                     "alpha_forge_attestation_hmac": (
-                        "HMAC256:INTERNAL-ATTESTATION" if STATE.shadow_session_active else None
+                        hmac_sig if (is_active and hmac_sig) else "NOT AVAILABLE"
                     ),
                     "attestation_type": "INTERNAL ALPHAFORGE PROVENANCE ATTESTATION",
                     "provenance_verified": (
                         "VERIFIED"
-                        if (STATE.shadow_session_active and has_token)
+                        if (is_active and has_token and raw_hash and hmac_sig)
                         else "PROVENANCE NOT YET AVAILABLE"
                     ),
                 }
@@ -502,13 +525,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                         "contract_id": cid,
                         "latest_price": STATE.shadow_market_buffer[-1].get("close"),
                         "candles": STATE.shadow_market_buffer,
-                        "overlays": {
-                            "entry_reference": "24500.00",
-                            "stop_loss": "24450.00",
-                            "tp1": "24550.00",
-                            "tp2": "24600.00",
-                            "tp3": "24650.00",
-                        },
+                        "overlays": None,
                     }
                 else:
                     data = {
@@ -517,6 +534,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                         "provider": UPSTOX_PROVIDER_NAME,
                         "contract_id": cid,
                         "candles": [],
+                        "overlays": None,
                     }
             self._send_json(200, data)
             return
@@ -874,6 +892,19 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+
+        # Enforce CSRF token verification on state-mutating POST requests
+        csrf_token = self.headers.get("X-CSRF-Token", "")
+        if not csrf_token or not hmac.compare_digest(csrf_token, STATE.csrf_token):
+            self._send_json(
+                403,
+                {
+                    "success": False,
+                    "error": "CSRF_FORBIDDEN: Missing or invalid X-CSRF-Token header",
+                },
+            )
+            return
+
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length).decode("utf-8")
         try:
