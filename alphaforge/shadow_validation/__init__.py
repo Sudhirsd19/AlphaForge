@@ -13,6 +13,11 @@ from alphaforge.shadow_validation.enums import (
     MarketDataAnomalyType,
     ProcessLifecycleState,
 )
+from alphaforge.shadow_validation.evidence_package import (
+    ForensicEvidenceBuilder,
+    ForensicEvidencePackage,
+    ForensicManifest,
+)
 from alphaforge.shadow_validation.execution_realism import (
     AckLossSimulator,
     GapThroughStopModel,
@@ -92,6 +97,9 @@ __all__ = [
     "DiscrepancySeverity",
     "FeedProvenanceToken",
     "FillExecutionType",
+    "ForensicEvidenceBuilder",
+    "ForensicEvidencePackage",
+    "ForensicManifest",
     "ForensicReplayVerifier",
     "GapThroughStopModel",
     "ImmutableEvidencePackage",
