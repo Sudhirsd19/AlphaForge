@@ -13,6 +13,12 @@ from alphaforge.shadow_validation.enums import (
     MarketDataAnomalyType,
     ProcessLifecycleState,
 )
+from alphaforge.shadow_validation.execution_realism import (
+    AckLossSimulator,
+    GapThroughStopModel,
+    LatencyJitterModel,
+    OrderAckState,
+)
 from alphaforge.shadow_validation.forensic_replay_verifier import ForensicReplayVerifier
 from alphaforge.shadow_validation.long_duration_runner import LongDurationShadowRunner
 from alphaforge.shadow_validation.market_data_adapter import (
@@ -48,6 +54,7 @@ from alphaforge.shadow_validation.reconnect import (
     ReconnectStateMachine,
     StreamConnectionState,
 )
+from alphaforge.shadow_validation.risk_guard import InstitutionalRiskGuard
 from alphaforge.shadow_validation.shadow_guard import ShadowExecutionOnlyGuard
 from alphaforge.shadow_validation.state_reconstruction_engine import (
     StateReconstructionEngine,
@@ -60,6 +67,7 @@ from alphaforge.shadow_validation.upstox_adapter import (
 __all__ = [
     "AUTHORIZED_LIVE_PROVIDERS",
     "AbstractMarketDataStreamAdapter",
+    "AckLossSimulator",
     "AuthoritativeContractSource",
     "AuthorizedLiveStreamAdapter",
     "CanonicalStateSnapshot",
@@ -74,13 +82,17 @@ __all__ = [
     "FeedProvenanceToken",
     "FillExecutionType",
     "ForensicReplayVerifier",
+    "GapThroughStopModel",
     "ImmutableEvidencePackage",
     "IndependentCertificationReport",
+    "InstitutionalRiskGuard",
+    "LatencyJitterModel",
     "LongDurationShadowRunner",
     "MarketDataAnomalyType",
     "MarketStreamEvent",
     "MarketStreamValidator",
     "NetworkResilienceCoordinator",
+    "OrderAckState",
     "PerformanceMetrics",
     "ProcessLifecycleState",
     "ProvenanceVerifier",

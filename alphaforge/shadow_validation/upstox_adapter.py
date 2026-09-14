@@ -781,7 +781,9 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                     event_queue.put(exc)
                 finally:
                     try:
-                        await stream.aclose()
+                        aclose = getattr(stream, "aclose", None)
+                        if callable(aclose):
+                            await aclose()
                     except Exception:
                         pass
                     event_queue.put(None)  # Sentinel to terminate generator

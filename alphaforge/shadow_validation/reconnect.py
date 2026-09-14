@@ -127,7 +127,7 @@ class ReconnectPolicy:
             return 0.0
         exp_delay = min(self.max_delay_seconds, self.base_delay_seconds * (2 ** (attempt - 1)))
         jitter = random.uniform(-self.jitter_factor * exp_delay, self.jitter_factor * exp_delay)
-        return max(self.base_delay_seconds, min(self.max_delay_seconds, exp_delay + jitter))
+        return float(max(self.base_delay_seconds, min(self.max_delay_seconds, exp_delay + jitter)))
 
 
 class ReconnectStateMachine:
