@@ -16,8 +16,7 @@ import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -25,9 +24,7 @@ from alphaforge.contract.enums import ContractStatus, SettlementType
 from alphaforge.contract.models import ContractMaster
 from alphaforge.core.exceptions import DataIntegrityError
 from alphaforge.data.enums import InstrumentType
-from alphaforge.shadow_validation.enums import DataSourceType
-from alphaforge.shadow_validation.market_data_adapter import ProvenanceVerifier
-from alphaforge.shadow_validation.models import FeedProvenanceToken, MarketStreamEvent
+from alphaforge.shadow_validation.models import MarketStreamEvent
 from alphaforge.shadow_validation.upstox_adapter import (
     QueueOverflowPolicy,
     UpstoxMarketDataAdapter,
