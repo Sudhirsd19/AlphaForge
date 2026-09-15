@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
@@ -24,11 +25,13 @@ from alphaforge.contract.enums import ContractStatus, SettlementType
 from alphaforge.contract.models import ContractMaster
 from alphaforge.core.exceptions import DataIntegrityError
 from alphaforge.data.enums import InstrumentType
-from alphaforge.shadow_validation.models import MarketStreamEvent
 from alphaforge.shadow_validation.upstox_adapter import (
     QueueOverflowPolicy,
     UpstoxMarketDataAdapter,
 )
+
+if TYPE_CHECKING:
+    from alphaforge.shadow_validation.models import MarketStreamEvent
 
 
 @pytest.fixture
