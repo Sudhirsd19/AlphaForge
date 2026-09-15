@@ -17,14 +17,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import MagicMock
-
-import pytest
 
 from alphaforge.shadow_validation.enums import DataSourceType
 from alphaforge.shadow_validation.models import MarketStreamEvent
 from alphaforge.shadow_validation.reconnect import (
-    DataGapRecord,
     DisconnectReason,
     ReconnectPolicy,
     ReconnectStateMachine,
@@ -149,7 +145,7 @@ def test_stale_data_and_heartbeat_timeout_detection() -> None:
 
 
 def test_gap_detection_marks_stream_degraded() -> None:
-    """Verifies temporal gap between candles transitions stream to DEGRADED and blocks evaluation."""
+    """Verifies temporal gap transitions to DEGRADED and blocks evaluation."""
     fsm = ReconnectStateMachine()
     fsm.on_connect_started()
     fsm.on_connected()
