@@ -40,15 +40,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 _repo_root = Path(__file__).resolve().parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from alphaforge.broker.models import BrokerOrderRequest, BrokerOrder
+from alphaforge.broker.models import BrokerOrder, BrokerOrderRequest
 from alphaforge.broker.paper import PaperBroker
-from alphaforge.core.models import Candle
+from alphaforge.core.enums import FuturesConfirmationStatus
+from alphaforge.core.models import Candle, StrategySignal
 from alphaforge.data.enums import InstrumentType
 from alphaforge.data.models import MarketCandle
 from alphaforge.paper_shadow.engine import PaperShadowEngine
@@ -180,12 +181,12 @@ def _event_from_candle(candle: MarketCandle, sequence: int, received: datetime) 
 
 class _ConfirmationAwareStrategyEngine(DeterministicStrategyEngine):
     """
-    Thin compatibility wrapper that preserves the frozen strategy implementation.
+    Compatibility wrapper that preserves the frozen strategy implementation.
 
-    PaperShadowEngine historically supplies its execution-candle history as both
-    execution and confirmation inputs. For a real multi-timeframe session we need
-    the separate 15m confirmation series without altering the PaperShadowEngine or
-    the frozen strategy rules themselves.
+    PaperShadowEngine currently supplies its execution-candle history as both
+    execution and confirmation inputs. For a live multi-timeframe session we
+    need the separate 15m confirmation series without changing the frozen
+    PaperShadowEngine or strategy rules.
     """
 
     def __init__(self, config: StrategyConfig | None = None) -> None:
@@ -199,11 +200,12 @@ class _ConfirmationAwareStrategyEngine(DeterministicStrategyEngine):
         self,
         raw_exec_candles: list[Candle],
         raw_conf_candles: list[Candle],
-        futures_status,
+        futures_status: FuturesConfirmationStatus,
         evaluation_timestamp: datetime,
-    ):
-        # The base PaperShadowEngine argument is intentionally ignored here.
+    ) -> StrategySignal:
+        # PaperShadowEngine's confirmation argument is intentionally ignored.
         # Only the runner-maintained 15m series is used for confirmation.
+        _ = raw_conf_candles
         return super().evaluate(
             raw_exec_candles=raw_exec_candles,
             raw_conf_candles=self._confirmation_candles,
@@ -285,7 +287,7 @@ def main() -> None:
     evidence_dir = _repo_root / "evidence" / "paper_live"
     evidence_dir.mkdir(parents=True, exist_ok=True)
     started = datetime.now(UTC)
-    counts = {
+    counts: dict[str, int] = {
         "upstox_1m_events": 0,
         "execution_3m_bars": 0,
         "confirmation_15m_bars": 0,
@@ -343,8 +345,6 @@ def main() -> None:
 
             # PaperShadowEngine remains authoritative for validation, risk,
             # routing/FSM, deterministic fill simulation, P&L, and reconciliation.
-            # It will only see 3m execution candles; the wrapper supplies 15m
-            # confirmation candles to the strategy engine.
             engine.process_event(event)
             counts["execution_3m_bars"] += 1
 
@@ -373,7 +373,7 @@ def main() -> None:
             logger.exception("Adapter shutdown error; session evidence will still be written.")
 
         ended = datetime.now(UTC)
-        final_telemetry = adapter.get_connection_telemetry()
+        final_telemetry: dict[str, Any] = adapter.get_connection_telemetry()
         positions = [
             {
                 "symbol": p.symbol,
