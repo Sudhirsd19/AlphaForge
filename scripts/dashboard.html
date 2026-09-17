@@ -1325,6 +1325,15 @@
       }
     }
 
+    async function parseSafeJson(res) {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        return await res.json();
+      }
+      const raw = await res.text();
+      throw new Error(`Server returned HTTP ${res.status}: ${raw.slice(0, 100)}`);
+    }
+
     async function startBot(mode = 'PAPER') {
       if (mode !== 'PAPER') {
         alertRealLocked();
@@ -1342,9 +1351,9 @@
           headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
           body: JSON.stringify({ mode: mode })
         });
-        const data = await res.json();
+        const data = await parseSafeJson(res);
         if (!res.ok || !data.success) {
-          const errText = data.error || 'Failed to start bot';
+          const errText = data.error || data.message || 'Failed to start bot';
           const errBanner = document.getElementById('bot-error-banner');
           const errMsg = document.getElementById('bot-error-msg');
           if (errBanner && errMsg) {
@@ -1353,7 +1362,7 @@
           }
         }
       } catch (err) {
-        alert('Bot start request failed: ' + err);
+        alert('Bot start request failed: ' + (err.message || err));
       } finally {
         await fetchAllTelemetry();
       }
@@ -1367,13 +1376,14 @@
         btn.disabled = true;
       }
       try {
-        await fetch('/api/bot/stop', {
+        const res = await fetch('/api/bot/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
           body: JSON.stringify({ reason: 'Operator UI Action' })
         });
+        await parseSafeJson(res);
       } catch (err) {
-        alert('Bot stop request failed: ' + err);
+        alert('Bot stop request failed: ' + (err.message || err));
       } finally {
         await fetchAllTelemetry();
       }

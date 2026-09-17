@@ -1139,7 +1139,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             if run_data:
                 self._send_json(200, run_data)
             else:
-                self.send_error(404, f"Run ID {run_id} not found")
+                self._send_json(404, {"error": f"Run ID {run_id} not found"})
             return
 
         if parsed.path.startswith("/api/export/"):
@@ -1150,7 +1150,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                 run_data = next((r for r in STATE.run_history if r["run_id"] == run_id), None)
 
             if not run_data:
-                self.send_error(404, f"Run ID {run_id} not found for export")
+                self._send_json(404, {"error": f"Run ID {run_id} not found for export"})
                 return
 
             if fmt == "csv":
@@ -1210,6 +1210,10 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             self._send_download(
                 f"alphaforge_validation_{run_id}.json", "application/json", json_bytes
             )
+            return
+
+        if parsed.path.startswith("/api/"):
+            self._send_json(404, {"error": f"API endpoint not found: {parsed.path}"})
             return
 
         self.send_error(404, "Endpoint not found")
@@ -1664,6 +1668,10 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     STATE.log_event("ORDER", "ERROR", f"Paper order submission failed: {exc}")
                     self._send_json(400, {"success": False, "error": str(exc)})
+            return
+
+        if parsed.path.startswith("/api/"):
+            self._send_json(404, {"error": f"API endpoint not found: {parsed.path}"})
             return
 
         self.send_error(404, "Endpoint not found")
