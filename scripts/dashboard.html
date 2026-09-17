@@ -2,15 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>AlphaForge Operations Console</title>
   <style>
     :root {
-      --bg: #060913;
-      --panel-bg: #0b1120;
-      --card-bg: #0f172a;
-      --card-border: #1e293b;
-      --header-bg: #080d1a;
+      --bg: #070a14;
+      --panel-bg: #0d1424;
+      --panel-bg-subtle: #0a0f1d;
+      --card-bg: #10192e;
+      --card-border: #1b2842;
+      --card-border-light: #243556;
+      --header-bg: #090f1d;
       --text: #f8fafc;
       --text-muted: #94a3b8;
       --text-dim: #64748b;
@@ -27,11 +29,11 @@
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, "Helvetica Neue", monospace; }
-    body { background-color: var(--bg); color: var(--text); padding: 14px 18px; line-height: 1.45; min-height: 100vh; }
+    body { background-color: var(--bg); color: var(--text); padding: 14px 18px; line-height: 1.45; min-height: 100vh; -webkit-font-smoothing: antialiased; }
     .container { max-width: 1680px; margin: 0 auto; }
 
-    /* Custom Scrollbar */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    /* Custom Smooth Scrollbars */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: #060a14; }
     ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #334155; }
@@ -50,26 +52,27 @@
       gap: 12px;
       box-shadow: 0 4px 20px rgba(0,0,0,0.5);
     }
+    .header-top-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .brand-cluster { display: flex; align-items: center; gap: 12px; }
     .brand-mark {
-      width: 36px; height: 36px;
+      width: 38px; height: 38px; min-width: 38px;
       background: linear-gradient(135deg, #1d4ed8, #06b6d4);
-      border-radius: 6px;
+      border-radius: 7px;
       display: flex; align-items: center; justify-content: center;
       font-weight: 900; font-size: 18px; color: #fff;
-      box-shadow: 0 0 12px rgba(6, 182, 212, 0.3);
+      box-shadow: 0 0 14px rgba(6, 182, 212, 0.35);
       letter-spacing: -0.5px;
     }
-    .brand-text h1 { font-size: 15px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: #fff; }
+    .brand-text h1 { font-size: 15px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; color: #fff; line-height: 1.2; }
     .brand-text span { font-size: 10px; color: var(--cyan); letter-spacing: 1.2px; font-weight: 700; text-transform: uppercase; }
 
     .header-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .hdr-badge {
       display: flex; flex-direction: column;
       background: #081022; border: 1px solid var(--card-border);
-      border-radius: 4px; padding: 4px 10px; min-width: 85px;
+      border-radius: 5px; padding: 4px 10px; min-width: 85px;
     }
-    .hdr-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.8px; }
+    .hdr-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.8px; margin-bottom: 1px; }
     .hdr-val { font-family: "JetBrains Mono", monospace; font-weight: 700; font-size: 11px; color: #e2e8f0; font-feature-settings: "tnum"; }
     .hdr-val.cyan { color: var(--cyan); }
     .hdr-val.green { color: var(--success); }
@@ -77,25 +80,27 @@
     .hdr-val.red { color: var(--danger); }
 
     .btn-kill-action {
-      background: rgba(239, 68, 68, 0.18); color: #f87171;
-      border: 1px solid rgba(239, 68, 68, 0.45); padding: 7px 14px;
+      background: rgba(239, 68, 68, 0.16); color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4); padding: 7px 14px;
       border-radius: 6px; font-weight: 800; cursor: pointer;
       font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
-      transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+      transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
+      white-space: nowrap;
     }
     .btn-kill-action:hover { background: #ef4444; color: #fff; box-shadow: 0 0 14px rgba(239, 68, 68, 0.5); }
     .btn-disarm-action {
-      background: rgba(16, 185, 129, 0.2); color: #34d399;
-      border: 1px solid rgba(16, 185, 129, 0.45); padding: 7px 14px;
+      background: rgba(16, 185, 129, 0.18); color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.4); padding: 7px 14px;
       border-radius: 6px; font-weight: 800; cursor: pointer;
       font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
-      transition: all 0.2s;
+      transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
+      white-space: nowrap;
     }
     .btn-disarm-action:hover { background: #10b981; color: #fff; box-shadow: 0 0 14px rgba(16, 185, 129, 0.5); }
 
-    /* Bot Master Control Strip */
+    /* Bot Master Control Bar */
     .bot-control-bar {
-      background: #090e1c;
+      background: #090f1e;
       border: 1px solid #1e2c47;
       border-radius: 8px;
       padding: 10px 16px;
@@ -103,12 +108,12 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 16px;
+      gap: 12px;
       flex-wrap: wrap;
     }
-    .bot-status-cluster { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .bot-status-cluster { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .bot-pulse-dot {
-      width: 10px; height: 10px; border-radius: 50%;
+      width: 10px; height: 10px; min-width: 10px; border-radius: 50%;
       background: var(--text-dim); transition: all 0.3s;
     }
     .bot-pulse-dot.running { background: #10b981; box-shadow: 0 0 10px #10b981; animation: pulse 1.8s infinite; }
@@ -122,9 +127,9 @@
       border-radius: 4px; padding: 3px 8px; font-size: 10px;
       font-weight: 700; color: #94a3b8; font-family: "JetBrains Mono", monospace;
     }
-    .bot-mode-selector { display: flex; align-items: center; gap: 4px; }
+    .bot-mode-selector { display: flex; align-items: center; gap: 3px; }
     .bot-mode-btn {
-      padding: 4px 10px; font-size: 10px; font-weight: 800;
+      padding: 4px 9px; font-size: 10px; font-weight: 800;
       border-radius: 4px; border: 1px solid transparent; cursor: pointer;
       text-transform: uppercase; letter-spacing: 0.6px;
     }
@@ -134,19 +139,19 @@
     .btn-bot-start {
       background: linear-gradient(135deg, #059669, #10b981);
       color: #fff; border: 1px solid #34d399;
-      padding: 8px 20px; border-radius: 6px; font-weight: 800;
+      padding: 9px 22px; border-radius: 6px; font-weight: 800;
       font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase;
-      cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 8px;
-      box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
+      cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3); white-space: nowrap;
     }
     .btn-bot-start:hover { background: #10b981; box-shadow: 0 0 16px rgba(16, 185, 129, 0.5); }
     .btn-bot-stop {
       background: linear-gradient(135deg, #b91c1c, #ef4444);
       color: #fff; border: 1px solid #f87171;
-      padding: 8px 20px; border-radius: 6px; font-weight: 800;
+      padding: 9px 22px; border-radius: 6px; font-weight: 800;
       font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase;
-      cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 8px;
-      box-shadow: 0 2px 10px rgba(239, 68, 68, 0.3);
+      cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      box-shadow: 0 2px 10px rgba(239, 68, 68, 0.3); white-space: nowrap;
     }
     .btn-bot-stop:hover { background: #ef4444; box-shadow: 0 0 16px rgba(239, 68, 68, 0.5); }
     .btn-bot-disabled { opacity: 0.6; cursor: not-allowed; }
@@ -157,17 +162,22 @@
       color: #fca5a5; font-size: 12px; display: none; align-items: center; justify-content: space-between;
     }
 
-    /* Navigation Tabs */
+    /* Navigation Tabs (Smooth Scrollable on Mobile) */
+    .tabs-nav-wrapper { position: relative; margin-bottom: 12px; }
     .tabs-nav {
-      display: flex; gap: 3px; margin-bottom: 14px;
+      display: flex; gap: 3px;
       border-bottom: 1px solid var(--card-border);
       padding-bottom: 4px; overflow-x: auto;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
     }
+    .tabs-nav::-webkit-scrollbar { display: none; }
     .nav-btn {
       background: transparent; border: none; color: var(--text-muted);
       padding: 7px 13px; border-radius: 4px; font-size: 11px;
       font-weight: 700; cursor: pointer; text-transform: uppercase;
-      letter-spacing: 0.7px; transition: all 0.15s; white-space: nowrap;
+      letter-spacing: 0.6px; transition: all 0.15s; white-space: nowrap;
+      flex-shrink: 0;
     }
     .nav-btn:hover { color: #fff; background: #0f172a; }
     .nav-btn.active { color: #fff; background: var(--primary); box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35); }
@@ -177,80 +187,74 @@
     @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
 
     /* Operational Grid System */
-    .grid-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-    .grid-row-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
-    .grid-row-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
-    .split-layout { display: grid; grid-template-columns: 1.65fr 1fr; gap: 12px; margin-bottom: 12px; }
-
-    @media (max-width: 1100px) {
-      .split-layout { grid-template-columns: 1fr; }
-      .grid-row-4 { grid-template-columns: repeat(2, 1fr); }
-      .grid-row-3 { grid-template-columns: 1fr; }
-      .grid-row-2 { grid-template-columns: 1fr; }
-    }
+    .grid-row-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 10px; }
+    .grid-row-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
+    .grid-row-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+    .split-layout { display: grid; grid-template-columns: 1.6fr 1fr; gap: 10px; margin-bottom: 10px; }
 
     .op-panel {
       background: var(--panel-bg);
       border: 1px solid var(--card-border);
-      border-radius: 6px;
-      padding: 13px 15px;
-      margin-bottom: 12px;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+      border-radius: 7px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
     }
     .op-panel-header {
       display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 10px; border-bottom: 1px solid #162033;
-      padding-bottom: 6px;
+      margin-bottom: 9px; border-bottom: 1px solid #162035;
+      padding-bottom: 6px; gap: 8px; flex-wrap: wrap;
     }
     .op-panel-title {
       font-size: 11px; font-weight: 800; text-transform: uppercase;
-      letter-spacing: 0.9px; color: #e2e8f0; display: flex; align-items: center; gap: 8px;
+      letter-spacing: 0.8px; color: #e2e8f0; display: flex; align-items: center; gap: 6px;
     }
     .op-subhead { font-size: 10px; color: var(--text-dim); }
 
     /* Badges & Tags */
     .status-tag {
-      font-size: 10px; font-weight: 800; padding: 2px 7px;
+      font-size: 9.5px; font-weight: 800; padding: 2px 7px;
       border-radius: 3px; text-transform: uppercase; letter-spacing: 0.5px;
-      font-family: "JetBrains Mono", monospace;
+      font-family: "JetBrains Mono", monospace; display: inline-flex; align-items: center;
+      white-space: nowrap;
     }
     .tag-green { background: var(--success-dim); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
     .tag-amber { background: var(--warning-dim); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
     .tag-red { background: var(--danger-dim); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
     .tag-cyan { background: var(--cyan-dim); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.4); }
-    .tag-slate { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+    .tag-slate { background: #172236; color: #94a3b8; border: 1px solid #283750; }
 
     /* Key-Value Pairs */
-    .kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
-    .kv-item { background: #070d1a; border: 1px solid #141f33; border-radius: 4px; padding: 7px 9px; }
-    .kv-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 2px; }
+    .kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 7px; }
+    .kv-item { background: var(--panel-bg-subtle); border: 1px solid #152238; border-radius: 4px; padding: 7px 9px; }
+    .kv-label { font-size: 8.5px; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 2px; }
     .kv-value { font-size: 12px; font-weight: 700; font-family: "JetBrains Mono", monospace; color: #f1f5f9; font-feature-settings: "tnum"; }
     .kv-value.green { color: #34d399; }
     .kv-value.amber { color: #fbbf24; }
     .kv-value.red { color: #f87171; }
     .kv-value.cyan { color: #22d3ee; }
 
-    /* Top Executive KPI Stat Cards */
+    /* Uniform-Height Executive KPI Cards */
     .kpi-card {
-      background: linear-gradient(180deg, #0d1527 0%, #080e1a 100%);
-      border: 1px solid #1a2744;
-      border-radius: 6px;
-      padding: 10px 14px;
+      background: linear-gradient(180deg, #0e172a 0%, #09101f 100%);
+      border: 1px solid var(--card-border);
+      border-radius: 7px;
+      padding: 10px 13px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+      min-height: 95px;
     }
-    .kpi-card:hover { border-color: #2a3c66; }
+    .kpi-card:hover { border-color: var(--card-border-light); }
     .kpi-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-    .kpi-label { font-size: 9px; font-weight: 800; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.8px; }
-    .kpi-main-val { font-size: 18px; font-weight: 900; font-family: "JetBrains Mono", monospace; color: #fff; margin-bottom: 4px; letter-spacing: -0.2px; font-feature-settings: "tnum"; }
-    .kpi-subrow { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--text-muted); font-family: "JetBrains Mono", monospace; }
+    .kpi-label { font-size: 9px; font-weight: 800; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.7px; }
+    .kpi-main-val { font-size: 17px; font-weight: 900; font-family: "JetBrains Mono", monospace; color: #fff; margin-bottom: 4px; letter-spacing: -0.2px; font-feature-settings: "tnum"; line-height: 1.2; }
+    .kpi-subrow { display: flex; justify-content: space-between; align-items: center; font-size: 9.5px; color: var(--text-muted); font-family: "JetBrains Mono", monospace; }
 
-    /* Visual Meters */
-    .meter-wrap { margin-top: 5px; }
-    .meter-label-row { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-bottom: 2px; font-family: "JetBrains Mono", monospace; }
-    .meter-track { height: 6px; background: #070c17; border-radius: 2px; overflow: hidden; border: 1px solid #162033; }
+    /* Visual Risk Meters */
+    .meter-wrap { margin-top: 4px; }
+    .meter-track { height: 5px; background: #070c17; border-radius: 2px; overflow: hidden; border: 1px solid #162033; }
     .meter-fill { height: 100%; transition: width 0.3s; }
     .meter-fill.green { background: #10b981; }
     .meter-fill.amber { background: #f59e0b; }
@@ -260,29 +264,29 @@
     .tbl-scroll-container { width: 100%; overflow-x: auto; border: 1px solid var(--card-border); border-radius: 4px; }
     table.forensic-tbl { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
     table.forensic-tbl th {
-      background: #081020; color: var(--text-dim); padding: 7px 10px;
+      background: #081020; color: var(--text-dim); padding: 7px 9px;
       font-weight: 700; text-transform: uppercase; font-size: 9px;
-      letter-spacing: 0.6px; border-bottom: 1px solid var(--card-border);
+      letter-spacing: 0.5px; border-bottom: 1px solid var(--card-border);
       position: sticky; top: 0; white-space: nowrap;
     }
-    table.forensic-tbl td { padding: 7px 10px; border-bottom: 1px solid #141d2e; font-family: "JetBrains Mono", monospace; font-size: 11px; white-space: nowrap; }
+    table.forensic-tbl td { padding: 7px 9px; border-bottom: 1px solid #141d2e; font-family: "JetBrains Mono", monospace; font-size: 10.5px; white-space: nowrap; }
     table.forensic-tbl tr:hover td { background: rgba(255,255,255,0.02); }
 
     /* Chart Canvas Container */
     .chart-container {
       background: #050812; border: 1px solid var(--card-border);
-      border-radius: 4px; padding: 8px; position: relative;
-      height: 310px; display: flex; flex-direction: column;
+      border-radius: 5px; padding: 8px; position: relative;
+      height: 300px; display: flex; flex-direction: column;
     }
     .chart-canvas { width: 100%; flex-grow: 1; }
 
     .empty-state-card {
       background: #080d1a; border: 1px dashed #1e2c47;
-      border-radius: 6px; padding: 22px; text-align: center;
-      color: var(--text-dim); margin: 8px 0;
+      border-radius: 6px; padding: 20px; text-align: center;
+      color: var(--text-dim); margin: 6px 0;
     }
-    .empty-state-title { font-size: 12px; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
-    .empty-state-desc { font-size: 11px; color: var(--text-dim); }
+    .empty-state-title { font-size: 12px; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; }
+    .empty-state-desc { font-size: 10.5px; color: var(--text-dim); line-height: 1.4; }
 
     /* Form Controls */
     .form-ctrl-group { margin-bottom: 8px; }
@@ -298,7 +302,7 @@
       padding: 7px 14px; border-radius: 4px; font-size: 11px;
       font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
       cursor: pointer; transition: background 0.15s; display: inline-flex;
-      align-items: center; gap: 6px; text-decoration: none;
+      align-items: center; justify-content: center; gap: 6px; text-decoration: none;
     }
     .btn-action:hover { background: var(--primary-hover); }
     .btn-action.secondary { background: #1e293b; color: #cbd5e1; }
@@ -308,27 +312,100 @@
 
     /* Security Invariants Box */
     .invariants-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 8px; margin-top: 8px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 7px; margin-top: 6px;
     }
     .invariant-card {
-      background: #070d1c; border: 1px solid #142036; border-radius: 4px; padding: 8px 10px;
+      background: #070d1c; border: 1px solid #142036; border-radius: 4px; padding: 7px 9px;
       display: flex; justify-content: space-between; align-items: center;
     }
-    .invariant-title { font-size: 10px; font-weight: 700; color: #cbd5e1; }
-    .invariant-val { font-size: 10px; font-weight: 800; font-family: "JetBrains Mono", monospace; }
+    .invariant-title { font-size: 9.5px; font-weight: 700; color: #cbd5e1; }
+    .invariant-val { font-size: 9.5px; font-weight: 800; font-family: "JetBrains Mono", monospace; }
+
+    /* ========================================================= */
+    /* RESPONSIVE DESIGN (MOBILE & TABLET STYLES)                */
+    /* ========================================================= */
+
+    @media (max-width: 1024px) {
+      .split-layout { grid-template-columns: 1fr; }
+      .grid-row-4 { grid-template-columns: repeat(2, 1fr); }
+      .grid-row-3 { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 8px 10px; }
+
+      header {
+        padding: 10px 12px;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+      }
+      .header-top-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+      }
+      .header-badges {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+        width: 100%;
+      }
+      .hdr-badge { min-width: auto; padding: 5px 8px; }
+
+      .bot-control-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px;
+      }
+      .bot-status-cluster {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+      }
+      .bot-tags-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        width: 100%;
+      }
+      .btn-bot-start, .btn-bot-stop {
+        width: 100%;
+        padding: 12px;
+        font-size: 12px;
+      }
+
+      .grid-row-4 { grid-template-columns: 1fr; }
+      .grid-row-3 { grid-template-columns: 1fr; }
+      .grid-row-2 { grid-template-columns: 1fr; }
+
+      .chart-container { height: 240px; }
+      .kv-grid { grid-template-columns: repeat(2, 1fr); }
+    }
   </style>
 </head>
 <body>
   <div class="container">
 
-    <!-- Top Command Center Header (Clean & Trader-Focused) -->
+    <!-- Top Command Center Header -->
     <header>
-      <div class="brand-cluster">
-        <div class="brand-mark">AF</div>
-        <div class="brand-text">
-          <h1>AlphaForge Operations Console</h1>
-          <span>Automated Algorithmic Trading Desk</span>
+      <div class="header-top-row">
+        <div class="brand-cluster">
+          <div class="brand-mark">AF</div>
+          <div class="brand-text">
+            <h1>AlphaForge Operations Console</h1>
+            <span>Automated Algorithmic Trading Desk</span>
+          </div>
+        </div>
+
+        <div>
+          <button id="btn-kill-toggle" class="btn-kill-action" onclick="toggleKillSwitch()">
+            &#9888; KILL SWITCH
+          </button>
         </div>
       </div>
 
@@ -350,17 +427,20 @@
           <span class="hdr-val green" id="hdr-health">HEALTHY</span>
         </div>
       </div>
-
-      <button id="btn-kill-toggle" class="btn-kill-action" onclick="toggleKillSwitch()">
-        &#9888; ENGAGE KILL SWITCH
-      </button>
     </header>
 
     <!-- Bot Master Control Strip -->
     <div class="bot-control-bar">
       <div class="bot-status-cluster">
-        <div id="bot-pulse-dot" class="bot-pulse-dot"></div>
-        <span id="bot-status-text" class="bot-title">BOT: STOPPED</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div id="bot-pulse-dot" class="bot-pulse-dot"></div>
+          <span id="bot-status-text" class="bot-title">BOT: STOPPED</span>
+        </div>
+
+        <div class="bot-mode-selector">
+          <button class="bot-mode-btn active-paper">PAPER</button>
+          <button class="bot-mode-btn locked-real" onclick="alertRealLocked()">&#128274; REAL</button>
+        </div>
 
         <span id="bot-pid-badge" class="bot-meta-pill" style="display: none;">
           PID: <span id="bot-pid-val">—</span>
@@ -368,13 +448,10 @@
         <span id="bot-uptime-badge" class="bot-meta-pill" style="display: none;">
           UPTIME: <span id="bot-uptime-val">0s</span>
         </span>
+      </div>
 
-        <div class="bot-mode-selector">
-          <button class="bot-mode-btn active-paper">PAPER TRADING</button>
-          <button class="bot-mode-btn locked-real" onclick="alertRealLocked()">&#128274; REAL (LOCKED)</button>
-        </div>
-
-        <span class="status-tag tag-cyan">UPSTOX LIVE FEED</span>
+      <div class="bot-tags-row">
+        <span class="status-tag tag-cyan">UPSTOX LIVE</span>
         <span class="status-tag tag-green">ZERO LIVE ORDERS GUARANTEED</span>
         <span id="bot-mkt-badge" class="status-tag tag-amber">MARKET: EVALUATING</span>
       </div>
@@ -392,18 +469,20 @@
       <button class="btn-action secondary" style="padding: 2px 8px; font-size: 10px;" onclick="dismissBotError()">Dismiss</button>
     </div>
 
-    <!-- Navigation Tabs (Simple, Trader-Friendly Labels) -->
-    <div class="tabs-nav">
-      <button class="nav-btn active" onclick="switchTab('overview')">Overview</button>
-      <button class="nav-btn" onclick="switchTab('market')">Market Watch</button>
-      <button class="nav-btn" onclick="switchTab('signals')">Signals</button>
-      <button class="nav-btn" onclick="switchTab('risk')">Risk Controls</button>
-      <button class="nav-btn" onclick="switchTab('shadow')">Live Session</button>
-      <button class="nav-btn" onclick="switchTab('execution')">Orders &amp; Fills</button>
-      <button class="nav-btn" onclick="switchTab('evidence')">Reports</button>
-      <button class="nav-btn" onclick="switchTab('security')">Security</button>
-      <button class="nav-btn" onclick="switchTab('observability')">System Logs</button>
-      <button class="nav-btn" onclick="switchTab('backtest')">Backtest</button>
+    <!-- Navigation Tabs (Touch-friendly & Horizontal Scrolling) -->
+    <div class="tabs-nav-wrapper">
+      <div class="tabs-nav">
+        <button class="nav-btn active" onclick="switchTab('overview')">Overview</button>
+        <button class="nav-btn" onclick="switchTab('market')">Market Watch</button>
+        <button class="nav-btn" onclick="switchTab('signals')">Signals</button>
+        <button class="nav-btn" onclick="switchTab('risk')">Risk Controls</button>
+        <button class="nav-btn" onclick="switchTab('shadow')">Live Session</button>
+        <button class="nav-btn" onclick="switchTab('execution')">Orders &amp; Fills</button>
+        <button class="nav-btn" onclick="switchTab('evidence')">Reports</button>
+        <button class="nav-btn" onclick="switchTab('security')">Security</button>
+        <button class="nav-btn" onclick="switchTab('observability')">System Logs</button>
+        <button class="nav-btn" onclick="switchTab('backtest')">Backtest</button>
+      </div>
     </div>
 
     <!-- ==================== TAB 1: OVERVIEW ==================== -->
@@ -443,7 +522,7 @@
             <span class="kpi-label">Strategy Stance</span>
             <span class="status-tag tag-cyan" id="ov-sig-state">WAIT</span>
           </div>
-          <div class="kpi-main-val" id="ov-sig-trend" style="font-size: 16px;">NEUTRAL</div>
+          <div class="kpi-main-val" id="ov-sig-trend">NEUTRAL</div>
           <div class="kpi-subrow">
             <span>Momentum: <strong id="ov-sig-momentum">WAIT</strong></span>
             <span>Breakout: <strong id="ov-sig-breakout">NONE</strong></span>
@@ -459,7 +538,7 @@
           <div class="meter-wrap">
             <div class="meter-track"><div class="meter-fill green" id="ov-meter-risk-bar" style="width: 0%;"></div></div>
           </div>
-          <div class="kpi-subrow" style="margin-top: 8px;">
+          <div class="kpi-subrow" style="margin-top: 6px;">
             <span>Daily Hard Loss Barrier</span>
             <span id="ov-meter-loss-pct">0.00% / 3.00%</span>
           </div>
@@ -471,20 +550,20 @@
 
       <!-- Main Operational Split Layout -->
       <div class="split-layout">
-        <!-- Left Column (65%): Live Chart & Signal Decision Feed -->
+        <!-- Left Column: Live Chart & Signal Decision Feed -->
         <div>
           <!-- Live Market Chart Panel -->
           <div class="op-panel">
             <div class="op-panel-header">
-              <span class="op-panel-title">NIFTY Futures &mdash; Live Market Feed</span>
-              <div style="display: flex; gap: 8px; align-items: center;">
+              <span class="op-panel-title">NIFTY Futures &mdash; Live Feed</span>
+              <div style="display: flex; gap: 6px; align-items: center;">
                 <span class="status-tag tag-slate" id="chart-session-status">SESSION: CHECKING</span>
                 <span class="status-tag tag-amber" id="chart-data-badge">LIVE STREAM</span>
               </div>
             </div>
             <div class="chart-container">
               <canvas id="marketChartCanvas" class="chart-canvas"></canvas>
-              <div id="chart-empty-state" class="empty-state-card" style="display: none; position: absolute; inset: 18px;">
+              <div id="chart-empty-state" class="empty-state-card" style="display: none; position: absolute; inset: 16px;">
                 <div class="empty-state-title">Awaiting Market Data Stream</div>
                 <div class="empty-state-desc">Click <strong>START BOT (PAPER)</strong> to stream live market candles during active NSE hours (09:15–15:30 IST).</div>
               </div>
@@ -495,9 +574,9 @@
           <div class="op-panel">
             <div class="op-panel-header">
               <span class="op-panel-title">Strategy Decision Feed</span>
-              <span class="op-subhead" id="ov-sig-decision">NO TRADE &mdash; Closed candle requirements not met.</span>
+              <span class="op-subhead" id="ov-sig-decision">NO TRADE &mdash; Standing by for market setup.</span>
             </div>
-            <div class="tbl-scroll-container" style="max-height: 240px;">
+            <div class="tbl-scroll-container" style="max-height: 220px;">
               <table class="forensic-tbl">
                 <thead>
                   <tr>
@@ -520,7 +599,7 @@
           </div>
         </div>
 
-        <!-- Right Column (35%): Broker Connection & Contract Specs -->
+        <!-- Right Column: Broker Connection & Contract Specs -->
         <div>
           <!-- Broker Connection & Safety Status -->
           <div class="op-panel">
@@ -534,19 +613,19 @@
                 <div class="kv-value" id="ov-provider">UPSTOX</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">Feed Connection</div>
+                <div class="kv-label">Connection</div>
                 <div class="kv-value" id="ov-conn-state">DISCONNECTED</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">Account Token</div>
+                <div class="kv-label">Token Auth</div>
                 <div class="kv-value green" id="ov-prov-auth">NOT VERIFIED</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">Live Data Ingest</div>
+                <div class="kv-label">Live Ingest</div>
                 <div class="kv-value" id="ov-ext-feed">NO</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">Real Orders Sent</div>
+                <div class="kv-label">Real Orders</div>
                 <div class="kv-value green" id="ov-live-orders">0 (BLOCKED)</div>
               </div>
               <div class="kv-item">
@@ -555,11 +634,11 @@
               </div>
             </div>
 
-            <div style="background: #081020; border: 1px solid #142036; border-radius: 4px; padding: 9px; margin-top: 10px; font-size: 11px; color: #94a3b8;">
-              <div style="font-weight: 800; color: #34d399; margin-bottom: 3px; display: flex; align-items: center; gap: 6px;">
+            <div style="background: #081020; border: 1px solid #142036; border-radius: 5px; padding: 9px; margin-top: 8px; font-size: 11px; color: #94a3b8;">
+              <div style="font-weight: 800; color: #34d399; margin-bottom: 2px; display: flex; align-items: center; gap: 6px;">
                 <span>&#10004;</span> Zero Real Orders Guaranteed
               </div>
-              <div>Real-money broker routing is permanently blocked. All trades execute in simulated paper mode against genuine live market data.</div>
+              <div>Real-money broker routing is permanently locked. All trades execute in simulated paper mode against genuine live market prices.</div>
             </div>
           </div>
 
@@ -571,7 +650,7 @@
             </div>
             <div class="kv-grid">
               <div class="kv-item">
-                <div class="kv-label">Exchange / Segment</div>
+                <div class="kv-label">Segment</div>
                 <div class="kv-value" id="ov-contract-exchange">NSE &bull; NFO</div>
               </div>
               <div class="kv-item">
@@ -604,7 +683,7 @@
           <span class="status-tag tag-cyan" id="mkt-session-badge">09:15 &mdash; 15:30 IST</span>
         </div>
         <div class="kv-grid">
-          <div class="kv-item"><div class="kv-label">Market Session</div><div class="kv-value">09:15 &mdash; 15:30 IST</div></div>
+          <div class="kv-item"><div class="kv-label">Trading Window</div><div class="kv-value">09:15 &mdash; 15:30 IST</div></div>
           <div class="kv-item"><div class="kv-label">Session Status</div><div class="kv-value" id="mkt-session-open">CLOSED (OFF-HOURS)</div></div>
           <div class="kv-item"><div class="kv-label">Clock (UTC)</div><div class="kv-value" id="mkt-clock-utc">00:00:00 UTC</div></div>
           <div class="kv-item"><div class="kv-label">Contract</div><div class="kv-value" id="mkt-contract-id">NIFTY FUTURES</div></div>
@@ -713,7 +792,7 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 5: LIVE SESSION (SHADOW RUN) ==================== -->
+    <!-- ==================== TAB 5: LIVE SESSION ==================== -->
     <div id="tab-shadow" class="tab-view">
       <div class="op-panel">
         <div class="op-panel-header">
@@ -746,7 +825,7 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 6: EXECUTION (ORDERS & FILLS) ==================== -->
+    <!-- ==================== TAB 6: ORDERS & FILLS ==================== -->
     <div id="tab-execution" class="tab-view">
       <div class="op-panel">
         <div class="op-panel-header">
@@ -813,7 +892,7 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 7: REPORTS (EVIDENCE) ==================== -->
+    <!-- ==================== TAB 7: REPORTS ==================== -->
     <div id="tab-evidence" class="tab-view">
       <div class="op-panel">
         <div class="op-panel-header">
@@ -883,7 +962,7 @@
         </div>
       </div>
 
-      <!-- System Integrity & Invariants Matrix (Cleanly placed in Security) -->
+      <!-- System Integrity & Invariants Matrix -->
       <div class="op-panel">
         <div class="op-panel-header">
           <span class="op-panel-title">System Invariants &amp; Integrity Matrix</span>
@@ -934,7 +1013,7 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 9: SYSTEM LOGS (OBSERVABILITY) ==================== -->
+    <!-- ==================== TAB 9: SYSTEM LOGS ==================== -->
     <div id="tab-observability" class="tab-view">
       <!-- Hidden technical badges to preserve JS DOM references safely -->
       <div style="display: none;">
@@ -944,14 +1023,14 @@
 
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">System Information &amp; Health</span>
+          <span class="op-panel-title">System Diagnostics</span>
           <span class="status-tag tag-green">8 / 8 OPERATIONAL</span>
         </div>
         <div class="kv-grid">
           <div class="kv-item"><div class="kv-label">Build Version (SHA)</div><div class="kv-value cyan" id="hdr-build-sha">...</div></div>
           <div class="kv-item"><div class="kv-label">Execution Mode</div><div class="kv-value">REAL-MARKET SHADOW</div></div>
           <div class="kv-item"><div class="kv-label">Data Provider</div><div class="kv-value">UPSTOX</div></div>
-          <div class="kv-item"><div class="kv-label">Market Feed Health</div><div class="kv-value" id="ov-health-level">DISCONNECTED</div></div>
+          <div class="kv-item"><div class="kv-label">Feed Health</div><div class="kv-value" id="ov-health-level">DISCONNECTED</div></div>
           <div class="kv-item"><div class="kv-label">Latency</div><div class="kv-value" id="ov-health-latency">—</div></div>
           <div class="kv-item"><div class="kv-label">Messages Received</div><div class="kv-value" id="ov-health-msgs">0</div></div>
           <div class="kv-item"><div class="kv-label">Valid Events</div><div class="kv-value" id="ov-health-valid">0</div></div>
@@ -964,8 +1043,8 @@
       <!-- Trace Logs -->
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Live System Trace Log</span>
-          <span class="op-subhead">System events stream</span>
+          <span class="op-panel-title">System Event Stream</span>
+          <span class="op-subhead">Recent telemetry</span>
         </div>
         <div class="tbl-scroll-container" style="max-height: 280px;">
           <table class="forensic-tbl">
@@ -1368,7 +1447,7 @@
           if (ovRiskStatus) ovRiskStatus.textContent = riskRes.risk_status || 'SAFE';
 
           const rPct = riskRes.risk_utilization_pct || 0;
-          const lPct = riskRes.loss_utilization_pct || 0;
+          const lPct = riskRes.loss_util_pct || riskRes.loss_utilization_pct || 0;
 
           const ovMetRiskPct = document.getElementById('ov-meter-risk-pct');
           if (ovMetRiskPct) ovMetRiskPct.textContent = rPct.toFixed(2) + '% / 2.00%';
@@ -1394,7 +1473,7 @@
         const ksBtn = document.getElementById('btn-kill-toggle');
         if (ksBtn) {
           if (isKsEngaged) {
-            ksBtn.textContent = 'ENGAGED — DISARM';
+            ksBtn.textContent = 'DISARM KILL SWITCH';
             ksBtn.className = 'btn-disarm-action';
             const hdrH = document.getElementById('hdr-health');
             if (hdrH) { hdrH.textContent = 'BLOCKED (KILL SWITCH)'; hdrH.className = 'hdr-val red'; }
@@ -1673,7 +1752,7 @@
     // Kill switch toggle
     async function toggleKillSwitch() {
       const cur = document.getElementById('btn-kill-toggle').textContent;
-      const action = cur.includes('ENGAGED') ? 'disarm' : 'engage';
+      const action = cur.includes('ENGAGED') || cur.includes('DISARM') ? 'disarm' : 'engage';
       if (!confirm(`Are you sure you want to ${action.toUpperCase()} the Kill Switch?`)) return;
       try {
         await fetch('/api/kill-switch', {
