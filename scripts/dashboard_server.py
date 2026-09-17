@@ -1,4 +1,4 @@
-# ruff: noqa: E402
+# ruff: noqa: E402, TC001, TC003, S110, S603
 """
 AlphaForge Quantitative Operations Console Server (Phase 17 V2).
 Runs on localhost:8080 with zero third-party dependencies using Python standard library http.server.
@@ -29,11 +29,14 @@ import io
 import json
 import os
 import secrets
+import signal
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from enum import StrEnum
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -124,6 +127,315 @@ def redact_secrets(val: Any) -> Any:
     return val
 
 
+class BotStatus(StrEnum):
+    STOPPED = "STOPPED"
+    STARTING = "STARTING"
+    RUNNING = "RUNNING"
+    STOPPING = "STOPPING"
+    ERROR = "ERROR"
+
+
+class RealTradingForbiddenError(RuntimeError):
+    """Raised when any attempt is made to execute in REAL trading mode."""
+
+
+def is_pid_active(pid: int) -> bool:
+    """Check if process with given PID is actively running."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32
+            synchronize = 0x00100000
+            process_query_limited_information = 0x1000
+            handle = kernel32.OpenProcess(
+                process_query_limited_information | synchronize, False, pid
+            )
+            if not handle:
+                return False
+            exit_code = ctypes.c_ulong()
+            if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                still_active = 259
+                is_alive = exit_code.value == still_active
+            else:
+                is_alive = False
+            kernel32.CloseHandle(handle)
+            return is_alive
+        except Exception:
+            return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+
+
+class BotManager:
+    """
+    Authoritative state machine and lifecycle manager for the AlphaForge trading bot.
+    Strictly enforces:
+    - State transitions: STOPPED -> STARTING -> RUNNING -> STOPPING -> ERROR
+    - Strict PAPER mode only; REAL mode is physically rejected fail-closed
+    - Duplicate process prevention
+    - Stale PID detection and cleanup
+    - Graceful signal and flag-based shutdown without kill -9
+    """
+
+    def __init__(
+        self,
+        command: list[str] | None = None,
+        pid_file: Path | None = None,
+        stop_flag_file: Path | None = None,
+        contract_supplier: Callable[[], str] | None = None,
+        log_dir: Path | None = None,
+    ) -> None:
+        self.lock = threading.RLock()
+        self.status = BotStatus.STOPPED
+        self.mode = "PAPER"
+        self.pid: int | None = None
+        self.started_at: datetime | None = None
+        self.stopped_at: datetime | None = None
+        self.error_message: str | None = None
+        self.process: subprocess.Popen[Any] | None = None
+        self.monitor_thread: threading.Thread | None = None
+        self._command = command
+        self.pid_file = pid_file or (REPO_ROOT / "runtime" / "paper_bot.pid")
+        self.stop_flag_file = stop_flag_file or (REPO_ROOT / "runtime" / "bot_stop.flag")
+        self.log_dir = log_dir or (REPO_ROOT / "runtime" / "logs")
+        self.stdout_log = self.log_dir / "paper_bot_stdout.log"
+        self.stderr_log = self.log_dir / "paper_bot_stderr.log"
+        self._contract_supplier = contract_supplier
+        self._stdout_handle: Any = None
+        self._stderr_handle: Any = None
+
+        # Recover or clean up any stale PID file
+        self._recover_stale_pid()
+
+    def _recover_stale_pid(self) -> None:
+        """Inspect PID file on initialization to adopt running bot or clean stale file."""
+        with self.lock:
+            if not self.pid_file.exists():
+                return
+            with contextlib.suppress(Exception):
+                raw = self.pid_file.read_text(encoding="utf-8").strip()
+                if raw.isdigit():
+                    recorded_pid = int(raw)
+                    if is_pid_active(recorded_pid):
+                        self.pid = recorded_pid
+                        self.status = BotStatus.RUNNING
+                        self.started_at = datetime.now(UTC)
+                        self.error_message = None
+                        return
+            self.pid_file.unlink(missing_ok=True)
+            self.status = BotStatus.STOPPED
+
+    @staticmethod
+    def _read_last_log_line(path: Path) -> str | None:
+        """Read the last non-empty line from log file for error diagnostics."""
+        try:
+            if not path.exists():
+                return None
+            content = path.read_text(encoding="utf-8", errors="replace")
+            lines = [line.strip() for line in content.splitlines() if line.strip()]
+            return lines[-1] if lines else None
+        except Exception:
+            return None
+
+    def start(self, mode: str = "PAPER") -> tuple[bool, str]:
+        """
+        Start the bot process in PAPER mode.
+        Rejects REAL mode fail-closed.
+        Prevents duplicate processes.
+        """
+        if str(mode).upper() != "PAPER":
+            raise RealTradingForbiddenError(
+                "REAL_MODE_LOCKED: Live real-money trading is forbidden. "
+                "Only PAPER mode is executable."
+            )
+
+        with self.lock:
+            if self.status in (BotStatus.RUNNING, BotStatus.STARTING):
+                return False, f"Bot is already {self.status.value}. Duplicate process prevented."
+
+            if self.status == BotStatus.STOPPING:
+                return False, "Bot is currently stopping. Wait for STOPPED state before restarting."
+
+            self.status = BotStatus.STARTING
+            self.error_message = None
+            self.stop_flag_file.unlink(missing_ok=True)
+
+            cmd = (
+                self._command
+                if self._command is not None
+                else [
+                    sys.executable,
+                    str(REPO_ROOT / "scripts" / "run_upstox_paper_session.py"),
+                    "--mode",
+                    "PAPER",
+                ]
+            )
+
+            creationflags = 0
+            if sys.platform == "win32":
+                creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            self._stdout_handle = self.stdout_log.open("a", encoding="utf-8")
+            self._stderr_handle = self.stderr_log.open("a", encoding="utf-8")
+
+            try:
+                self.process = subprocess.Popen(
+                    cmd,
+                    cwd=str(REPO_ROOT),
+                    stdout=self._stdout_handle,
+                    stderr=self._stderr_handle,
+                    creationflags=creationflags,
+                )
+                self.pid = self.process.pid
+                self.started_at = datetime.now(UTC)
+                self.stopped_at = None
+                self.pid_file.parent.mkdir(parents=True, exist_ok=True)
+                self.pid_file.write_text(str(self.pid), encoding="utf-8")
+                self.status = BotStatus.RUNNING
+
+                self.monitor_thread = threading.Thread(
+                    target=self._monitor_process,
+                    args=(self.process,),
+                    daemon=True,
+                )
+                self.monitor_thread.start()
+                return True, f"Bot started successfully in PAPER mode (PID: {self.pid})."
+            except Exception as exc:
+                self.status = BotStatus.ERROR
+                self.error_message = f"Failed to spawn bot worker: {exc}"
+                self.pid = None
+                self.process = None
+                with contextlib.suppress(Exception):
+                    if self._stdout_handle and not self._stdout_handle.closed:
+                        self._stdout_handle.close()
+                with contextlib.suppress(Exception):
+                    if self._stderr_handle and not self._stderr_handle.closed:
+                        self._stderr_handle.close()
+                return False, self.error_message
+
+    def _monitor_process(self, proc: subprocess.Popen[Any]) -> None:
+        """Background thread monitoring process termination and exit codes."""
+        proc.wait()
+
+        # Close file handles cleanly
+        with contextlib.suppress(Exception):
+            if self._stdout_handle and not self._stdout_handle.closed:
+                self._stdout_handle.close()
+        with contextlib.suppress(Exception):
+            if self._stderr_handle and not self._stderr_handle.closed:
+                self._stderr_handle.close()
+
+        with self.lock:
+            if self.process is proc:
+                self.pid = None
+                self.process = None
+                self.stopped_at = datetime.now(UTC)
+                self.pid_file.unlink(missing_ok=True)
+                self.stop_flag_file.unlink(missing_ok=True)
+
+                if self.status == BotStatus.STOPPING:
+                    self.status = BotStatus.STOPPED
+                elif proc.returncode != 0:
+                    self.status = BotStatus.ERROR
+                    err_line = self._read_last_log_line(self.stderr_log)
+                    out_line = self._read_last_log_line(self.stdout_log)
+                    self.error_message = (
+                        err_line or out_line or f"Process exited with code {proc.returncode}"
+                    )
+                else:
+                    self.status = BotStatus.STOPPED
+
+    def stop(
+        self,
+        reason: str = "Operator stop command",  # noqa: ARG002
+        timeout: float = 5.0,
+    ) -> tuple[bool, str]:
+        """
+        Gracefully stop the bot process.
+        Safe against repeated calls (idempotent).
+        """
+        with self.lock:
+            if self.status == BotStatus.STOPPED:
+                return True, "Bot is already stopped."
+
+            if self.status == BotStatus.STOPPING:
+                return True, "Bot is already stopping."
+
+            self.status = BotStatus.STOPPING
+            proc = self.process
+
+        # Signal graceful stop via flag file
+        with contextlib.suppress(Exception):
+            self.stop_flag_file.parent.mkdir(parents=True, exist_ok=True)
+            self.stop_flag_file.write_text("STOP", encoding="utf-8")
+
+        if proc is not None:
+            with contextlib.suppress(Exception):
+                if sys.platform == "win32":
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    proc.send_signal(signal.SIGTERM)
+
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
+                with contextlib.suppress(Exception):
+                    proc.wait(timeout=2.0)
+
+        with self.lock:
+            self.status = BotStatus.STOPPED
+            self.stopped_at = datetime.now(UTC)
+            self.pid = None
+            self.process = None
+            self.pid_file.unlink(missing_ok=True)
+            self.stop_flag_file.unlink(missing_ok=True)
+
+        return True, "Bot stopped gracefully."
+
+    def get_telemetry(self) -> dict[str, Any]:
+        """Return authoritative operational telemetry for the bot."""
+        with self.lock:
+            is_open, session_str = is_nse_session_open()
+            uptime = 0
+            if self.started_at and self.status == BotStatus.RUNNING:
+                uptime = int(max(0.0, (datetime.now(UTC) - self.started_at).total_seconds()))
+
+            contract_id = (
+                self._contract_supplier()
+                if self._contract_supplier is not None
+                else "UNAVAILABLE"
+            )
+
+            return {
+                "status": self.status.value,
+                "mode": "PAPER",
+                "real_locked": True,
+                "real_trading_allowed": False,
+                "pid": self.pid,
+                "started_at": self.started_at.isoformat() if self.started_at else None,
+                "stopped_at": self.stopped_at.isoformat() if self.stopped_at else None,
+                "uptime_seconds": uptime,
+                "market_data_provider": UPSTOX_PROVIDER_NAME,
+                "market_data_mode": "LIVE_EXTERNAL_READ_ONLY",
+                "execution_mode": "PAPER_ONLY",
+                "real_orders_count": 0,
+                "real_orders_status": "DISABLED",
+                "market_status": session_str,
+                "is_market_open": is_open,
+                "active_contract": contract_id,
+                "error_message": self.error_message,
+            }
+
+
 class AlphaForgeState:
     """Singleton operational state holding live backend components and run evidence."""
 
@@ -139,6 +451,12 @@ class AlphaForgeState:
         # Phase 17 Authoritative Contract Source
         self.contract_source = AuthoritativeContractSource()
         self.contract_repo = self.contract_source.repository
+
+        self.bot_manager = BotManager(
+            contract_supplier=lambda: (
+                self.active_contract.contract_id if self.active_contract else "UNAVAILABLE"
+            )
+        )
 
         self.broker = PaperBroker()
         self.guard = DeploymentBrokerGuard(delegate=self.broker, config=self.config)
@@ -214,10 +532,10 @@ class AlphaForgeState:
         # Decision Explainer History (populated solely from runtime evaluations)
         self.decision_history: list[dict[str, Any]] = []
 
-        self.run_history: list[dict] = []
+        self.run_history: list[dict[str, Any]] = []
         self.csrf_token: str = secrets.token_hex(32)
 
-        self.activity_log: list[dict] = [
+        self.activity_log: list[dict[str, Any]] = [
             {
                 "timestamp": datetime.now(UTC).strftime("%H:%M:%S"),
                 "level": "INFO",
@@ -302,7 +620,7 @@ STATE = AlphaForgeState()
 class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
     """Handles HTTP requests for AlphaForge Quantitative Operations Console."""
 
-    def log_message(self, format: str, *args) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         pass
 
     def _get_allowed_origin(self) -> str | None:
@@ -314,7 +632,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             return origin
         return None
 
-    def _send_json(self, status: int, data: dict | list) -> None:
+    def _send_json(self, status: int, data: dict[str, Any] | list[Any]) -> None:
         clean_data = redact_secrets(data)
         payload = json.dumps(clean_data, indent=2, default=str).encode("utf-8")
         self.send_response(status)
@@ -394,7 +712,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                 is_open, session_str = is_nse_session_open()
                 phase17c = STATE.derive_phase17c_status()
 
-                data = {
+                data: dict[str, Any] = {
                     "environment": STATE.config.environment.value,
                     "mode": "REAL-MARKET SHADOW",
                     "data_provider": UPSTOX_PROVIDER_NAME,
@@ -417,7 +735,13 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                     },
                     "commit_sha": STATE.git_sha,
                     "logs": STATE.activity_log,
+                    "bot": STATE.bot_manager.get_telemetry(),
                 }
+            self._send_json(200, data)
+            return
+
+        if parsed.path == "/api/bot/status":
+            data = STATE.bot_manager.get_telemetry()
             self._send_json(200, data)
             return
 
@@ -918,11 +1242,110 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             with STATE.lock:
                 if action == "engage":
                     STATE.kill_switch.engage(reason=reason)
+                    STATE.bot_manager.stop(reason=f"Kill switch engaged: {reason}")
                     STATE.log_event("SECURITY", "KILL_SWITCH", f"Kill switch ENGAGED: {reason}")
                 elif action == "disarm":
                     STATE.kill_switch.disarm(reason=reason)
                     STATE.log_event("SECURITY", "KILL_SWITCH", f"Kill switch DISARMED: {reason}")
             self._send_json(200, {"status": STATE.kill_switch.status.value})
+            return
+
+        if parsed.path == "/api/bot/start":
+            mode = payload.get("mode", "PAPER")
+            if str(mode).upper() != "PAPER":
+                STATE.log_event(
+                    "SECURITY",
+                    "BOT_CONTROLLER",
+                    f"BLOCKED: Attempt to start bot in REAL mode ({mode})",
+                )
+                self._send_json(
+                    403,
+                    {
+                        "success": False,
+                        "error": (
+                            "REAL_MODE_LOCKED: Live real-money trading is forbidden. "
+                            "Only PAPER mode is executable."
+                        ),
+                        "mode": "PAPER",
+                        "real_locked": True,
+                        "status": STATE.bot_manager.status.value,
+                    },
+                )
+                return
+
+            with STATE.lock:
+                if STATE.kill_switch.is_engaged():
+                    self._send_json(
+                        403,
+                        {
+                            "success": False,
+                            "error": "Bot startup blocked: Kill Switch is ENGAGED!",
+                            "status": STATE.bot_manager.status.value,
+                        },
+                    )
+                    return
+
+            success, msg = STATE.bot_manager.start(mode="PAPER")
+            if not success:
+                if "already" in msg.lower():
+                    self._send_json(
+                        409,
+                        {
+                            "success": False,
+                            "error": msg,
+                            "message": msg,
+                            "status": STATE.bot_manager.status.value,
+                            "mode": "PAPER",
+                            "real_locked": True,
+                        },
+                    )
+                else:
+                    self._send_json(
+                        400,
+                        {
+                            "success": False,
+                            "error": msg,
+                            "status": STATE.bot_manager.status.value,
+                            "mode": "PAPER",
+                            "real_locked": True,
+                        },
+                    )
+                return
+
+            STATE.log_event(
+                "BOT",
+                "BOT_CONTROLLER",
+                f"Bot started in PAPER mode (PID: {STATE.bot_manager.pid})",
+            )
+            self._send_json(
+                200,
+                {
+                    "success": True,
+                    "message": msg,
+                    "status": STATE.bot_manager.status.value,
+                    "mode": "PAPER",
+                    "real_locked": True,
+                    "pid": STATE.bot_manager.pid,
+                },
+            )
+            return
+
+        if parsed.path == "/api/bot/stop":
+            reason = payload.get("reason", "Operator command via Quantitative Operations Console")
+            success, msg = STATE.bot_manager.stop(reason=reason)
+            STATE.log_event(
+                "BOT",
+                "BOT_CONTROLLER",
+                f"Bot stop requested: {reason}. Status: {STATE.bot_manager.status.value}",
+            )
+            self._send_json(
+                200,
+                {
+                    "success": True,
+                    "message": msg,
+                    "status": STATE.bot_manager.status.value,
+                },
+            )
             return
 
         if parsed.path == "/api/shadow/preflight":
@@ -1072,7 +1495,9 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                 ]
 
                 # Authoritative Equity curve calculation from trades
-                equity_points: list[dict] = [{"bar": 0, "equity": 1000000.0, "drawdown_pct": 0.0}]
+                equity_points: list[dict[str, Any]] = [
+                    {"bar": 0, "equity": 1000000.0, "drawdown_pct": 0.0}
+                ]
                 running_eq = Decimal("1000000")
                 peak_eq = running_eq
                 for idx, t in enumerate(closed_trades):

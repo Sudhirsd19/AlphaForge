@@ -236,6 +236,161 @@
     .btn-action.secondary:hover { background: #334155; }
     .btn-action.cyan { background: #0891b2; }
     .btn-action.cyan:hover { background: #06b6d4; }
+
+    /* Bot Master Control Bar */
+    .bot-control-bar {
+      background: #090e1c;
+      border: 1px solid #1e2c47;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .bot-status-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .bot-state-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 800;
+      font-family: monospace;
+      letter-spacing: 0.8px;
+      background: #050811;
+      border: 1px solid var(--card-border);
+    }
+    .bot-pulse-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #64748b;
+      display: inline-block;
+      transition: all 0.3s;
+    }
+    .bot-pulse-dot.running {
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+      animation: pulse-green 1.8s infinite;
+    }
+    .bot-pulse-dot.starting, .bot-pulse-dot.stopping {
+      background: #f59e0b;
+      box-shadow: 0 0 8px #f59e0b;
+      animation: pulse-amber 1.2s infinite;
+    }
+    .bot-pulse-dot.error {
+      background: #ef4444;
+      box-shadow: 0 0 8px #ef4444;
+    }
+    @keyframes pulse-green {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    @keyframes pulse-amber {
+      0% { transform: scale(0.95); opacity: 0.7; }
+      50% { transform: scale(1.15); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.7; }
+    }
+    .mode-pills-group {
+      display: inline-flex;
+      background: #050811;
+      padding: 3px;
+      border-radius: 4px;
+      border: 1px solid var(--card-border);
+      gap: 4px;
+    }
+    .mode-pill {
+      padding: 4px 12px;
+      font-size: 10px;
+      font-weight: 800;
+      border-radius: 3px;
+      border: none;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      transition: all 0.15s;
+    }
+    .mode-pill.active {
+      background: var(--primary);
+      color: #fff;
+    }
+    .mode-pill.locked {
+      background: transparent;
+      color: #64748b;
+      cursor: not-allowed;
+      opacity: 0.6;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .btn-bot-start {
+      background: #059669;
+      color: #fff;
+      border: 1px solid #10b981;
+      padding: 8px 18px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .btn-bot-start:hover { background: #10b981; }
+    .btn-bot-stop {
+      background: #dc2626;
+      color: #fff;
+      border: 1px solid #ef4444;
+      padding: 8px 18px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .btn-bot-stop:hover { background: #b91c1c; }
+    .btn-bot-disabled {
+      background: #1e293b !important;
+      color: #64748b !important;
+      border-color: #334155 !important;
+      cursor: not-allowed !important;
+    }
+    .bot-badges-cluster {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .bot-err-banner {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid #ef4444;
+      border-radius: 4px;
+      padding: 8px 14px;
+      margin-bottom: 12px;
+      font-size: 11px;
+      color: #fca5a5;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+    }
   </style>
 </head>
 <body>
@@ -289,6 +444,44 @@
         </button>
       </div>
     </header>
+
+    <!-- BOT MASTER CONTROL BAR -->
+    <div id="bot-error-banner" class="bot-err-banner">
+      <span id="bot-error-msg">&#9888; Bot Error</span>
+      <button class="btn-action secondary" style="padding: 2px 6px; font-size: 9px;" onclick="dismissBotError()">DISMISS</button>
+    </div>
+
+    <div class="bot-control-bar">
+      <!-- Left: Bot Status and Mode -->
+      <div class="bot-status-group">
+        <div class="bot-state-pill">
+          <span class="bot-pulse-dot" id="bot-pulse-dot"></span>
+          <span id="bot-status-text">BOT: STOPPED</span>
+          <span id="bot-pid-badge" style="display:none; color: var(--text-dim); font-size: 10px;">PID: <span id="bot-pid-val">—</span></span>
+          <span id="bot-uptime-badge" style="display:none; color: var(--cyan); font-size: 10px;">UP: <span id="bot-uptime-val">0s</span></span>
+        </div>
+
+        <div class="mode-pills-group">
+          <button class="mode-pill active" id="btn-mode-paper" title="Paper Trading with Live Upstox Market Data">PAPER</button>
+          <button class="mode-pill locked" id="btn-mode-real" onclick="alertRealLocked()" title="REAL live order routing is permanently locked / disabled">&#128274; REAL (LOCKED)</button>
+        </div>
+      </div>
+
+      <!-- Center: Safety Badges -->
+      <div class="bot-badges-cluster">
+        <span class="status-tag tag-cyan" id="bot-feed-badge" title="Live Upstox WebSocket market data feed, read-only">UPSTOX LIVE / READ-ONLY</span>
+        <span class="status-tag tag-green" id="bot-exec-badge" title="Zero live broker routing allowed">PAPER ONLY</span>
+        <span class="status-tag tag-slate" id="bot-orders-badge" title="Broker order routing is physically blocked">REAL ORDERS: DISABLED / 0</span>
+        <span class="status-tag tag-amber" id="bot-mkt-badge">MARKET: EVALUATING</span>
+      </div>
+
+      <!-- Right: Main Toggle Action -->
+      <div>
+        <button id="btn-bot-toggle" class="btn-bot-start" onclick="toggleBot()">
+          &#9654; START BOT (PAPER)
+        </button>
+      </div>
+    </div>
 
     <!-- Workflow Stepper -->
     <div class="workflow-bar">
@@ -1024,6 +1217,167 @@
 
   <script>
     let csrfToken = '';
+    let currentBotStatus = 'STOPPED';
+
+    function alertRealLocked() {
+      alert('REAL MODE LOCKED: Live real-money trading is forbidden. Only PAPER mode is executable.');
+    }
+
+    function dismissBotError() {
+      const banner = document.getElementById('bot-error-banner');
+      if (banner) banner.style.display = 'none';
+    }
+
+    function updateBotUI(bot) {
+      if (!bot) return;
+      currentBotStatus = bot.status || 'STOPPED';
+
+      // 1. Status Text and Pulse Dot
+      const statusEl = document.getElementById('bot-status-text');
+      const dotEl = document.getElementById('bot-pulse-dot');
+      if (statusEl) statusEl.textContent = 'BOT: ' + currentBotStatus;
+
+      if (dotEl) {
+        dotEl.className = 'bot-pulse-dot';
+        if (currentBotStatus === 'RUNNING') dotEl.classList.add('running');
+        else if (currentBotStatus === 'STARTING') dotEl.classList.add('starting');
+        else if (currentBotStatus === 'STOPPING') dotEl.classList.add('stopping');
+        else if (currentBotStatus === 'ERROR') dotEl.classList.add('error');
+      }
+
+      // 2. PID & Uptime Badges
+      const pidBadge = document.getElementById('bot-pid-badge');
+      const pidVal = document.getElementById('bot-pid-val');
+      if (pidBadge && pidVal) {
+        if (bot.pid) {
+          pidVal.textContent = bot.pid;
+          pidBadge.style.display = 'inline';
+        } else {
+          pidBadge.style.display = 'none';
+        }
+      }
+
+      const uptimeBadge = document.getElementById('bot-uptime-badge');
+      const uptimeVal = document.getElementById('bot-uptime-val');
+      if (uptimeBadge && uptimeVal) {
+        if (bot.uptime_seconds !== undefined && bot.uptime_seconds > 0 && currentBotStatus === 'RUNNING') {
+          const s = bot.uptime_seconds;
+          const fmt = s >= 3600 ? `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m` :
+                      s >= 60 ? `${Math.floor(s/60)}m ${s%60}s` : `${s}s`;
+          uptimeVal.textContent = fmt;
+          uptimeBadge.style.display = 'inline';
+        } else {
+          uptimeBadge.style.display = 'none';
+        }
+      }
+
+      // 3. Market Badge in Bot Bar
+      const mktBadge = document.getElementById('bot-mkt-badge');
+      if (mktBadge) {
+        mktBadge.textContent = 'MARKET: ' + (bot.market_status || 'EVALUATING');
+        mktBadge.className = bot.is_market_open ? 'status-tag tag-green' : 'status-tag tag-amber';
+      }
+
+      // 4. Toggle Button
+      const btnToggle = document.getElementById('btn-bot-toggle');
+      if (btnToggle) {
+        if (currentBotStatus === 'RUNNING') {
+          btnToggle.innerHTML = '&#9632; STOP BOT';
+          btnToggle.className = 'btn-bot-stop';
+          btnToggle.disabled = false;
+        } else if (currentBotStatus === 'STARTING') {
+          btnToggle.innerHTML = '&#9203; STARTING...';
+          btnToggle.className = 'btn-bot-start btn-bot-disabled';
+          btnToggle.disabled = true;
+        } else if (currentBotStatus === 'STOPPING') {
+          btnToggle.innerHTML = '&#9203; STOPPING...';
+          btnToggle.className = 'btn-bot-stop btn-bot-disabled';
+          btnToggle.disabled = true;
+        } else if (currentBotStatus === 'ERROR') {
+          btnToggle.innerHTML = '&#9654; RETRY BOT (PAPER)';
+          btnToggle.className = 'btn-bot-start';
+          btnToggle.disabled = false;
+        } else {
+          btnToggle.innerHTML = '&#9654; START BOT (PAPER)';
+          btnToggle.className = 'btn-bot-start';
+          btnToggle.disabled = false;
+        }
+      }
+
+      // 5. Error Banner
+      const errBanner = document.getElementById('bot-error-banner');
+      const errMsg = document.getElementById('bot-error-msg');
+      if (errBanner && errMsg) {
+        if (bot.error_message && currentBotStatus === 'ERROR') {
+          errMsg.textContent = '⚠ Bot Error: ' + bot.error_message;
+          errBanner.style.display = 'flex';
+        } else if (currentBotStatus !== 'ERROR') {
+          errBanner.style.display = 'none';
+        }
+      }
+    }
+
+    async function toggleBot() {
+      if (currentBotStatus === 'RUNNING') {
+        await stopBot();
+      } else if (currentBotStatus === 'STOPPED' || currentBotStatus === 'ERROR') {
+        await startBot('PAPER');
+      }
+    }
+
+    async function startBot(mode = 'PAPER') {
+      if (mode !== 'PAPER') {
+        alertRealLocked();
+        return;
+      }
+      const btn = document.getElementById('btn-bot-toggle');
+      if (btn) {
+        btn.innerHTML = '&#9203; STARTING...';
+        btn.className = 'btn-bot-start btn-bot-disabled';
+        btn.disabled = true;
+      }
+      try {
+        const res = await fetch('/api/bot/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+          body: JSON.stringify({ mode: mode })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          const errText = data.error || 'Failed to start bot';
+          const errBanner = document.getElementById('bot-error-banner');
+          const errMsg = document.getElementById('bot-error-msg');
+          if (errBanner && errMsg) {
+            errMsg.textContent = '⚠ Startup Notice: ' + errText;
+            errBanner.style.display = 'flex';
+          }
+        }
+      } catch (err) {
+        alert('Bot start request failed: ' + err);
+      } finally {
+        await fetchAllTelemetry();
+      }
+    }
+
+    async function stopBot() {
+      const btn = document.getElementById('btn-bot-toggle');
+      if (btn) {
+        btn.innerHTML = '&#9203; STOPPING...';
+        btn.className = 'btn-bot-stop btn-bot-disabled';
+        btn.disabled = true;
+      }
+      try {
+        await fetch('/api/bot/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+          body: JSON.stringify({ reason: 'Operator UI Action' })
+        });
+      } catch (err) {
+        alert('Bot stop request failed: ' + err);
+      } finally {
+        await fetchAllTelemetry();
+      }
+    }
 
     async function initCsrfToken() {
       try {
@@ -1064,7 +1418,8 @@
           fetch('/api/signals/state').then(r => r.json())
         ]);
 
-        // 1. Header Updates
+        // 1. Header Updates & Bot Master Control
+        if (statusRes.bot) updateBotUI(statusRes.bot);
         if (statusRes.commit_sha) document.getElementById('hdr-build-sha').textContent = statusRes.commit_sha;
         if (statusRes.session_status) {
           const sessEl = document.getElementById('hdr-session');

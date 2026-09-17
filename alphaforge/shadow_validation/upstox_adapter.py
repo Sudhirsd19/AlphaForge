@@ -21,6 +21,7 @@ PROVENANCE DISTINCTION:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -223,8 +224,9 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
         self._last_sequence_no: int = 0
         self._seen_event_hashes: set[str] = set()
 
-        # --- Candle aggregation ---
+        # --- Candle aggregation & streaming control ---
         self._candle_aggregator = _CandleAggregator()
+        self._stream_stop_event: threading.Event | None = None
 
     @staticmethod
     def _validate_contract(contract: ContractMaster) -> None:
@@ -398,6 +400,8 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
         self._disconnect_ts = datetime.now(UTC)
         self._disconnect_count += 1
         self._ws = None
+        if hasattr(self, "_stream_stop_event") and self._stream_stop_event is not None:
+            self._stream_stop_event.set()
         logger.info(
             f"UpstoxMarketDataAdapter: Disconnected. Session: {self._session_id}. "
             f"Total market events: {self._total_valid_market_events}."
@@ -752,7 +756,7 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                 stream = self.stream_live_events()
                 try:
                     async for event in stream:
-                        if stop_event.is_set():
+                        if stop_event.is_set() or not self._is_connected:
                             break
 
                         if self._overflow_policy == QueueOverflowPolicy.FAIL_CLOSED:
@@ -777,6 +781,8 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                                 )
                                 event_queue.put(DataIntegrityError(msg))
                                 break
+                except asyncio.CancelledError:
+                    pass
                 except Exception as exc:
                     event_queue.put(exc)
                 finally:
@@ -788,8 +794,24 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                         pass
                     event_queue.put(None)  # Sentinel to terminate generator
 
+            async def _monitor_stop(consume_task: asyncio.Task[None]) -> None:
+                while not stop_event.is_set() and self._is_connected:
+                    await asyncio.sleep(0.05)
+                if not consume_task.done():
+                    consume_task.cancel()
+
+            async def _main() -> None:
+                consume_task = loop.create_task(_consume())
+                monitor_task = loop.create_task(_monitor_stop(consume_task))
+                with contextlib.suppress(asyncio.CancelledError):
+                    await consume_task
+                if not monitor_task.done():
+                    monitor_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await monitor_task
+
             try:
-                loop.run_until_complete(_consume())
+                loop.run_until_complete(_main())
             finally:
                 loop.close()
 
@@ -800,9 +822,13 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
         )
         worker_thread.start()
 
+        self._stream_stop_event = stop_event
         try:
-            while True:
-                item = event_queue.get()
+            while self._is_connected and not stop_event.is_set():
+                try:
+                    item = event_queue.get(timeout=0.25)
+                except queue.Empty:
+                    continue
                 if item is None:
                     break
                 if isinstance(item, Exception):
@@ -810,6 +836,7 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                 yield item
         finally:
             stop_event.set()
+            self._stream_stop_event = None
             self.disconnect()
             worker_thread.join(timeout=2.0)
 

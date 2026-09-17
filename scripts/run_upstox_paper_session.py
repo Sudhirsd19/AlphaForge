@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402, TC001
 """
 AlphaForge — Upstox REAL-MARKET DATA -> PAPER session.
 
@@ -36,6 +37,8 @@ import json
 import logging
 import signal
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -235,31 +238,64 @@ class _ObservedPaperBroker(PaperBroker):
 
 def main() -> None:
     """Run a live Upstox-feed-driven paper session until interrupted."""
-    parser = argparse.ArgumentParser(description="AlphaForge Upstox real-market-data to paper session")
+    parser = argparse.ArgumentParser(
+        description="AlphaForge Upstox real-market-data to paper session"
+    )
     parser.add_argument(
         "--duration-seconds",
         type=int,
         default=0,
         help="Optional bounded test duration. 0 means run until interrupted.",
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="PAPER",
+        choices=["PAPER"],
+        help="Trading execution mode. Strictly PAPER only.",
+    )
     args = parser.parse_args()
     if args.duration_seconds < 0:
         raise SystemExit("--duration-seconds must be >= 0")
-
-    stop_requested = False
-
-    def _stop(_signum: int, _frame: object) -> None:
-        nonlocal stop_requested
-        stop_requested = True
-        logger.info("Shutdown requested; partial timeframe buckets will NOT be evaluated.")
-
-    signal.signal(signal.SIGINT, _stop)
-    signal.signal(signal.SIGTERM, _stop)
 
     contract_source = AuthoritativeContractSource()
     contract = contract_source.get_active_contract()
     if contract is None:
         raise RuntimeError("No active authoritative NIFTY Futures contract; failing closed.")
+
+    adapter = UpstoxMarketDataAdapter(contract=contract)
+
+    stop_requested = False
+    stop_flag_file = _repo_root / "runtime" / "bot_stop.flag"
+
+    def _trigger_graceful_stop(reason: str = "stop requested") -> None:
+        nonlocal stop_requested
+        if not stop_requested:
+            stop_requested = True
+            logger.info("Graceful shutdown triggered (%s); waking event stream.", reason)
+            adapter.disconnect()
+
+    def _stop(_signum: int, _frame: object) -> None:
+        _trigger_graceful_stop("signal received")
+
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _stop)
+
+    def _poll_stop_flag() -> None:
+        while not stop_requested:
+            if stop_flag_file.exists():
+                _trigger_graceful_stop("bot_stop.flag detected")
+                break
+            time.sleep(0.1)
+
+    stop_watcher = threading.Thread(
+        target=_poll_stop_flag,
+        name="BotStopWatcher",
+        daemon=True,
+    )
+    stop_watcher.start()
 
     config = PaperShadowConfig(
         mode=PaperShadowMode.PAPER,
@@ -279,7 +315,6 @@ def main() -> None:
     strategy_bridge = _ConfirmationAwareStrategyEngine()
     engine._strategy_engine = strategy_bridge
 
-    adapter = UpstoxMarketDataAdapter(contract=contract)
     exec_agg = _TimeframeAggregator(3)
     conf_agg = _TimeframeAggregator(15)
     confirmation_history: list[Candle] = []
@@ -304,12 +339,14 @@ def main() -> None:
         adapter.connect()
         telemetry = adapter.get_connection_telemetry()
         if not telemetry.get("provider_authenticated") or not telemetry.get("is_live_external"):
-            raise RuntimeError("Upstox connection did not prove authenticated external live feed; failing closed.")
+            raise RuntimeError(
+                "Upstox connection did not prove authenticated external live feed; failing closed."
+            )
 
         logger.info("Upstox authenticated; consuming read-only real-market stream.")
 
         for market_event in adapter.stream_events():
-            if stop_requested:
+            if stop_requested or stop_flag_file.exists():
                 break
 
             counts["upstox_1m_events"] += 1
@@ -350,7 +387,8 @@ def main() -> None:
 
             if counts["execution_3m_bars"] % 5 == 0:
                 logger.info(
-                    "Live 1m=%d | closed 3m=%d | closed 15m=%d | paper submitted=%d | paper filled=%d | positions=%d",
+                    "Live 1m=%d | closed 3m=%d | closed 15m=%d | paper submitted=%d | "
+                    "paper filled=%d | positions=%d",
                     counts["upstox_1m_events"],
                     counts["execution_3m_bars"],
                     counts["confirmation_15m_bars"],
@@ -359,7 +397,10 @@ def main() -> None:
                     len(paper_broker.get_positions()),
                 )
 
-            if args.duration_seconds and (datetime.now(UTC) - started).total_seconds() >= args.duration_seconds:
+            if (
+                args.duration_seconds
+                and (datetime.now(UTC) - started).total_seconds() >= args.duration_seconds
+            ):
                 stop_requested = True
                 break
 
@@ -367,6 +408,7 @@ def main() -> None:
         # Never flush/evaluate a partial 3m or 15m bucket at shutdown.
         exec_agg.discard_open_bucket()
         conf_agg.discard_open_bucket()
+        stop_flag_file.unlink(missing_ok=True)
         try:
             adapter.disconnect()
         except Exception:
