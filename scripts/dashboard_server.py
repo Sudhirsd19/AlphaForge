@@ -47,6 +47,27 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+
+def load_dotenv(path: Path | None = None) -> None:
+    """Load key-value pairs from .env into os.environ if not already set."""
+    env_file = path or (REPO_ROOT / ".env")
+    if not env_file.is_file():
+        return
+    with contextlib.suppress(Exception):
+        for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k, v = k.strip(), v.strip()
+            if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                v = v[1:-1]
+            if k and k not in os.environ:
+                os.environ[k] = v
+
+
+load_dotenv()
+
 if TYPE_CHECKING:
     from alphaforge.contract.models import ContractMaster
 
