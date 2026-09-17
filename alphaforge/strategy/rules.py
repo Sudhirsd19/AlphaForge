@@ -51,14 +51,16 @@ def evaluate_trend_regime(
             if spread_pct < min_ema_spread_pct:
                 return TrendState.NEUTRAL, latest_fast, latest_slow
 
-        # 2. ADX Directional Strength Gate: Reject weak/choppy markets
-        if len(conf_candles) >= 28:
-            highs = [c.high for c in conf_candles]
-            lows = [c.low for c in conf_candles]
-            adx_series = calculate_adx(highs, lows, closes, period=14)
-            latest_adx = adx_series[-1]
-            if latest_adx < min_adx_threshold:
-                return TrendState.NEUTRAL, latest_fast, latest_slow
+        # 2. ADX Directional Strength Gate: Fail-closed on insufficient history, reject weak/choppy markets
+        if len(conf_candles) < 28:
+            return TrendState.NEUTRAL, latest_fast, latest_slow
+
+        highs = [c.high for c in conf_candles]
+        lows = [c.low for c in conf_candles]
+        adx_series = calculate_adx(highs, lows, closes, period=14)
+        latest_adx = adx_series[-1]
+        if latest_adx < min_adx_threshold:
+            return TrendState.NEUTRAL, latest_fast, latest_slow
 
     if latest_fast > latest_slow and latest_close > latest_slow:
         return TrendState.BULLISH, latest_fast, latest_slow

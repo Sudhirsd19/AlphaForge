@@ -125,12 +125,14 @@ class BacktestEngine:
         strategy_config: StrategyConfig | None = None,
         risk_config: RiskConfig | None = None,
         ledger: AuditLedger | None = None,
+        confirmation_dataset: BacktestDataset | None = None,
     ) -> None:
         self.config = config
         self.dataset = dataset
         self.contract_master = contract_master
         self.strategy_config = strategy_config or StrategyConfig()
         self.risk_config = risk_config or RiskConfig()
+        self.confirmation_dataset = confirmation_dataset
 
         # Telemetry counters for risk gate integration
         self.risk_evaluations_count: int = 0
@@ -458,10 +460,22 @@ class BacktestEngine:
                     self.dataset.candles[j].to_strategy_candle() for j in range(i, -1, -1)
                 ]
 
+                if self.confirmation_dataset is not None:
+                    matching_conf = [
+                        c for c in self.confirmation_dataset.candles if c.exchange_timestamp <= ts
+                    ]
+                    conf_candles_rev = (
+                        [forming_dummy] + [c.to_strategy_candle() for c in reversed(matching_conf)]
+                        if matching_conf
+                        else closed_candles_rev
+                    )
+                else:
+                    conf_candles_rev = closed_candles_rev
+
                 # Authoritative Phase 1 evaluation
                 signal = self.strategy_engine.evaluate(
                     raw_exec_candles=closed_candles_rev,
-                    raw_conf_candles=closed_candles_rev,
+                    raw_conf_candles=conf_candles_rev,
                     futures_status=FuturesConfirmationStatus.CONFIRMED,
                     evaluation_timestamp=ts,
                 )

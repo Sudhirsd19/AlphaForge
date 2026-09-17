@@ -18,7 +18,7 @@ class StrategyConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     strategy_id: str = "AF_ORB_MOMENTUM_V1"
-    strategy_version: str = "1.0.0"
+    strategy_version: str = "1.1.0"
     symbol: str = "NIFTY"
     exec_timeframe: str = "3m"
     conf_timeframe: str = "15m"
@@ -64,8 +64,18 @@ class StrategyConfig(BaseModel):
 
     # Market Regime Filter Parameters
     enable_regime_filter: bool = False
-    min_adx_threshold: Decimal = Decimal("20.0")
-    min_ema_spread_pct: Decimal = Decimal("0.0008")  # 0.08% (~20 Nifty pts) minimum spread
+    min_adx_threshold: Decimal = Field(
+        default=Decimal("20.0"),
+        ge=Decimal("0.0"),
+        le=Decimal("100.0"),
+        description="Minimum ADX threshold for trending market regime",
+    )
+    min_ema_spread_pct: Decimal = Field(
+        default=Decimal("0.0008"),
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
+        description="Minimum percentage spread between EMA fast and slow",
+    )
 
     def compute_config_hash(self) -> str:
         """

@@ -38,6 +38,7 @@ coverage.xml
 *.db-wal
 *.db-shm
 runtime/
+evidence/
 
 # Security & Secrets (STRICT - ZERO CREDENTIAL LEAKS)
 .env

@@ -42,10 +42,12 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from alphaforge.strategy.config import StrategyConfig
 
 _repo_root = Path(__file__).resolve().parent.parent
 if str(_repo_root) not in sys.path:
@@ -334,13 +336,47 @@ def main() -> None:
     )
 
     # Preserve PaperShadowEngine orchestration while injecting the real 15m
-    # confirmation timeframe into the frozen DeterministicStrategyEngine.
-    strategy_bridge = _ConfirmationAwareStrategyEngine()
+    # confirmation timeframe and active Market Regime Filter into the strategy engine.
+    regime_enabled = os.environ.get("ENABLE_REGIME_FILTER", "1").lower() not in ("0", "false", "no")
+    strat_config = StrategyConfig(
+        strategy_version="1.1.0",
+        enable_regime_filter=regime_enabled,
+        min_adx_threshold=Decimal("18.0"),
+        min_ema_spread_pct=Decimal("0.0003"),
+    )
+    strategy_bridge = _ConfirmationAwareStrategyEngine(config=strat_config)
     engine._strategy_engine = strategy_bridge
 
     exec_agg = _TimeframeAggregator(3)
     conf_agg = _TimeframeAggregator(15)
     confirmation_history: list[Candle] = []
+
+    # Preload historical 15m confirmation bars for Day-1 ADX & EMA warmup
+    try:
+        from scripts.run_real_data_backtest import fetch_upstox_1m_candles, resample_1m_to_interval
+        warmup_end = datetime.now(UTC)
+        warmup_start = warmup_end - timedelta(days=6)
+        raw_warmup = fetch_upstox_1m_candles(
+            instrument_key=adapter._instrument_key,
+            from_date=warmup_start,
+            to_date=warmup_end,
+            token=access_token,
+            cache_dir=_repo_root / "runtime" / "historical_data",
+        )
+        if raw_warmup:
+            warmup_15m = resample_1m_to_interval(
+                raw_candles=raw_warmup,
+                symbol=contract.underlying_symbol,
+                contract_id=contract.contract_id,
+                instrument_type=contract.instrument_type,
+                interval_minutes=15,
+            )
+            for mc in warmup_15m:
+                confirmation_history.append(mc.to_strategy_candle())
+            strategy_bridge.set_confirmation_candles(confirmation_history)
+            logger.info("Preloaded %d historical 15m confirmation bars for Day-1 ADX warmup.", len(confirmation_history))
+    except Exception as e:
+        logger.warning("Could not preload historical confirmation warmup: %s", e)
 
     evidence_dir = _repo_root / "evidence" / "paper_live"
     evidence_dir.mkdir(parents=True, exist_ok=True)

@@ -144,13 +144,20 @@ def fetch_upstox_1m_candles(
     return sorted_candles
 
 
-def resample_1m_to_3m(raw_candles: list[list], symbol: str, contract_id: str, instrument_type: InstrumentType) -> list[MarketCandle]:
+def resample_1m_to_interval(
+    raw_candles: list[list],
+    symbol: str,
+    contract_id: str,
+    instrument_type: InstrumentType,
+    interval_minutes: int,
+) -> list[MarketCandle]:
     """
-    Resample 1-minute raw candle records into authoritative 3-minute MarketCandle instances.
+    Resample 1-minute raw candle records into authoritative MarketCandle instances.
     Enforces strict UTC timestamps, Decimal boundaries, and valid OHLCV.
     """
     aggregated: list[MarketCandle] = []
     chunk: list[tuple[datetime, Decimal, Decimal, Decimal, Decimal, int, int]] = []
+    tf_str = f"{interval_minutes}m"
 
     for r in raw_candles:
         ts_str = str(r[0])
@@ -164,7 +171,7 @@ def resample_1m_to_3m(raw_candles: list[list], symbol: str, contract_id: str, in
 
         chunk.append((dt, o, h, l, c, v, oi))
 
-        if len(chunk) == 3:
+        if len(chunk) == interval_minutes:
             bar_ts = chunk[0][0]
             bar_open = chunk[0][1]
             bar_high = max(item[2] for item in chunk)
@@ -185,7 +192,7 @@ def resample_1m_to_3m(raw_candles: list[list], symbol: str, contract_id: str, in
                 contract_id=contract_id,
                 exchange_timestamp=bar_ts,
                 received_timestamp=bar_ts + timedelta(milliseconds=10),
-                timeframe="3m",
+                timeframe=tf_str,
                 open=bar_open,
                 high=bar_high,
                 low=bar_low,
@@ -231,14 +238,25 @@ def run_real_backtest(
         logger.error("No historical candles retrieved from Upstox. Check network connectivity or date range.")
         sys.exit(1)
 
-    candles_3m = resample_1m_to_3m(
+    candles_3m = resample_1m_to_interval(
         raw_candles=raw_candles,
         symbol=symbol,
         contract_id=contract_id,
         instrument_type=InstrumentType.FUTURES,
+        interval_minutes=3,
+    )
+    candles_15m = resample_1m_to_interval(
+        raw_candles=raw_candles,
+        symbol=symbol,
+        contract_id=contract_id,
+        instrument_type=InstrumentType.FUTURES,
+        interval_minutes=15,
     )
 
-    logger.info("Resampled %d 1-minute bars into %d 3-minute execution bars.", len(raw_candles), len(candles_3m))
+    logger.info(
+        "Resampled %d 1-minute bars into %d 3m execution bars and %d 15m confirmation bars.",
+        len(raw_candles), len(candles_3m), len(candles_15m),
+    )
 
     if len(candles_3m) < 30:
         logger.error("Insufficient 3m candles for backtesting (%d bars). Minimum 30 required.", len(candles_3m))
@@ -264,16 +282,16 @@ def run_real_backtest(
         data_source="NSE_MASTER",
     )
 
-    dataset_id = f"UPSTOX_REAL_{symbol}_{contract_id}_3M"
-    dataset = BacktestDataset(dataset_id=dataset_id, candles=candles_3m)
+    dataset_exec = BacktestDataset(dataset_id=f"UPSTOX_REAL_{symbol}_{contract_id}_3M", candles=candles_3m)
+    dataset_conf = BacktestDataset(dataset_id=f"UPSTOX_REAL_{symbol}_{contract_id}_15M", candles=candles_15m)
 
     t_start = candles_3m[0].exchange_timestamp
     t_end = candles_3m[-1].exchange_timestamp + timedelta(minutes=3)
 
     config = BacktestConfig(
         strategy_id="AF_ORB_MOMENTUM_V1",
-        strategy_version="1.0.0",
-        dataset_id=dataset.dataset_id,
+        strategy_version="1.1.0",
+        dataset_id=dataset_exec.dataset_id,
         start_time=t_start,
         end_time=t_end,
         initial_capital=initial_capital,
@@ -284,6 +302,7 @@ def run_real_backtest(
     )
 
     strat_cfg = StrategyConfig(
+        strategy_version="1.1.0",
         enable_regime_filter=regime_filter,
         min_adx_threshold=Decimal(str(min_adx)),
         min_ema_spread_pct=Decimal(str(min_spread)),
@@ -292,11 +311,18 @@ def run_real_backtest(
     logger.info("Launching AlphaForge Pure Deterministic Backtest Engine...")
     logger.info("  Strategy: %s v%s", config.strategy_id, config.strategy_version)
     logger.info("  Regime Filter: %s (Min ADX: %.1f, Min Spread: %.4f)", "ENABLED" if regime_filter else "DISABLED", min_adx, min_spread)
+    logger.info("  Confirmation Horizon: 15-minute timeframe (%d bars)", len(candles_15m))
     logger.info("  Initial Capital: Rs. %s", f"{initial_capital:,.2f}")
     logger.info("  Contract: %s (Lot Size: %d)", contract.contract_id, contract.lot_size)
     logger.info("  Time Horizon: %s -> %s", t_start.isoformat(), t_end.isoformat())
 
-    engine = BacktestEngine(config=config, dataset=dataset, contract_master=contract, strategy_config=strat_cfg)
+    engine = BacktestEngine(
+        config=config,
+        dataset=dataset_exec,
+        contract_master=contract,
+        strategy_config=strat_cfg,
+        confirmation_dataset=dataset_conf,
+    )
     result = engine.run()
 
     # -------------------------------------------------------------
