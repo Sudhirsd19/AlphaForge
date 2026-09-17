@@ -175,3 +175,82 @@ def calculate_candle_geometry(
     )
 
     return body_ratio, close_loc_long, close_loc_short
+
+
+def calculate_adx(
+    highs: list[Decimal], lows: list[Decimal], closes: list[Decimal], period: int = 14
+) -> list[Decimal]:
+    """
+    Calculate Average Directional Index (ADX) using Wilder's directional movement smoothing.
+    Returns a list of Decimal values representing ADX at each bar.
+    Bars prior to (2 * period - 1) are seeded with Decimal("0.0").
+    """
+    n = len(highs)
+    if n < 2 * period or len(lows) < n or len(closes) < n:
+        return [Decimal("0.0")] * n
+
+    # Step 1: Directional Movement (+DM, -DM) and True Range (TR)
+    plus_dm: list[Decimal] = [Decimal("0.0")]
+    minus_dm: list[Decimal] = [Decimal("0.0")]
+    tr_list: list[Decimal] = [highs[0] - lows[0]]
+
+    for i in range(1, n):
+        up_move = highs[i] - highs[i - 1]
+        down_move = lows[i - 1] - lows[i]
+
+        if up_move > Decimal("0") and up_move > down_move:
+            plus_dm.append(up_move)
+        else:
+            plus_dm.append(Decimal("0.0"))
+
+        if down_move > Decimal("0") and down_move > up_move:
+            minus_dm.append(down_move)
+        else:
+            minus_dm.append(Decimal("0.0"))
+
+        h_l = highs[i] - lows[i]
+        h_pc = abs(highs[i] - closes[i - 1])
+        l_pc = abs(lows[i] - closes[i - 1])
+        tr_list.append(max(h_l, h_pc, l_pc))
+
+    # Step 2: Wilder's smoothing for TR, +DM, -DM
+    smooth_tr = sum(tr_list[1 : period + 1])
+    smooth_plus_dm = sum(plus_dm[1 : period + 1])
+    smooth_minus_dm = sum(minus_dm[1 : period + 1])
+
+    dec_period = Decimal(period)
+    dec_period_minus_1 = dec_period - Decimal("1")
+
+    dx_list: list[Decimal] = []
+
+    def _compute_dx(s_tr: Decimal, s_pdm: Decimal, s_mdm: Decimal) -> Decimal:
+        if s_tr == Decimal("0"):
+            return Decimal("0.0")
+        p_di = (s_pdm / s_tr) * Decimal("100")
+        m_di = (s_mdm / s_tr) * Decimal("100")
+        di_sum = p_di + m_di
+        if di_sum == Decimal("0"):
+            return Decimal("0.0")
+        return (abs(p_di - m_di) / di_sum) * Decimal("100")
+
+    dx_list.append(_compute_dx(smooth_tr, smooth_plus_dm, smooth_minus_dm))
+
+    for i in range(period + 1, n):
+        smooth_tr = smooth_tr - (smooth_tr / dec_period) + tr_list[i]
+        smooth_plus_dm = smooth_plus_dm - (smooth_plus_dm / dec_period) + plus_dm[i]
+        smooth_minus_dm = smooth_minus_dm - (smooth_minus_dm / dec_period) + minus_dm[i]
+        dx_list.append(_compute_dx(smooth_tr, smooth_plus_dm, smooth_minus_dm))
+
+    # Step 3: Wilder's smoothing of DX to obtain ADX
+    adx_result: list[Decimal] = [Decimal("0.0")] * (2 * period - 1)
+    if len(dx_list) < period:
+        return [Decimal("0.0")] * n
+
+    current_adx = sum(dx_list[:period]) / dec_period
+    adx_result.append(current_adx.quantize(PRECISION, rounding=ROUND_HALF_EVEN))
+
+    for k in range(period, len(dx_list)):
+        current_adx = (current_adx * dec_period_minus_1 + dx_list[k]) / dec_period
+        adx_result.append(current_adx.quantize(PRECISION, rounding=ROUND_HALF_EVEN))
+
+    return adx_result

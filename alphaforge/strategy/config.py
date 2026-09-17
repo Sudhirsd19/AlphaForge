@@ -62,6 +62,11 @@ class StrategyConfig(BaseModel):
     # Stale Data Threshold (Seconds)
     max_stale_seconds: int = 195  # 3m (180s) + 15s grace
 
+    # Market Regime Filter Parameters
+    enable_regime_filter: bool = False
+    min_adx_threshold: Decimal = Decimal("20.0")
+    min_ema_spread_pct: Decimal = Decimal("0.0008")  # 0.08% (~20 Nifty pts) minimum spread
+
     def compute_config_hash(self) -> str:
         """
         Produce a deterministic SHA-256 hash of the canonical JSON representation.

@@ -38,6 +38,7 @@ from alphaforge.contract.models import ContractMaster
 from alphaforge.data.enums import InstrumentType
 from alphaforge.data.models import MarketCandle
 from alphaforge.shadow_validation.contract_source import get_current_active_contract
+from alphaforge.strategy.config import StrategyConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -207,6 +208,9 @@ def run_real_backtest(
     initial_capital: Decimal = Decimal("1000000"),
     lot_size: int = 50,
     output_report: Path | None = None,
+    regime_filter: bool = False,
+    min_adx: float = 20.0,
+    min_spread: float = 0.0008,
 ) -> None:
     """Execute historical backtest on real Upstox market data."""
     to_dt = datetime.now(UTC)
@@ -279,13 +283,20 @@ def run_real_backtest(
         verify_reproducibility=False,
     )
 
+    strat_cfg = StrategyConfig(
+        enable_regime_filter=regime_filter,
+        min_adx_threshold=Decimal(str(min_adx)),
+        min_ema_spread_pct=Decimal(str(min_spread)),
+    )
+
     logger.info("Launching AlphaForge Pure Deterministic Backtest Engine...")
     logger.info("  Strategy: %s v%s", config.strategy_id, config.strategy_version)
+    logger.info("  Regime Filter: %s (Min ADX: %.1f, Min Spread: %.4f)", "ENABLED" if regime_filter else "DISABLED", min_adx, min_spread)
     logger.info("  Initial Capital: Rs. %s", f"{initial_capital:,.2f}")
     logger.info("  Contract: %s (Lot Size: %d)", contract.contract_id, contract.lot_size)
     logger.info("  Time Horizon: %s -> %s", t_start.isoformat(), t_end.isoformat())
 
-    engine = BacktestEngine(config=config, dataset=dataset, contract_master=contract)
+    engine = BacktestEngine(config=config, dataset=dataset, contract_master=contract, strategy_config=strat_cfg)
     result = engine.run()
 
     # -------------------------------------------------------------
@@ -382,6 +393,9 @@ def main() -> None:
     parser.add_argument("--capital", type=float, default=1000000.0, help="Initial capital in INR (default: 1,000,000)")
     parser.add_argument("--lot-size", type=int, default=50, help="Futures contract lot size (default: 50)")
     parser.add_argument("--output", type=str, default=None, help="Path to save report JSON")
+    parser.add_argument("--regime-filter", action="store_true", help="Enable ADX + EMA spread market regime filter")
+    parser.add_argument("--min-adx", type=float, default=20.0, help="Minimum ADX threshold for trending regime (default: 20.0)")
+    parser.add_argument("--min-spread", type=float, default=0.0008, help="Minimum EMA spread percentage (default: 0.0008)")
 
     args = parser.parse_args()
     out_path = Path(args.output) if args.output else None
@@ -394,6 +408,9 @@ def main() -> None:
         initial_capital=Decimal(str(args.capital)),
         lot_size=args.lot_size,
         output_report=out_path,
+        regime_filter=args.regime_filter,
+        min_adx=args.min_adx,
+        min_spread=args.min_spread,
     )
 
 

@@ -10,6 +10,7 @@ from decimal import Decimal
 from alphaforge.core.enums import SignalDirection, TrendState
 from alphaforge.core.models import Candle
 from alphaforge.strategy.indicators import (
+    calculate_adx,
     calculate_atr,
     calculate_candle_geometry,
     calculate_ema,
@@ -18,11 +19,19 @@ from alphaforge.strategy.indicators import (
 
 
 def evaluate_trend_regime(
-    conf_candles: list[Candle], fast_period: int = 9, slow_period: int = 21
+    conf_candles: list[Candle],
+    fast_period: int = 9,
+    slow_period: int = 21,
+    enable_regime_filter: bool = False,
+    min_adx_threshold: Decimal = Decimal("20.0"),
+    min_ema_spread_pct: Decimal = Decimal("0.0008"),
 ) -> tuple[TrendState, Decimal, Decimal]:
     """
     Evaluate higher-timeframe trend regime on closed candles.
     Returns (TrendState, ema_fast, ema_slow).
+    If enable_regime_filter is True:
+      - Validates minimum EMA spread to reject tangled/flat EMAs in sideways markets.
+      - Validates ADX(14) >= min_adx_threshold to reject non-trending/choppy regimes.
     """
     if len(conf_candles) < slow_period:
         return TrendState.NEUTRAL, Decimal("0"), Decimal("0")
@@ -34,6 +43,22 @@ def evaluate_trend_regime(
     latest_close = closes[-1]
     latest_fast = ema_fast_series[-1]
     latest_slow = ema_slow_series[-1]
+
+    if enable_regime_filter:
+        # 1. EMA Spread Gate: Reject tangled EMAs in ranging markets
+        if latest_close > Decimal("0"):
+            spread_pct = abs(latest_fast - latest_slow) / latest_close
+            if spread_pct < min_ema_spread_pct:
+                return TrendState.NEUTRAL, latest_fast, latest_slow
+
+        # 2. ADX Directional Strength Gate: Reject weak/choppy markets
+        if len(conf_candles) >= 28:
+            highs = [c.high for c in conf_candles]
+            lows = [c.low for c in conf_candles]
+            adx_series = calculate_adx(highs, lows, closes, period=14)
+            latest_adx = adx_series[-1]
+            if latest_adx < min_adx_threshold:
+                return TrendState.NEUTRAL, latest_fast, latest_slow
 
     if latest_fast > latest_slow and latest_close > latest_slow:
         return TrendState.BULLISH, latest_fast, latest_slow

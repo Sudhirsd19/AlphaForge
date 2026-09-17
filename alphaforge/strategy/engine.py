@@ -144,7 +144,12 @@ class DeterministicStrategyEngine:
             )
 
         trend_state, _, _ = evaluate_trend_regime(
-            deduped_conf_closed, self.config.trend_ema_fast, self.config.trend_ema_slow
+            deduped_conf_closed,
+            self.config.trend_ema_fast,
+            self.config.trend_ema_slow,
+            enable_regime_filter=self.config.enable_regime_filter,
+            min_adx_threshold=self.config.min_adx_threshold,
+            min_ema_spread_pct=self.config.min_ema_spread_pct,
         )
 
         if trend_state == TrendState.NEUTRAL:

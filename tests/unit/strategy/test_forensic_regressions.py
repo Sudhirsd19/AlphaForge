@@ -168,6 +168,9 @@ def test_config_hash_sensitivity_all_parameters() -> None:
         ("max_risk_distance_pct", Decimal("0.0400")),
         ("target_risk_multiple", Decimal("2.5")),
         ("max_stale_seconds", 200),
+        ("enable_regime_filter", True),
+        ("min_adx_threshold", Decimal("25.0")),
+        ("min_ema_spread_pct", Decimal("0.0012")),
     ]
 
     for param, new_val in mutations:

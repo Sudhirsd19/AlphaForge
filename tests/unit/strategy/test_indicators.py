@@ -87,3 +87,26 @@ def test_calculate_candle_geometry() -> None:
     assert body_ratio > Decimal("0.80")
     assert close_loc_long > Decimal("0.90")
     assert close_loc_short < Decimal("0.20")
+
+
+def test_calculate_adx() -> None:
+    from alphaforge.strategy.indicators import calculate_adx
+
+    # Trending series: price consistently expanding upward
+    highs_trend = [Decimal(str(100 + i * 2)) for i in range(40)]
+    lows_trend = [Decimal(str(95 + i * 2)) for i in range(40)]
+    closes_trend = [Decimal(str(98 + i * 2)) for i in range(40)]
+
+    adx_trend = calculate_adx(highs_trend, lows_trend, closes_trend, period=14)
+    assert len(adx_trend) == 40
+    # In a strong trending market, ADX must be high (> 50)
+    assert adx_trend[-1] > Decimal("50.0")
+
+    # Choppy / ranging series: price oscillates within narrow boundary
+    highs_chop = [Decimal(str(100 + (i % 2) * 2)) for i in range(40)]
+    lows_chop = [Decimal(str(95 - (i % 2) * 2)) for i in range(40)]
+    closes_chop = [Decimal(str(98 + (i % 2))) for i in range(40)]
+
+    adx_chop = calculate_adx(highs_chop, lows_chop, closes_chop, period=14)
+    # In a choppy market, ADX must be low (< 20)
+    assert adx_chop[-1] < Decimal("20.0")
