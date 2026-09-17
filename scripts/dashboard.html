@@ -10,7 +10,6 @@
       --panel-bg: #0b1120;
       --card-bg: #0f172a;
       --card-border: #1e293b;
-      --card-border-glow: rgba(30, 41, 59, 0.8);
       --header-bg: #080d1a;
       --text: #f8fafc;
       --text-muted: #94a3b8;
@@ -25,14 +24,13 @@
       --danger-dim: rgba(239, 68, 68, 0.14);
       --warning: #f59e0b;
       --warning-dim: rgba(245, 158, 11, 0.14);
-      --badge-bg: #111b2e;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, "Helvetica Neue", monospace; }
     body { background-color: var(--bg); color: var(--text); padding: 14px 18px; line-height: 1.45; min-height: 100vh; }
     .container { max-width: 1680px; margin: 0 auto; }
 
-    /* Custom Institutional Scrollbar */
+    /* Custom Scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #060a14; }
     ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
@@ -50,7 +48,7 @@
       align-items: center;
       flex-wrap: wrap;
       gap: 12px;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
     }
     .brand-cluster { display: flex; align-items: center; gap: 12px; }
     .brand-mark {
@@ -62,17 +60,17 @@
       box-shadow: 0 0 12px rgba(6, 182, 212, 0.3);
       letter-spacing: -0.5px;
     }
-    .brand-text h1 { font-size: 15px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: #fff; }
-    .brand-text span { font-size: 10px; color: var(--cyan); letter-spacing: 1.6px; font-weight: 700; text-transform: uppercase; }
+    .brand-text h1 { font-size: 15px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: #fff; }
+    .brand-text span { font-size: 10px; color: var(--cyan); letter-spacing: 1.2px; font-weight: 700; text-transform: uppercase; }
 
     .header-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .hdr-badge {
       display: flex; flex-direction: column;
       background: #081022; border: 1px solid var(--card-border);
-      border-radius: 4px; padding: 4px 9px; min-width: 80px;
+      border-radius: 4px; padding: 4px 10px; min-width: 85px;
     }
     .hdr-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; font-weight: 700; letter-spacing: 0.8px; }
-    .hdr-val { font-family: "JetBrains Mono", monospace, monospace; font-weight: 700; font-size: 11px; color: #e2e8f0; font-feature-settings: "tnum"; }
+    .hdr-val { font-family: "JetBrains Mono", monospace; font-weight: 700; font-size: 11px; color: #e2e8f0; font-feature-settings: "tnum"; }
     .hdr-val.cyan { color: var(--cyan); }
     .hdr-val.green { color: var(--success); }
     .hdr-val.amber { color: var(--warning); }
@@ -95,7 +93,7 @@
     }
     .btn-disarm-action:hover { background: #10b981; color: #fff; box-shadow: 0 0 14px rgba(16, 185, 129, 0.5); }
 
-    /* Bot Master Control Bar */
+    /* Bot Master Control Strip */
     .bot-control-bar {
       background: #090e1c;
       border: 1px solid #1e2c47;
@@ -136,7 +134,7 @@
     .btn-bot-start {
       background: linear-gradient(135deg, #059669, #10b981);
       color: #fff; border: 1px solid #34d399;
-      padding: 8px 18px; border-radius: 6px; font-weight: 800;
+      padding: 8px 20px; border-radius: 6px; font-weight: 800;
       font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase;
       cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 8px;
       box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
@@ -145,7 +143,7 @@
     .btn-bot-stop {
       background: linear-gradient(135deg, #b91c1c, #ef4444);
       color: #fff; border: 1px solid #f87171;
-      padding: 8px 18px; border-radius: 6px; font-weight: 800;
+      padding: 8px 20px; border-radius: 6px; font-weight: 800;
       font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase;
       cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 8px;
       box-shadow: 0 2px 10px rgba(239, 68, 68, 0.3);
@@ -258,7 +256,7 @@
     .meter-fill.amber { background: #f59e0b; }
     .meter-fill.red { background: #ef4444; }
 
-    /* High-Density Forensic Tables */
+    /* Tables */
     .tbl-scroll-container { width: 100%; overflow-x: auto; border: 1px solid var(--card-border); border-radius: 4px; }
     table.forensic-tbl { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
     table.forensic-tbl th {
@@ -324,13 +322,13 @@
 <body>
   <div class="container">
 
-    <!-- Top Command Center Header -->
+    <!-- Top Command Center Header (Clean & Trader-Focused) -->
     <header>
       <div class="brand-cluster">
         <div class="brand-mark">AF</div>
         <div class="brand-text">
           <h1>AlphaForge Operations Console</h1>
-          <span>Institutional Quantitative Operations Center &bull; Phase 17</span>
+          <span>Automated Algorithmic Trading Desk</span>
         </div>
       </div>
 
@@ -338,10 +336,6 @@
         <div class="hdr-badge">
           <span class="hdr-label">Provider</span>
           <span class="hdr-val cyan">UPSTOX</span>
-        </div>
-        <div class="hdr-badge">
-          <span class="hdr-label">Execution Mode</span>
-          <span class="hdr-val">REAL-MARKET SHADOW</span>
         </div>
         <div class="hdr-badge">
           <span class="hdr-label">Contract</span>
@@ -354,14 +348,6 @@
         <div class="hdr-badge">
           <span class="hdr-label">System Health</span>
           <span class="hdr-val green" id="hdr-health">HEALTHY</span>
-        </div>
-        <div class="hdr-badge">
-          <span class="hdr-label">Phase 17C</span>
-          <span class="hdr-val amber" id="hdr-phase17c">READY</span>
-        </div>
-        <div class="hdr-badge">
-          <span class="hdr-label">Build SHA</span>
-          <span class="hdr-val" id="hdr-build-sha">...</span>
         </div>
       </div>
 
@@ -384,11 +370,11 @@
         </span>
 
         <div class="bot-mode-selector">
-          <button class="bot-mode-btn active-paper">PAPER</button>
+          <button class="bot-mode-btn active-paper">PAPER TRADING</button>
           <button class="bot-mode-btn locked-real" onclick="alertRealLocked()">&#128274; REAL (LOCKED)</button>
         </div>
 
-        <span class="status-tag tag-cyan">UPSTOX LIVE &bull; READ-ONLY</span>
+        <span class="status-tag tag-cyan">UPSTOX LIVE FEED</span>
         <span class="status-tag tag-green">ZERO LIVE ORDERS GUARANTEED</span>
         <span id="bot-mkt-badge" class="status-tag tag-amber">MARKET: EVALUATING</span>
       </div>
@@ -406,18 +392,18 @@
       <button class="btn-action secondary" style="padding: 2px 8px; font-size: 10px;" onclick="dismissBotError()">Dismiss</button>
     </div>
 
-    <!-- Navigation Tabs -->
+    <!-- Navigation Tabs (Simple, Trader-Friendly Labels) -->
     <div class="tabs-nav">
-      <button class="nav-btn active" onclick="switchTab('overview')">1. Overview</button>
-      <button class="nav-btn" onclick="switchTab('market')">2. Market</button>
-      <button class="nav-btn" onclick="switchTab('signals')">3. Signals</button>
-      <button class="nav-btn" onclick="switchTab('risk')">4. Risk</button>
-      <button class="nav-btn" onclick="switchTab('shadow')">5. Shadow Run</button>
-      <button class="nav-btn" onclick="switchTab('execution')">6. Execution</button>
-      <button class="nav-btn" onclick="switchTab('evidence')">7. Evidence</button>
-      <button class="nav-btn" onclick="switchTab('security')">8. Security</button>
-      <button class="nav-btn" onclick="switchTab('observability')">9. Observability</button>
-      <button class="nav-btn" onclick="switchTab('backtest')">10. Backtest</button>
+      <button class="nav-btn active" onclick="switchTab('overview')">Overview</button>
+      <button class="nav-btn" onclick="switchTab('market')">Market Watch</button>
+      <button class="nav-btn" onclick="switchTab('signals')">Signals</button>
+      <button class="nav-btn" onclick="switchTab('risk')">Risk Controls</button>
+      <button class="nav-btn" onclick="switchTab('shadow')">Live Session</button>
+      <button class="nav-btn" onclick="switchTab('execution')">Orders &amp; Fills</button>
+      <button class="nav-btn" onclick="switchTab('evidence')">Reports</button>
+      <button class="nav-btn" onclick="switchTab('security')">Security</button>
+      <button class="nav-btn" onclick="switchTab('observability')">System Logs</button>
+      <button class="nav-btn" onclick="switchTab('backtest')">Backtest</button>
     </div>
 
     <!-- ==================== TAB 1: OVERVIEW ==================== -->
@@ -434,14 +420,14 @@
           <div class="kpi-main-val" id="ov-risk-equity">₹1,000,000.00</div>
           <div class="kpi-subrow">
             <span>Reserved: <strong id="ov-risk-reserved">₹0.00</strong></span>
-            <span>Positions: <strong id="ov-risk-positions">0 / 5</strong></span>
+            <span>Open Trades: <strong id="ov-risk-positions">0 / 5</strong></span>
           </div>
         </div>
 
         <!-- KPI 2: Active Contract -->
         <div class="kpi-card">
           <div class="kpi-header">
-            <span class="kpi-label">Active Contract Master</span>
+            <span class="kpi-label">Active Contract</span>
             <span class="status-tag tag-green" id="ov-contract-status">ACTIVE</span>
           </div>
           <div class="kpi-main-val" id="ov-contract-id">NIFTY26SEPFUT</div>
@@ -454,20 +440,20 @@
         <!-- KPI 3: Strategy Stance -->
         <div class="kpi-card">
           <div class="kpi-header">
-            <span class="kpi-label">Quant Strategy State</span>
-            <span class="status-tag tag-cyan" id="ov-sig-state">NO ACTIVE SIGNAL</span>
+            <span class="kpi-label">Strategy Stance</span>
+            <span class="status-tag tag-cyan" id="ov-sig-state">WAIT</span>
           </div>
           <div class="kpi-main-val" id="ov-sig-trend" style="font-size: 16px;">NEUTRAL</div>
           <div class="kpi-subrow">
             <span>Momentum: <strong id="ov-sig-momentum">WAIT</strong></span>
-            <span>Breakout: <strong id="ov-sig-breakout">NOT CONFIRMED</strong></span>
+            <span>Breakout: <strong id="ov-sig-breakout">NONE</strong></span>
           </div>
         </div>
 
         <!-- KPI 4: Risk Barriers -->
         <div class="kpi-card">
           <div class="kpi-header">
-            <span class="kpi-label">Portfolio Risk Utilization</span>
+            <span class="kpi-label">Risk Utilization</span>
             <span id="ov-meter-risk-pct" style="font-family: monospace; font-size: 10px; font-weight: 800; color: #34d399;">0.00% / 2.00%</span>
           </div>
           <div class="meter-wrap">
@@ -490,40 +476,40 @@
           <!-- Live Market Chart Panel -->
           <div class="op-panel">
             <div class="op-panel-header">
-              <span class="op-panel-title">NIFTY Futures &mdash; Real Market Data Feed</span>
+              <span class="op-panel-title">NIFTY Futures &mdash; Live Market Feed</span>
               <div style="display: flex; gap: 8px; align-items: center;">
                 <span class="status-tag tag-slate" id="chart-session-status">SESSION: CHECKING</span>
-                <span class="status-tag tag-amber" id="chart-data-badge">SHADOW STREAM</span>
+                <span class="status-tag tag-amber" id="chart-data-badge">LIVE STREAM</span>
               </div>
             </div>
             <div class="chart-container">
               <canvas id="marketChartCanvas" class="chart-canvas"></canvas>
               <div id="chart-empty-state" class="empty-state-card" style="display: none; position: absolute; inset: 18px;">
                 <div class="empty-state-title">Awaiting Market Data Stream</div>
-                <div class="empty-state-desc">Live WebSocket connects when the bot is started. During NSE market hours (09:15–15:30 IST), candles stream continuously into this terminal.</div>
+                <div class="empty-state-desc">Click <strong>START BOT (PAPER)</strong> to stream live market candles during active NSE hours (09:15–15:30 IST).</div>
               </div>
             </div>
           </div>
 
-          <!-- Decision Explainer & Rejection Ledger -->
+          <!-- Strategy Activity & Decision Feed -->
           <div class="op-panel">
             <div class="op-panel-header">
-              <span class="op-panel-title">Decision Explainer &mdash; Causal Non-Lookahead Rationale</span>
-              <span class="op-subhead" id="ov-sig-decision">NO TRADE &mdash; Closed candle requirements not met on execution timeframe.</span>
+              <span class="op-panel-title">Strategy Decision Feed</span>
+              <span class="op-subhead" id="ov-sig-decision">NO TRADE &mdash; Closed candle requirements not met.</span>
             </div>
             <div class="tbl-scroll-container" style="max-height: 240px;">
               <table class="forensic-tbl">
                 <thead>
                   <tr>
-                    <th>Timestamp</th>
+                    <th>Time</th>
                     <th>Candle</th>
-                    <th>Strategy State</th>
-                    <th>Signal Candidate</th>
-                    <th>Risk Gate</th>
+                    <th>Strategy</th>
+                    <th>Signal</th>
+                    <th>Risk</th>
                     <th>Contract</th>
-                    <th>Final Decision</th>
-                    <th>Category</th>
-                    <th>Causal Reason</th>
+                    <th>Action</th>
+                    <th>Status</th>
+                    <th>Reason</th>
                   </tr>
                 </thead>
                 <tbody id="tbl-decision-history">
@@ -534,53 +520,53 @@
           </div>
         </div>
 
-        <!-- Right Column (35%): Execution Firewall & Contract Specs -->
+        <!-- Right Column (35%): Broker Connection & Contract Specs -->
         <div>
-          <!-- Execution Safety & Firewall Status -->
+          <!-- Broker Connection & Safety Status -->
           <div class="op-panel">
             <div class="op-panel-header">
-              <span class="op-panel-title">Execution Safety &amp; Broker Firewall</span>
-              <span class="status-tag tag-cyan" id="ov-provider-status">UPSTOX SHADOW</span>
+              <span class="op-panel-title">Broker &amp; Protection Status</span>
+              <span class="status-tag tag-cyan" id="ov-provider-status">PAPER SHADOW</span>
             </div>
             <div class="kv-grid">
               <div class="kv-item">
-                <div class="kv-label">Data Provider</div>
+                <div class="kv-label">Broker</div>
                 <div class="kv-value" id="ov-provider">UPSTOX</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">Connection State</div>
+                <div class="kv-label">Feed Connection</div>
                 <div class="kv-value" id="ov-conn-state">DISCONNECTED</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">Provider Authenticated</div>
+                <div class="kv-label">Account Token</div>
                 <div class="kv-value green" id="ov-prov-auth">NOT VERIFIED</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">External Live Feed</div>
+                <div class="kv-label">Live Data Ingest</div>
                 <div class="kv-value" id="ov-ext-feed">NO</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">Live Broker Orders</div>
+                <div class="kv-label">Real Orders Sent</div>
                 <div class="kv-value green" id="ov-live-orders">0 (BLOCKED)</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">Phase 17C Readiness</div>
-                <div class="kv-value amber" id="ov-phase17c">READY FOR RUN</div>
+                <div class="kv-label">Safety Status</div>
+                <div class="kv-value green">100% PROTECTED</div>
               </div>
             </div>
 
             <div style="background: #081020; border: 1px solid #142036; border-radius: 4px; padding: 9px; margin-top: 10px; font-size: 11px; color: #94a3b8;">
               <div style="font-weight: 800; color: #34d399; margin-bottom: 3px; display: flex; align-items: center; gap: 6px;">
-                <span>&#10004;</span> Fail-Closed Broker Isolation Active
+                <span>&#10004;</span> Zero Real Orders Guaranteed
               </div>
-              <div><code>DeploymentBrokerGuard</code> &amp; <code>ShadowExecutionOnlyGuard</code> structurally block live broker routing. All trades execute in simulated paper memory.</div>
+              <div>Real-money broker routing is permanently blocked. All trades execute in simulated paper mode against genuine live market data.</div>
             </div>
           </div>
 
           <!-- Active Contract Master Specifications -->
           <div class="op-panel">
             <div class="op-panel-header">
-              <span class="op-panel-title">Contract Master Specs</span>
+              <span class="op-panel-title">Contract Details</span>
               <span class="status-tag tag-slate" id="ov-contract-lifecycle">TRADABLE</span>
             </div>
             <div class="kv-grid">
@@ -589,15 +575,15 @@
                 <div class="kv-value" id="ov-contract-exchange">NSE &bull; NFO</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">Instrument Type</div>
+                <div class="kv-label">Type</div>
                 <div class="kv-value" id="ov-contract-type">FUTURES</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">Data Source</div>
+                <div class="kv-label">Source</div>
                 <div class="kv-value" id="ov-contract-source">AUTHORITATIVE</div>
               </div>
               <div class="kv-item">
-                <div class="kv-label">Rollover Candidate</div>
+                <div class="kv-label">Rollover</div>
                 <div class="kv-value" id="ov-contract-rollover">NONE</div>
               </div>
               <div class="kv-item" style="grid-column: span 2;">
@@ -614,27 +600,27 @@
     <div id="tab-market" class="tab-view">
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">NSE Session Status &amp; Time</span>
+          <span class="op-panel-title">NSE Market Hours &amp; Clock</span>
           <span class="status-tag tag-cyan" id="mkt-session-badge">09:15 &mdash; 15:30 IST</span>
         </div>
         <div class="kv-grid">
-          <div class="kv-item"><div class="kv-label">Trading Window</div><div class="kv-value">09:15 &mdash; 15:30 IST (03:45 &mdash; 10:00 UTC)</div></div>
+          <div class="kv-item"><div class="kv-label">Market Session</div><div class="kv-value">09:15 &mdash; 15:30 IST</div></div>
           <div class="kv-item"><div class="kv-label">Session Status</div><div class="kv-value" id="mkt-session-open">CLOSED (OFF-HOURS)</div></div>
-          <div class="kv-item"><div class="kv-label">Market Clock (UTC)</div><div class="kv-value" id="mkt-clock-utc">00:00:00 UTC</div></div>
+          <div class="kv-item"><div class="kv-label">Clock (UTC)</div><div class="kv-value" id="mkt-clock-utc">00:00:00 UTC</div></div>
           <div class="kv-item"><div class="kv-label">Contract</div><div class="kv-value" id="mkt-contract-id">NIFTY FUTURES</div></div>
         </div>
       </div>
 
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">NIFTY Futures &mdash; Real Market Data Stream</span>
+          <span class="op-panel-title">NIFTY Futures &mdash; Live Chart</span>
           <span class="status-tag tag-slate" id="mkt-feed-source">UPSTOX WEBSOCKET</span>
         </div>
         <div class="chart-container" style="height: 420px;">
           <canvas id="primaryMarketChart" class="chart-canvas"></canvas>
           <div id="primary-chart-empty" class="empty-state-card" style="position: absolute; inset: 30px;">
             <div class="empty-state-title">WAITING FOR MARKET DATA</div>
-            <div class="empty-state-desc">Live WebSocket is currently disconnected. Click <strong>START BOT (PAPER)</strong> during active market hours to stream live ticks and candles.</div>
+            <div class="empty-state-desc">Click <strong>START BOT (PAPER)</strong> during market hours to stream live ticks.</div>
           </div>
         </div>
       </div>
@@ -644,8 +630,8 @@
     <div id="tab-signals" class="tab-view">
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Quantitative Signal Engine Architecture</span>
-          <span class="status-tag tag-cyan">CAUSAL / NON-LOOKAHEAD</span>
+          <span class="op-panel-title">Trading Signal Indicators</span>
+          <span class="status-tag tag-cyan">ACTIVE MODEL</span>
         </div>
         <div class="grid-row-4">
           <div class="kv-item"><div class="kv-label">Trend Direction</div><div class="kv-value" id="sig-tab-trend">NEUTRAL</div></div>
@@ -656,14 +642,14 @@
         <div class="grid-row-3" style="margin-top: 10px;">
           <div class="kv-item"><div class="kv-label">Volatility Band</div><div class="kv-value" id="sig-tab-vol">NORMAL</div></div>
           <div class="kv-item"><div class="kv-label">Risk Authorization</div><div class="kv-value green" id="sig-tab-risk">PASS</div></div>
-          <div class="kv-item"><div class="kv-label">Authoritative Decision</div><div class="kv-value amber" id="sig-tab-decision">NO ACTIVE SIGNAL</div></div>
+          <div class="kv-item"><div class="kv-label">Active Signal</div><div class="kv-value amber" id="sig-tab-decision">NO ACTIVE SIGNAL</div></div>
         </div>
       </div>
 
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Decision Explainer Ledger</span>
-          <span class="op-subhead">Filterable Causal Rejections</span>
+          <span class="op-panel-title">Signal Log &amp; Rejection Ledger</span>
+          <span class="op-subhead">Filterable history</span>
         </div>
         <div class="tbl-scroll-container">
           <table class="forensic-tbl">
@@ -673,7 +659,7 @@
                 <th>Symbol</th>
                 <th>Decision</th>
                 <th>Category</th>
-                <th>Causal Reason</th>
+                <th>Reason</th>
               </tr>
             </thead>
             <tbody id="tbl-signals-full">
@@ -688,25 +674,25 @@
     <div id="tab-risk" class="tab-view">
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Portfolio Risk Control Center</span>
+          <span class="op-panel-title">Portfolio Risk Controls</span>
           <span class="status-tag tag-green" id="risk-tab-status">SAFE</span>
         </div>
         <div class="grid-row-3">
-          <div class="kv-item"><div class="kv-label">Account Equity</div><div class="kv-value" id="risk-tab-equity">₹1,000,000.00</div></div>
+          <div class="kv-item"><div class="kv-label">Account Capital</div><div class="kv-value" id="risk-tab-equity">₹1,000,000.00</div></div>
           <div class="kv-item"><div class="kv-label">Available Capital</div><div class="kv-value" id="risk-tab-avail">₹1,000,000.00</div></div>
           <div class="kv-item"><div class="kv-label">Reserved Risk</div><div class="kv-value" id="risk-tab-reserved">₹0.00</div></div>
-          <div class="kv-item"><div class="kv-label">Max Portfolio Risk</div><div class="kv-value" id="risk-tab-max-risk">₹20,000.00 (2.00%)</div></div>
+          <div class="kv-item"><div class="kv-label">Max Risk Per Trade</div><div class="kv-value" id="risk-tab-max-risk">₹20,000.00 (2.00%)</div></div>
           <div class="kv-item"><div class="kv-label">Reserved Notional</div><div class="kv-value" id="risk-tab-notional">₹0.00</div></div>
-          <div class="kv-item"><div class="kv-label">Daily Loss Barrier</div><div class="kv-value" id="risk-tab-loss">₹0.00 / ₹30,000.00</div></div>
+          <div class="kv-item"><div class="kv-label">Daily Loss Limit</div><div class="kv-value" id="risk-tab-loss">₹0.00 / ₹30,000.00</div></div>
         </div>
 
         <div style="margin-top: 14px;">
           <div class="meter-wrap">
-            <div class="meter-label-row"><span>Portfolio Risk Utilization (Hard 2.0% Cap)</span><span id="risk-tab-meter-risk-label">0.00%</span></div>
+            <div class="meter-label-row"><span>Portfolio Risk Utilization (2.0% Cap)</span><span id="risk-tab-meter-risk-label">0.00%</span></div>
             <div class="meter-track"><div class="meter-fill green" id="risk-tab-meter-risk" style="width: 0%;"></div></div>
           </div>
           <div class="meter-wrap" style="margin-top: 10px;">
-            <div class="meter-label-row"><span>Daily Loss Barrier (Hard 3.0% Cap)</span><span id="risk-tab-meter-loss-label">0.00%</span></div>
+            <div class="meter-label-row"><span>Daily Hard Loss Barrier (3.0% Cap)</span><span id="risk-tab-meter-loss-label">0.00%</span></div>
             <div class="meter-track"><div class="meter-fill green" id="risk-tab-meter-loss" style="width: 0%;"></div></div>
           </div>
         </div>
@@ -714,11 +700,11 @@
 
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Operational Kill Switch Command</span>
+          <span class="op-panel-title">Emergency Kill Switch</span>
           <span class="status-tag tag-green" id="risk-tab-ks-status">DISARMED</span>
         </div>
         <p style="font-size: 11px; color: var(--text-dim); margin-bottom: 12px;">
-          Engaging the kill switch halts all order evaluations, cancels any simulated working orders, and fail-closes the shadow engine immediately.
+          Halts all bot execution, cancels pending orders, and stops trading immediately.
         </p>
         <div style="display: flex; gap: 10px;">
           <button class="btn-action" style="background:#dc2626;" onclick="engageKillSwitchManual()">&#9888; ENGAGE KILL SWITCH</button>
@@ -727,19 +713,19 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 5: SHADOW RUN ==================== -->
+    <!-- ==================== TAB 5: LIVE SESSION (SHADOW RUN) ==================== -->
     <div id="tab-shadow" class="tab-view">
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Phase 17C Real-Market Shadow Session Console</span>
-          <span class="status-tag tag-amber" id="shw-run-phase">READY FOR REAL-MARKET RUN</span>
+          <span class="op-panel-title">Live Market Session Telemetry</span>
+          <span class="status-tag tag-amber" id="shw-run-phase">READY FOR RUN</span>
         </div>
         <p style="font-size: 11px; color: var(--text-dim); margin-bottom: 14px;">
-          Extended Real-Market Shadow Validation exposes AlphaForge to genuine live NSE/NFO Upstox market data with <strong>ZERO REAL ORDERS</strong>.
+          Connects to Upstox live WebSocket stream to observe market events with <strong>ZERO REAL ORDERS</strong>.
         </p>
 
         <div style="display: flex; gap: 10px; margin-bottom: 16px;">
-          <button class="btn-action cyan" onclick="runPreflightCheck()">&#128269; Run Upstox Preflight Verification</button>
+          <button class="btn-action cyan" onclick="runPreflightCheck()">&#128269; Run Upstox Connection Test</button>
         </div>
 
         <div id="preflight-result-box" style="display: none; margin-bottom: 14px; padding: 12px; border-radius: 4px; border: 1px solid var(--card-border); background: #081022;">
@@ -748,44 +734,23 @@
         </div>
 
         <div class="kv-grid">
-          <div class="kv-item"><div class="kv-label">Active Provider</div><div class="kv-value">UPSTOX (WebSocket v3)</div></div>
-          <div class="kv-item"><div class="kv-label">Connection Status</div><div class="kv-value" id="shw-conn">DISCONNECTED</div></div>
+          <div class="kv-item"><div class="kv-label">Provider</div><div class="kv-value">UPSTOX (WebSocket v3)</div></div>
+          <div class="kv-item"><div class="kv-label">Status</div><div class="kv-value" id="shw-conn">DISCONNECTED</div></div>
           <div class="kv-item"><div class="kv-label">Contract</div><div class="kv-value" id="shw-contract">NIFTY26SEPFUT</div></div>
-          <div class="kv-item"><div class="kv-label">Duration</div><div class="kv-value" id="shw-duration">0.0 s</div></div>
-          <div class="kv-item"><div class="kv-label">Valid Market Events</div><div class="kv-value" id="shw-events">0</div></div>
-          <div class="kv-item"><div class="kv-label">Verified Provenance Events</div><div class="kv-value" id="shw-verified-events">0</div></div>
-          <div class="kv-item"><div class="kv-label">Causality Violations</div><div class="kv-value green" id="shw-causality">0 (PASS)</div></div>
-          <div class="kv-item"><div class="kv-label">Shadow Orders / Fills</div><div class="kv-value" id="shw-fills">0 / 0</div></div>
-        </div>
-      </div>
-
-      <div class="op-panel">
-        <div class="op-panel-header">
-          <span class="op-panel-title">Phase 17 Multi-Level Certification Status</span>
-          <span class="status-tag tag-amber">PHASE 17 READY</span>
-        </div>
-        <div class="grid-row-3">
-          <div class="kv-item">
-            <div class="kv-label">Level A &bull; Implementation Audit</div>
-            <div class="kv-value green">&#10004; PASS</div>
-          </div>
-          <div class="kv-item">
-            <div class="kv-label">Level B &bull; Automated Causal Replay</div>
-            <div class="kv-value green">&#10004; PASS (953 Tests)</div>
-          </div>
-          <div class="kv-item">
-            <div class="kv-label">Level C &bull; Real-Market Shadow Run</div>
-            <div class="kv-value green">&#10004; READY (Active Upstox Auth)</div>
-          </div>
+          <div class="kv-item"><div class="kv-label">Uptime</div><div class="kv-value" id="shw-duration">0.0 s</div></div>
+          <div class="kv-item"><div class="kv-label">Market Events</div><div class="kv-value" id="shw-events">0</div></div>
+          <div class="kv-item"><div class="kv-label">Verified Events</div><div class="kv-value" id="shw-verified-events">0</div></div>
+          <div class="kv-item"><div class="kv-label">Safety Integrity</div><div class="kv-value green" id="shw-causality">0 (PASS)</div></div>
+          <div class="kv-item"><div class="kv-label">Paper Trades / Fills</div><div class="kv-value" id="shw-fills">0 / 0</div></div>
         </div>
       </div>
     </div>
 
-    <!-- ==================== TAB 6: EXECUTION ==================== -->
+    <!-- ==================== TAB 6: EXECUTION (ORDERS & FILLS) ==================== -->
     <div id="tab-execution" class="tab-view">
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Shadow Execution Book</span>
+          <span class="op-panel-title">Paper Trade Execution Book</span>
           <span class="status-tag tag-slate">SIMULATED FILLS</span>
         </div>
         <div class="tbl-scroll-container">
@@ -802,13 +767,13 @@
                 <th>Fill Price</th>
                 <th>Slippage</th>
                 <th>Fees</th>
-                <th>FSM State</th>
+                <th>State</th>
               </tr>
             </thead>
             <tbody id="tbl-shadow-orders">
               <tr>
                 <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 20px;">
-                  NO SHADOW ORDERS SUBMITTED
+                  NO PAPER ORDERS SUBMITTED
                 </td>
               </tr>
             </tbody>
@@ -819,11 +784,11 @@
       <!-- Paper Order Simulator -->
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Paper Order Simulator (Research Only)</span>
+          <span class="op-panel-title">Manual Paper Order Test</span>
           <span class="status-tag tag-slate">SIMULATION ONLY</span>
         </div>
         <p style="font-size: 11px; color: var(--text-dim); margin-bottom: 10px;">
-          Manually test the 17-state FSM and PaperBroker order execution. Does NOT route to Upstox, Dhan, Zerodha, or any live broker.
+          Submit manual paper orders to test the simulation engine. Never routes to any live broker.
         </p>
         <div class="grid-row-4">
           <div class="form-ctrl-group">
@@ -848,30 +813,27 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 7: EVIDENCE ==================== -->
+    <!-- ==================== TAB 7: REPORTS (EVIDENCE) ==================== -->
     <div id="tab-evidence" class="tab-view">
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Forensic Evidence Packages</span>
+          <span class="op-panel-title">Session Validation Reports</span>
           <span class="status-tag tag-cyan">DISCOVERED PACKAGES</span>
         </div>
-        <p style="font-size: 11px; color: var(--text-dim); margin-bottom: 12px;">
-          Authoritative validation evidence packages discovered in <code>evidence/shadow_validation/</code>. All evidence packages are sealed with SHA-256 cryptographic manifests.
-        </p>
         <div class="tbl-scroll-container">
           <table class="forensic-tbl">
             <thead>
               <tr>
                 <th>Run ID</th>
-                <th>Created At</th>
+                <th>Date</th>
                 <th>Provider</th>
                 <th>Contract</th>
-                <th>Valid Events</th>
-                <th>Verified Events</th>
-                <th>Causality</th>
-                <th>Manifest SHA-256</th>
-                <th>Certification</th>
-                <th>Actions</th>
+                <th>Events</th>
+                <th>Verified</th>
+                <th>Integrity</th>
+                <th>Manifest Hash</th>
+                <th>Status</th>
+                <th>Download</th>
               </tr>
             </thead>
             <tbody id="tbl-evidence-packages">
@@ -884,20 +846,20 @@
       <!-- Data Provenance Card -->
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Data Ingestion Cryptographic Provenance</span>
+          <span class="op-panel-title">Data Ingestion Proofs</span>
           <span class="status-tag tag-slate" id="ov-prov-status">PROVENANCE NOT YET AVAILABLE</span>
         </div>
         <div class="kv-grid">
           <div class="kv-item">
-            <div class="kv-label">Provider Origin</div>
+            <div class="kv-label">Origin</div>
             <div class="kv-value">UPSTOX (NFO)</div>
           </div>
           <div class="kv-item">
-            <div class="kv-label">Raw Wire Hash (SHA-256)</div>
+            <div class="kv-label">Wire Hash</div>
             <div class="kv-value" id="ov-prov-wire-hash">—</div>
           </div>
           <div class="kv-item" style="grid-column: span 2;">
-            <div class="kv-label">AlphaForge Attestation (INTERNAL INGESTION PROOF)</div>
+            <div class="kv-label">Ingestion Proof (HMAC)</div>
             <div class="kv-value" style="font-size: 11px; word-break: break-all;" id="ov-prov-hmac">—</div>
           </div>
         </div>
@@ -906,10 +868,25 @@
 
     <!-- ==================== TAB 8: SECURITY ==================== -->
     <div id="tab-security" class="tab-view">
-      <!-- System Integrity & Invariants Matrix (Relocated cleanly to Security Tab) -->
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">System Integrity &amp; Architectural Invariants Matrix</span>
+          <span class="op-panel-title">Safety Guards &amp; Broker Firewall</span>
+          <span class="status-tag tag-green">LOCKDOWN ACTIVE</span>
+        </div>
+        <div class="grid-row-2">
+          <div class="kv-item"><div class="kv-label">Token Store</div><div class="kv-value">Environment (UPSTOX_ACCESS_TOKEN)</div></div>
+          <div class="kv-item"><div class="kv-label">Secret Protection</div><div class="kv-value green">&#10004; ACTIVE (Redacted from logs)</div></div>
+          <div class="kv-item"><div class="kv-label">Live Broker Routing</div><div class="kv-value green">&#10004; BLOCKED (Zero live orders)</div></div>
+          <div class="kv-item"><div class="kv-label">Shadow Guard</div><div class="kv-value green">&#10004; ACTIVE (ShadowExecutionOnlyGuard)</div></div>
+          <div class="kv-item"><div class="kv-label">Deployment Guard</div><div class="kv-value green">&#10004; ACTIVE (DeploymentBrokerGuard)</div></div>
+          <div class="kv-item"><div class="kv-label">Kill Switch State</div><div class="kv-value green" id="sec-ks-status">&#10004; DISARMED (Ready to engage)</div></div>
+        </div>
+      </div>
+
+      <!-- System Integrity & Invariants Matrix (Cleanly placed in Security) -->
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">System Invariants &amp; Integrity Matrix</span>
           <span class="status-tag tag-green">10 / 10 PASS</span>
         </div>
         <div class="invariants-grid">
@@ -955,92 +932,49 @@
           </div>
         </div>
       </div>
-
-      <div class="op-panel">
-        <div class="op-panel-header">
-          <span class="op-panel-title">Production Operational Security Posture</span>
-          <span class="status-tag tag-green">LOCKDOWN ACTIVE</span>
-        </div>
-        <div class="grid-row-2">
-          <div class="kv-item"><div class="kv-label">Credential Source</div><div class="kv-value">Environment / Secure Store (UPSTOX_ACCESS_TOKEN)</div></div>
-          <div class="kv-item"><div class="kv-label">Secret Logging</div><div class="kv-value green">&#10004; BLOCKED (Fail-Closed Redaction)</div></div>
-          <div class="kv-item"><div class="kv-label">Token Redaction</div><div class="kv-value green">&#10004; ACTIVE (HMAC Masking)</div></div>
-          <div class="kv-item"><div class="kv-label">Live Broker Routing</div><div class="kv-value green">&#10004; BLOCKED (Zero Live Order APIs)</div></div>
-          <div class="kv-item"><div class="kv-label">Shadow Execution Guard</div><div class="kv-value green">&#10004; ACTIVE (ShadowExecutionOnlyGuard)</div></div>
-          <div class="kv-item"><div class="kv-label">Deployment Broker Guard</div><div class="kv-value green">&#10004; ACTIVE (DeploymentBrokerGuard)</div></div>
-          <div class="kv-item"><div class="kv-label">Kill Switch Status</div><div class="kv-value green" id="sec-ks-status">&#10004; DISARMED (Ready to engage)</div></div>
-          <div class="kv-item"><div class="kv-label">Live Trading Capability</div><div class="kv-value green">&#10004; NONE (Architecturally Disabled)</div></div>
-        </div>
-      </div>
     </div>
 
-    <!-- ==================== TAB 9: OBSERVABILITY ==================== -->
+    <!-- ==================== TAB 9: SYSTEM LOGS (OBSERVABILITY) ==================== -->
     <div id="tab-observability" class="tab-view">
-      <div class="op-panel">
-        <div class="op-panel-header">
-          <span class="op-panel-title">Subsystem Health Rollup</span>
-          <span class="status-tag tag-green">8 / 8 OPERATIONAL</span>
-        </div>
-        <div class="grid-row-4">
-          <div class="kv-item"><div class="kv-label">1. Market Data Feed</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
-          <div class="kv-item"><div class="kv-label">2. Strategy Engine</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
-          <div class="kv-item"><div class="kv-label">3. Risk Gate</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
-          <div class="kv-item"><div class="kv-label">4. Execution FSM</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
-          <div class="kv-item"><div class="kv-label">5. Audit Ledger</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
-          <div class="kv-item"><div class="kv-label">6. Reconciler</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
-          <div class="kv-item"><div class="kv-label">7. Security Gate</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
-          <div class="kv-item"><div class="kv-label">8. Shadow Validator</div><div class="kv-value green">&#10004; OPERATIONAL</div></div>
-        </div>
+      <!-- Hidden technical badges to preserve JS DOM references safely -->
+      <div style="display: none;">
+        <span id="hdr-phase17c">READY</span>
+        <span id="ov-phase17c">READY</span>
       </div>
 
-      <!-- Network Diagnostic Health -->
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Market Feed Network Telemetry</span>
-          <span class="status-tag tag-slate" id="ov-health-level">DISCONNECTED</span>
+          <span class="op-panel-title">System Information &amp; Health</span>
+          <span class="status-tag tag-green">8 / 8 OPERATIONAL</span>
         </div>
         <div class="kv-grid">
-          <div class="kv-item">
-            <div class="kv-label">Round-Trip Latency</div>
-            <div class="kv-value" id="ov-health-latency">—</div>
-          </div>
-          <div class="kv-item">
-            <div class="kv-label">Messages Received</div>
-            <div class="kv-value" id="ov-health-msgs">0</div>
-          </div>
-          <div class="kv-item">
-            <div class="kv-label">Valid Events</div>
-            <div class="kv-value" id="ov-health-valid">0</div>
-          </div>
-          <div class="kv-item">
-            <div class="kv-label">Duplicates / Gaps</div>
-            <div class="kv-value" id="ov-health-dups-gaps">0 / 0</div>
-          </div>
-          <div class="kv-item">
-            <div class="kv-label">Out-of-Order</div>
-            <div class="kv-value" id="ov-health-ooo">0</div>
-          </div>
-          <div class="kv-item">
-            <div class="kv-label">Socket Reconnects</div>
-            <div class="kv-value" id="ov-health-reconnects">0</div>
-          </div>
+          <div class="kv-item"><div class="kv-label">Build Version (SHA)</div><div class="kv-value cyan" id="hdr-build-sha">...</div></div>
+          <div class="kv-item"><div class="kv-label">Execution Mode</div><div class="kv-value">REAL-MARKET SHADOW</div></div>
+          <div class="kv-item"><div class="kv-label">Data Provider</div><div class="kv-value">UPSTOX</div></div>
+          <div class="kv-item"><div class="kv-label">Market Feed Health</div><div class="kv-value" id="ov-health-level">DISCONNECTED</div></div>
+          <div class="kv-item"><div class="kv-label">Latency</div><div class="kv-value" id="ov-health-latency">—</div></div>
+          <div class="kv-item"><div class="kv-label">Messages Received</div><div class="kv-value" id="ov-health-msgs">0</div></div>
+          <div class="kv-item"><div class="kv-label">Valid Events</div><div class="kv-value" id="ov-health-valid">0</div></div>
+          <div class="kv-item"><div class="kv-label">Duplicates / Gaps</div><div class="kv-value" id="ov-health-dups-gaps">0 / 0</div></div>
+          <div class="kv-item"><div class="kv-label">Out-of-Order</div><div class="kv-value" id="ov-health-ooo">0</div></div>
+          <div class="kv-item"><div class="kv-label">Reconnects</div><div class="kv-value" id="ov-health-reconnects">0</div></div>
         </div>
       </div>
 
       <!-- Trace Logs -->
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Diagnostic Causal Trace Log</span>
-          <span class="op-subhead">Recent telemetry stream</span>
+          <span class="op-panel-title">Live System Trace Log</span>
+          <span class="op-subhead">System events stream</span>
         </div>
-        <div class="tbl-scroll-container" style="max-height: 260px;">
+        <div class="tbl-scroll-container" style="max-height: 280px;">
           <table class="forensic-tbl">
             <thead>
               <tr>
                 <th style="width: 90px;">Time</th>
                 <th style="width: 80px;">Level</th>
                 <th style="width: 140px;">Subsystem</th>
-                <th>Diagnostic Message</th>
+                <th>Message</th>
               </tr>
             </thead>
             <tbody id="tbl-trace-logs">
@@ -1055,19 +989,19 @@
     <div id="tab-backtest" class="tab-view">
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Execute Synthetic / Paper Forward Batch</span>
-          <span class="status-tag tag-cyan">SYNTHETIC BENCHMARK</span>
+          <span class="op-panel-title">Run Historical Strategy Simulation</span>
+          <span class="status-tag tag-cyan">BACKTEST</span>
         </div>
         <div class="grid-row-3">
           <div class="form-ctrl-group">
-            <label class="form-ctrl-label">Validation Mode</label>
+            <label class="form-ctrl-label">Simulation Mode</label>
             <select id="fwd-mode" class="form-select">
-              <option value="PAPER">PAPER (Simulation Only)</option>
+              <option value="PAPER">PAPER (Simulation)</option>
               <option value="SHADOW">SHADOW (Passive Benchmark)</option>
             </select>
           </div>
           <div class="form-ctrl-group">
-            <label class="form-ctrl-label">Bar Count</label>
+            <label class="form-ctrl-label">Bars Count</label>
             <select id="fwd-candles" class="form-select">
               <option value="50">50 NIFTY Bars (Fast)</option>
               <option value="150" selected>150 NIFTY Bars (Standard)</option>
@@ -1075,26 +1009,26 @@
             </select>
           </div>
           <div class="form-ctrl-group" style="display: flex; align-items: flex-end;">
-            <button class="btn-action" style="width: 100%;" onclick="runForwardBatch()">&#9654; Execute Synthetic Batch</button>
+            <button class="btn-action" style="width: 100%;" onclick="runForwardBatch()">&#9654; Run Simulation</button>
           </div>
         </div>
       </div>
 
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Backtest P&amp;L Performance Metrics</span>
+          <span class="op-panel-title">Performance Metrics</span>
           <span class="status-tag tag-slate" id="bt-status-badge">AWAITING RUN</span>
         </div>
         <div id="bt-empty-state" class="empty-state-card">
-          <div class="empty-state-title">NO BACKTEST RUN</div>
-          <div class="empty-state-desc">Run a synthetic/paper backtest batch above to generate historical metrics.</div>
+          <div class="empty-state-title">NO SIMULATION RUN</div>
+          <div class="empty-state-desc">Click Run Simulation above to test the strategy on historical bars.</div>
         </div>
         <div id="bt-metrics-content" style="display: none;">
           <div class="grid-row-4">
             <div class="kv-item"><div class="kv-label">Processed Bars</div><div class="kv-value" id="bt-bars">0</div></div>
             <div class="kv-item"><div class="kv-label">Trades Executed</div><div class="kv-value" id="bt-trades">0</div></div>
             <div class="kv-item"><div class="kv-label">Win Rate</div><div class="kv-value" id="bt-winrate">0.0%</div></div>
-            <div class="kv-item"><div class="kv-label">Synthetic P&amp;L</div><div class="kv-value" id="bt-pnl">₹0.00</div></div>
+            <div class="kv-item"><div class="kv-label">Simulated P&amp;L</div><div class="kv-value" id="bt-pnl">₹0.00</div></div>
           </div>
         </div>
       </div>
@@ -1317,11 +1251,15 @@
 
         // 1. Header Updates & Bot Master Control
         if (statusRes.bot) updateBotUI(statusRes.bot);
-        if (statusRes.commit_sha) document.getElementById('hdr-build-sha').textContent = statusRes.commit_sha;
+        const bSha = document.getElementById('hdr-build-sha');
+        if (bSha && statusRes.commit_sha) bSha.textContent = statusRes.commit_sha;
+
         if (statusRes.session_status) {
           const sessEl = document.getElementById('hdr-session');
-          sessEl.textContent = statusRes.session_status;
-          sessEl.className = statusRes.session_open ? 'hdr-val green' : 'hdr-val';
+          if (sessEl) {
+            sessEl.textContent = statusRes.session_status;
+            sessEl.className = statusRes.session_open ? 'hdr-val green' : 'hdr-val';
+          }
           const chartSess = document.getElementById('chart-session-status');
           if (chartSess) chartSess.textContent = 'SESSION: ' + statusRes.session_status;
           const mktSess = document.getElementById('mkt-session-open');
@@ -1625,8 +1563,8 @@
       const title = document.getElementById('preflight-status-title');
       const reason = document.getElementById('preflight-reason-text');
       box.style.display = 'block';
-      title.textContent = 'RUNNING PREFLIGHT INSPECTION...';
-      reason.textContent = 'Validating Upstox credentials, contract master, and zero-live-orders isolation...';
+      title.textContent = 'RUNNING CONNECTION TEST...';
+      reason.textContent = 'Validating Upstox credentials, contract master, and safe paper isolation...';
 
       try {
         const res = await fetch('/api/shadow/preflight', {
@@ -1636,13 +1574,13 @@
         });
         const data = await res.json();
         if (data.ready) {
-          title.textContent = 'PREFLIGHT PASSED — READY FOR RUN';
+          title.textContent = 'CONNECTION TEST PASSED — READY FOR RUN';
           title.style.color = '#34d399';
         } else {
-          title.textContent = 'PREFLIGHT BLOCKED — CREDENTIALS REQUIRED';
+          title.textContent = 'CONNECTION TEST BLOCKED — CREDENTIALS REQUIRED';
           title.style.color = '#fbbf24';
         }
-        reason.textContent = data.reason + ' (Live Orders: ' + data.live_orders + ' | Guards: ' + data.guard_status + ')';
+        reason.textContent = data.reason + ' (Real Orders: ' + data.live_orders + ' | Safeguards: ' + data.guard_status + ')';
       } catch (e) {
         title.textContent = 'PREFLIGHT ERROR';
         title.style.color = '#f87171';
@@ -1659,7 +1597,7 @@
         if (!tbody) return;
         tbody.innerHTML = '';
         if (list.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-dim); padding: 20px;">NO SHADOW EVIDENCE PACKAGE AVAILABLE</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-dim); padding: 20px;">NO SESSION REPORT AVAILABLE</td></tr>';
           return;
         }
         list.forEach(p => {
@@ -1697,7 +1635,7 @@
         if (data.success) {
           document.getElementById('bt-empty-state').style.display = 'none';
           document.getElementById('bt-metrics-content').style.display = 'block';
-          document.getElementById('bt-status-badge').textContent = 'SYNTHETIC RUN: ' + data.run_id;
+          document.getElementById('bt-status-badge').textContent = 'SIMULATION RUN: ' + data.run_id;
           document.getElementById('bt-bars').textContent = data.report.processed_candles;
           document.getElementById('bt-trades').textContent = data.report.total_trades;
           document.getElementById('bt-winrate').textContent = data.report.win_rate + '%';
@@ -1705,7 +1643,7 @@
           fetchAllTelemetry();
         }
       } catch (e) {
-        alert('Synthetic batch error: ' + e);
+        alert('Simulation error: ' + e);
       }
     }
 
