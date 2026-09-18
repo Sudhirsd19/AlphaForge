@@ -148,14 +148,14 @@ def redact_secrets(val: Any) -> Any:
     return val
 
 
-def get_live_bot_state() -> dict[str, Any] | None:
+def get_live_bot_state(only_active: bool = True) -> dict[str, Any] | None:
     """Read live state emitted by the running bot subprocess."""
     state_file = REPO_ROOT / "runtime" / "paper_bot_live.json"
     if not state_file.exists():
         return None
     try:
         data = json.loads(state_file.read_text(encoding="utf-8"))
-        if data.get("status") in ("RUNNING", "CONNECTED", "STARTING"):
+        if not only_active or data.get("status") in ("RUNNING", "CONNECTED", "STARTING"):
             return data
     except Exception:
         pass
@@ -1007,7 +1007,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/bot/logs":
-            live_bot = get_live_bot_state()
+            live_bot = get_live_bot_state(only_active=False)
             bot_logs: list[dict[str, Any]] = []
             if live_bot and "bot_logs" in live_bot:
                 bot_logs = live_bot["bot_logs"]

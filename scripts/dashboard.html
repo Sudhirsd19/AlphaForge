@@ -1650,6 +1650,16 @@
       if (badge) badge.textContent = '0 EVENTS';
     }
 
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
     function renderBotLogs(logs) {
       if (!logs || !Array.isArray(logs)) return;
       cachedBotLogs = logs;
@@ -1664,16 +1674,16 @@
       }
 
       container.innerHTML = logs.map(l => {
-        let ts = l.timestamp || '';
-        let lvl = (l.level || 'INFO').toUpperCase();
-        let cat = (l.category || 'BOT').toUpperCase();
-        let msg = l.message || '';
+        let ts = escapeHtml(l.timestamp || '');
+        let lvl = escapeHtml((l.level || 'INFO').toUpperCase());
+        let cat = escapeHtml((l.category || l.component || 'BOT').toUpperCase());
+        let msg = escapeHtml(l.message || '');
 
         let tagColor = 'tag-cyan';
         let msgColor = '#cbd5e1';
         if (lvl === 'ERROR') { tagColor = 'tag-red'; msgColor = '#fca5a5'; }
         else if (lvl === 'WARN') { tagColor = 'tag-amber'; msgColor = '#fde68a'; }
-        else if (lvl === 'SIGNAL' || cat === 'SIGNAL') { tagColor = 'tag-cyan'; msgColor = '#c4b5fd'; }
+        else if (lvl === 'SIGNAL' || cat === 'SIGNAL' || cat === 'REGIME') { tagColor = 'tag-cyan'; msgColor = '#c4b5fd'; }
         else if (lvl === 'ORDER' || lvl === 'FILL' || cat === 'ORDER' || cat === 'FILL') { tagColor = 'tag-green'; msgColor = '#86efac'; }
         else if (lvl === 'TICK') { tagColor = 'tag-slate'; msgColor = '#94a3b8'; }
 

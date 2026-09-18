@@ -509,6 +509,7 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
             ).get("ohlc", [])
 
             # --- Process OHLC bars (provider-supplied 1-minute candles) ---
+            processed_1m_candle = False
             for ohlc in ohlc_list:
                 interval = ohlc.get("interval", "")
                 if interval != "1m":
@@ -539,9 +540,11 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                 )
                 if event:
                     events.append(event)
+                    processed_1m_candle = True
 
             # --- Process LTPC ticks (aggregate into 1-minute closed candles) ---
-            if ltpc_data and not ohlc_list:
+            # If no provider-supplied 1m bar arrived, aggregate incoming ticks via _CandleAggregator
+            if ltpc_data and not processed_1m_candle:
                 ltp = ltpc_data.get("ltp", 0.0)
                 ltt_ms = ltpc_data.get("ltt", 0)
                 ltq = int(ltpc_data.get("ltq", 0))
@@ -649,12 +652,26 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
         self._reconnect_fsm.on_event_received(event)
         return event
 
+    @property
+    def subscription_instrument_key(self) -> str:
+        """Resolve numeric Upstox instrument key for wire WebSocket subscription."""
+        clean = self._instrument_key.replace("NSE_FO|", "")
+        if clean in UPSTOX_KNOWN_INSTRUMENT_KEYS:
+            return UPSTOX_KNOWN_INSTRUMENT_KEYS[clean]
+        if self._instrument_key in UPSTOX_KNOWN_INSTRUMENT_KEYS:
+            return UPSTOX_KNOWN_INSTRUMENT_KEYS[self._instrument_key]
+        return self._instrument_key
+
     def _is_target_instrument(self, instrument_key: str) -> bool:
         """Check if the instrument key matches our configured subscription."""
+        sub_key = self.subscription_instrument_key
         return (
             instrument_key == self._instrument_key
+            or instrument_key == sub_key
             or instrument_key.endswith(f"|{self._contract.contract_id}")
             or instrument_key.endswith(f":{self._contract.contract_id}")
+            or sub_key.endswith(f"|{instrument_key}")
+            or instrument_key.endswith(sub_key)
             or (
                 self._contract.underlying_symbol in instrument_key
                 and ("FO" in instrument_key or "FUT" in instrument_key)
@@ -689,7 +706,8 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                 self._ws = ws
                 logger.info("UpstoxMarketDataAdapter: WebSocket stream active (live pipeline).")
 
-                # Subscribe to instrument
+                # Subscribe to instrument using numeric wire key if available
+                sub_key = self.subscription_instrument_key
                 await asyncio.sleep(1)
                 sub_msg = json.dumps(
                     {
@@ -697,13 +715,13 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                         "method": "sub",
                         "data": {
                             "mode": "full",
-                            "instrumentKeys": [self._instrument_key],
+                            "instrumentKeys": [sub_key],
                         },
                     }
                 ).encode("utf-8")
                 await ws.send(sub_msg)
                 self._subscription_start_ts = datetime.now(UTC)
-                logger.info(f"UpstoxMarketDataAdapter: Subscribed to {self._instrument_key}.")
+                logger.info(f"UpstoxMarketDataAdapter: Subscribed to {sub_key} (canonical: {self._instrument_key}).")
 
                 async for message in ws:
                     receive_ts = datetime.now(UTC)
