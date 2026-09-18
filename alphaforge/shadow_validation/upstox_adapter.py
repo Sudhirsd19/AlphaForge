@@ -515,7 +515,17 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                 if interval != "1m":
                     continue  # Only process 1-minute bars
 
-                ts_ms = ohlc.get("ts", 0)
+                try:
+                    ts_ms = int(ohlc.get("ts", 0))
+                    o_price = float(ohlc.get("open", 0.0))
+                    h_price = float(ohlc.get("high", 0.0))
+                    l_price = float(ohlc.get("low", 0.0))
+                    c_price = float(ohlc.get("close", 0.0))
+                    vol = int(float(ohlc.get("vol", 0)))
+                except (ValueError, TypeError):
+                    self._invalid_events += 1
+                    continue
+
                 if ts_ms <= 0:
                     self._invalid_events += 1
                     continue
@@ -531,11 +541,11 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
                 event = self._build_market_stream_event(
                     exchange_ts=exchange_ts,
                     receive_ts=receive_ts,
-                    open_price=ohlc.get("open", 0.0),
-                    high_price=ohlc.get("high", 0.0),
-                    low_price=ohlc.get("low", 0.0),
-                    close_price=ohlc.get("close", 0.0),
-                    volume=int(ohlc.get("vol", 0)),
+                    open_price=o_price,
+                    high_price=h_price,
+                    low_price=l_price,
+                    close_price=c_price,
+                    volume=vol,
                     provenance=provenance,
                 )
                 if event:
@@ -545,9 +555,13 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
             # --- Process LTPC ticks (aggregate into 1-minute closed candles) ---
             # If no provider-supplied 1m bar arrived, aggregate incoming ticks via _CandleAggregator
             if ltpc_data and not processed_1m_candle:
-                ltp = ltpc_data.get("ltp", 0.0)
-                ltt_ms = ltpc_data.get("ltt", 0)
-                ltq = int(ltpc_data.get("ltq", 0))
+                try:
+                    ltp = float(ltpc_data.get("ltp", 0.0))
+                    ltt_ms = int(ltpc_data.get("ltt", 0))
+                    ltq = int(float(ltpc_data.get("ltq", 0)))
+                except (ValueError, TypeError):
+                    self._invalid_events += 1
+                    continue
 
                 if ltp <= 0 or ltt_ms <= 0:
                     self._invalid_events += 1
