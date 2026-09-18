@@ -482,6 +482,7 @@
         <button class="nav-btn" onclick="switchTab('security')">Security</button>
         <button class="nav-btn" onclick="switchTab('observability')">System Logs</button>
         <button class="nav-btn" onclick="switchTab('backtest')">Backtest</button>
+        <button class="nav-btn" onclick="switchTab('botlogs')">Bot Logs</button>
       </div>
     </div>
 
@@ -1110,6 +1111,26 @@
             <div class="kv-item"><div class="kv-label">Simulated P&amp;L</div><div class="kv-value" id="bt-pnl">₹0.00</div></div>
           </div>
         </div>
+    </div>
+
+    <!-- ==================== TAB 11: BOT LOGS ==================== -->
+    <div id="tab-botlogs" class="tab-view">
+      <div class="op-panel">
+        <div class="op-panel-header">
+          <span class="op-panel-title">&#128421; Live Bot Activity Feed &amp; Execution Stream</span>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <label style="display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); cursor: pointer;">
+              <input type="checkbox" id="bot-logs-autoscroll" checked style="cursor: pointer;"> Auto-Scroll
+            </label>
+            <button class="btn-action secondary" style="padding: 3px 8px; font-size: 10px;" onclick="clearBotLogsView()">Clear View</button>
+            <span class="status-tag tag-cyan" id="bot-logs-count-badge">0 EVENTS</span>
+          </div>
+        </div>
+        <div id="bot-logs-scroll-box" style="max-height: 480px; min-height: 340px; background: #070c18; border: 1px solid #142036; border-radius: 5px; padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.6; overflow-y: auto;">
+          <div id="bot-logs-container" style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="color: var(--text-dim); text-align: center; padding: 40px 0;">Awaiting bot activity logs...</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1308,7 +1329,7 @@
       const target = document.getElementById('tab-' + tabId);
       if (target) target.classList.add('active');
       const btns = document.querySelectorAll('.nav-btn');
-      const tabMap = ['overview','market','signals','risk','shadow','execution','evidence','security','observability','backtest'];
+      const tabMap = ['overview','market','signals','risk','shadow','execution','evidence','security','observability','backtest','botlogs'];
       const idx = tabMap.indexOf(tabId);
       if (idx >= 0 && btns[idx]) btns[idx].classList.add('active');
 
@@ -1318,14 +1339,16 @@
     // Auto-Polling
     async function fetchAllTelemetry() {
       try {
-        const [statusRes, shadowRes, contractRes, riskRes, healthRes, provRes, sigRes] = await Promise.all([
-          fetch('/api/status').then(r => r.json()),
-          fetch('/api/shadow/status').then(r => r.json()),
-          fetch('/api/contract').then(r => r.json()),
-          fetch('/api/risk').then(r => r.json()),
-          fetch('/api/shadow/health').then(r => r.json()),
-          fetch('/api/shadow/provenance').then(r => r.json()),
-          fetch('/api/signals/state').then(r => r.json())
+        const [statusRes, shadowRes, contractRes, riskRes, healthRes, provRes, sigRes, mktRes, logsRes] = await Promise.all([
+          fetch('/api/status').then(r => r.json()).catch(() => ({})),
+          fetch('/api/shadow/status').then(r => r.json()).catch(() => ({})),
+          fetch('/api/contract').then(r => r.json()).catch(() => ({})),
+          fetch('/api/risk').then(r => r.json()).catch(() => ({})),
+          fetch('/api/shadow/health').then(r => r.json()).catch(() => ({})),
+          fetch('/api/shadow/provenance').then(r => r.json()).catch(() => ({})),
+          fetch('/api/signals/state').then(r => r.json()).catch(() => ({})),
+          fetch('/api/shadow/market').then(r => r.json()).catch(() => ({})),
+          fetch('/api/bot/logs').then(r => r.json()).catch(() => ({}))
         ]);
 
         // 1. Header Updates & Bot Master Control
@@ -1595,6 +1618,16 @@
           }
         }
 
+        // Market Candles Stream
+        if (mktRes && mktRes.candles) {
+          drawMarketChart(mktRes.candles);
+        }
+
+        // Live Bot Activity Feed
+        if (logsRes && logsRes.logs) {
+          renderBotLogs(logsRes.logs);
+        }
+
         // Market Clock
         const now = new Date();
         const mktClock = document.getElementById('mkt-clock-utc');
@@ -1605,35 +1638,204 @@
       }
     }
 
-    // Chart Canvas Rendering (Zero Fake Data)
-    function drawMarketChart() {
-      const canvas = document.getElementById('marketChartCanvas');
-      const primaryCanvas = document.getElementById('primaryMarketChart');
-      [canvas, primaryCanvas].forEach(c => {
+    let cachedCandles = [];
+    let cachedBotLogs = [];
+
+    function clearBotLogsView() {
+      const container = document.getElementById('bot-logs-container');
+      if (container) {
+        container.innerHTML = '<div style="color: var(--text-dim); text-align: center; padding: 40px 0;">Activity view cleared. Awaiting new events...</div>';
+      }
+      const badge = document.getElementById('bot-logs-count-badge');
+      if (badge) badge.textContent = '0 EVENTS';
+    }
+
+    function renderBotLogs(logs) {
+      if (!logs || !Array.isArray(logs)) return;
+      cachedBotLogs = logs;
+      const container = document.getElementById('bot-logs-container');
+      const badge = document.getElementById('bot-logs-count-badge');
+      if (badge) badge.textContent = `${logs.length} EVENTS`;
+      if (!container) return;
+
+      if (logs.length === 0) {
+        container.innerHTML = '<div style="color: var(--text-dim); text-align: center; padding: 40px 0;">Awaiting bot activity logs...</div>';
+        return;
+      }
+
+      container.innerHTML = logs.map(l => {
+        let ts = l.timestamp || '';
+        let lvl = (l.level || 'INFO').toUpperCase();
+        let cat = (l.category || 'BOT').toUpperCase();
+        let msg = l.message || '';
+
+        let tagColor = 'tag-cyan';
+        let msgColor = '#cbd5e1';
+        if (lvl === 'ERROR') { tagColor = 'tag-red'; msgColor = '#fca5a5'; }
+        else if (lvl === 'WARN') { tagColor = 'tag-amber'; msgColor = '#fde68a'; }
+        else if (lvl === 'SIGNAL' || cat === 'SIGNAL') { tagColor = 'tag-cyan'; msgColor = '#c4b5fd'; }
+        else if (lvl === 'ORDER' || lvl === 'FILL' || cat === 'ORDER' || cat === 'FILL') { tagColor = 'tag-green'; msgColor = '#86efac'; }
+        else if (lvl === 'TICK') { tagColor = 'tag-slate'; msgColor = '#94a3b8'; }
+
+        return `<div style="display: flex; gap: 8px; align-items: flex-start; padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
+          <span style="color: var(--text-dim); font-size: 10px; min-width: 60px;">${ts}</span>
+          <span class="status-tag ${tagColor}" style="font-size: 9px; padding: 1px 5px; min-width: 50px; text-align: center;">${lvl}</span>
+          <span style="color: var(--text-muted); font-size: 10px; min-width: 70px;">[${cat}]</span>
+          <span style="color: ${msgColor}; flex: 1; word-break: break-all;">${msg}</span>
+        </div>`;
+      }).join('');
+
+      const autoScroll = document.getElementById('bot-logs-autoscroll');
+      const box = document.getElementById('bot-logs-scroll-box');
+      if (box && (!autoScroll || autoScroll.checked)) {
+        box.scrollTop = box.scrollHeight;
+      }
+    }
+
+    // Chart Canvas Candlestick Rendering
+    function drawMarketChart(candles) {
+      if (candles !== undefined) cachedCandles = candles;
+      const data = cachedCandles || [];
+      const canvas1 = document.getElementById('marketChartCanvas');
+      const canvas2 = document.getElementById('primaryMarketChart');
+
+      [canvas1, canvas2].forEach(c => {
         if (!c) return;
+        const w = c.clientWidth || 600;
+        const h = c.clientHeight || 300;
+        c.width = w;
+        c.height = h;
         const ctx = c.getContext('2d');
-        c.width = c.clientWidth;
-        c.height = c.clientHeight;
 
+        // Dark background
         ctx.fillStyle = '#050812';
-        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.fillRect(0, 0, w, h);
 
-        // Subtle gridlines
+        if (!data || data.length === 0) {
+          // Subtle gridlines
+          ctx.strokeStyle = '#0f172a';
+          ctx.lineWidth = 1;
+          for (let x = 40; x < w; x += 60) {
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+          }
+          for (let y = 30; y < h; y += 40) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+          }
+          return;
+        }
+
+        // Layout margins
+        const padRight = 70;
+        const padBottom = 22;
+        const padTop = 15;
+        const padLeft = 10;
+        const chartW = w - padLeft - padRight;
+        const chartH = h - padTop - padBottom;
+
+        // Min / max prices
+        let minP = Infinity;
+        let maxP = -Infinity;
+        for (const cd of data) {
+          if (cd.low < minP) minP = cd.low;
+          if (cd.high > maxP) maxP = cd.high;
+        }
+        if (minP === Infinity || maxP === -Infinity || minP === maxP) {
+          minP -= 10; maxP += 10;
+        }
+        const range = maxP - minP;
+        const padP = range * 0.05;
+        const effMin = minP - padP;
+        const effMax = maxP + padP;
+        const effRange = effMax - effMin;
+
+        function getY(p) {
+          return padTop + chartH - ((p - effMin) / effRange) * chartH;
+        }
+
+        // Horizontal gridlines & price labels
         ctx.strokeStyle = '#0f172a';
         ctx.lineWidth = 1;
-        for (let x = 40; x < c.width; x += 60) {
-          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, c.height); ctx.stroke();
+        ctx.fillStyle = '#64748b';
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'left';
+
+        const gridSteps = 5;
+        for (let i = 0; i <= gridSteps; i++) {
+          const p = effMin + (effRange / gridSteps) * i;
+          const y = getY(p);
+          ctx.beginPath();
+          ctx.moveTo(padLeft, y);
+          ctx.lineTo(w - padRight, y);
+          ctx.stroke();
+          ctx.fillText(p.toFixed(1), w - padRight + 6, y + 3);
         }
-        for (let y = 30; y < c.height; y += 40) {
-          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(c.width, y); ctx.stroke();
-        }
+
+        // Candles
+        const count = data.length;
+        const slotW = chartW / Math.max(count, 1);
+        const candleW = Math.max(2, Math.min(18, slotW * 0.7));
+
+        data.forEach((cd, i) => {
+          const cx = padLeft + i * slotW + slotW / 2;
+          const isGreen = cd.close >= cd.open;
+          const col = isGreen ? '#10b981' : '#ef4444';
+          ctx.strokeStyle = col;
+          ctx.fillStyle = col;
+
+          // Wick
+          const yH = getY(cd.high);
+          const yL = getY(cd.low);
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(cx, yH);
+          ctx.lineTo(cx, yL);
+          ctx.stroke();
+
+          // Body
+          const yO = getY(cd.open);
+          const yC = getY(cd.close);
+          const topY = Math.min(yO, yC);
+          const bodyH = Math.max(2, Math.abs(yC - yO));
+          ctx.fillRect(cx - candleW / 2, topY, candleW, bodyH);
+
+          // Timestamp label
+          if (i === count - 1 || i % Math.max(1, Math.floor(count / 6)) === 0) {
+            let label = cd.timestamp || '';
+            if (label.includes('T')) label = label.split('T')[1].substring(0, 5);
+            else if (label.length > 8) label = label.substring(0, 5);
+            ctx.fillStyle = '#475569';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, cx, h - 6);
+          }
+        });
+
+        // Current price dashed line
+        const lastCd = data[data.length - 1];
+        const lastY = getY(lastCd.close);
+        const lastCol = lastCd.close >= lastCd.open ? '#10b981' : '#ef4444';
+        ctx.strokeStyle = lastCol;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(padLeft, lastY);
+        ctx.lineTo(w - padRight, lastY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Current price badge on axis
+        ctx.fillStyle = lastCol;
+        ctx.fillRect(w - padRight + 2, lastY - 9, padRight - 4, 18);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(lastCd.close.toFixed(1), w - padRight + 6, lastY + 4);
       });
 
-      // Show empty state banners when no live session exists
+      // Toggle empty state cards
+      const hasData = data && data.length > 0;
       const chEmpty = document.getElementById('chart-empty-state');
-      if (chEmpty) chEmpty.style.display = 'block';
+      if (chEmpty) chEmpty.style.display = hasData ? 'none' : 'block';
       const pEmpty = document.getElementById('primary-chart-empty');
-      if (pEmpty) pEmpty.style.display = 'block';
+      if (pEmpty) pEmpty.style.display = hasData ? 'none' : 'block';
     }
 
     // Preflight Check Action

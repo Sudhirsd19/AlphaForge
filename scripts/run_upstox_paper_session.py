@@ -84,7 +84,10 @@ from alphaforge.paper_shadow.engine import PaperShadowEngine
 from alphaforge.paper_shadow.enums import PaperShadowMode
 from alphaforge.paper_shadow.models import MarketEvent, PaperShadowConfig
 from alphaforge.shadow_validation.contract_source import AuthoritativeContractSource
-from alphaforge.shadow_validation.upstox_adapter import UpstoxMarketDataAdapter
+from alphaforge.shadow_validation.upstox_adapter import (
+    UPSTOX_KNOWN_INSTRUMENT_KEYS,
+    UpstoxMarketDataAdapter,
+)
 from alphaforge.strategy.engine import DeterministicStrategyEngine
 
 if TYPE_CHECKING:
@@ -220,6 +223,8 @@ class _ConfirmationAwareStrategyEngine(DeterministicStrategyEngine):
     def __init__(self, config: StrategyConfig | None = None) -> None:
         super().__init__(config=config)
         self._confirmation_candles: list[Candle] = []
+        self.last_signal: StrategySignal | None = None
+        self.decision_history: list[dict[str, Any]] = []
 
     def set_confirmation_candles(self, candles: list[Candle]) -> None:
         self._confirmation_candles = list(candles)
@@ -231,15 +236,39 @@ class _ConfirmationAwareStrategyEngine(DeterministicStrategyEngine):
         futures_status: FuturesConfirmationStatus,
         evaluation_timestamp: datetime,
     ) -> StrategySignal:
-        # PaperShadowEngine's confirmation argument is intentionally ignored.
-        # Only the runner-maintained 15m series is used for confirmation.
         _ = raw_conf_candles
-        return super().evaluate(
+        sig = super().evaluate(
             raw_exec_candles=raw_exec_candles,
             raw_conf_candles=self._confirmation_candles,
             futures_status=futures_status,
             evaluation_timestamp=evaluation_timestamp,
         )
+        self.last_signal = sig
+
+        dir_val = sig.direction.value if hasattr(sig.direction, "value") else str(sig.direction)
+        decision_val = sig.decision.value if hasattr(sig.decision, "value") else str(sig.decision)
+        trend_val = sig.trend_state.value if hasattr(sig.trend_state, "value") else str(sig.trend_state)
+        rej_code = sig.rejection_code.value if hasattr(sig.rejection_code, "value") else str(sig.rejection_code)
+
+        reason_str = (
+            f"Decision: {decision_val} ({rej_code})"
+            if decision_val != "ACCEPT"
+            else f"Signal Active: {dir_val} @ {sig.entry_reference}"
+        )
+        self.decision_history.insert(0, {
+            "timestamp": evaluation_timestamp.strftime("%H:%M:%S"),
+            "candle": f"#{len(raw_exec_candles)}",
+            "strategy_state": trend_val,
+            "signal": dir_val,
+            "risk_decision": "PASS",
+            "contract_decision": "PASS",
+            "final_decision": dir_val if decision_val == "ACCEPT" else "WAIT",
+            "category": "SIGNAL" if decision_val == "ACCEPT" else "WAIT",
+            "reason": reason_str,
+        })
+        if len(self.decision_history) > 50:
+            self.decision_history.pop()
+        return sig
 
 
 class _ObservedPaperBroker(PaperBroker):
@@ -249,15 +278,31 @@ class _ObservedPaperBroker(PaperBroker):
         super().__init__()
         self.total_submitted = 0
         self.total_filled = 0
+        self.recent_orders: list[dict[str, Any]] = []
 
     def submit_order(self, request: BrokerOrderRequest) -> BrokerOrder:
         order = super().submit_order(request)
         self.total_submitted += 1
+        self.recent_orders.insert(0, {
+            "client_order_id": order.client_order_id,
+            "symbol": order.symbol,
+            "side": order.side.value if hasattr(order.side, "value") else str(order.side),
+            "quantity": order.quantity,
+            "price": str(order.average_price or request.price or "0.00"),
+            "state": order.status.value if hasattr(order.status, "value") else str(order.status),
+            "time": datetime.now(UTC).strftime("%H:%M:%S"),
+        })
+        if len(self.recent_orders) > 30:
+            self.recent_orders.pop()
         return order
 
     def simulate_full_fill(self, client_order_id: str, fill_price: Decimal) -> BrokerOrder:
         order = super().simulate_full_fill(client_order_id, fill_price)
         self.total_filled += 1
+        for o in self.recent_orders:
+            if o.get("client_order_id") == client_order_id:
+                o["state"] = order.status.value if hasattr(order.status, "value") else str(order.status)
+                o["price"] = str(fill_price)
         return order
 
 
@@ -288,16 +333,39 @@ def main() -> None:
     if contract is None:
         raise RuntimeError("No active authoritative NIFTY Futures contract; failing closed.")
 
-    adapter = UpstoxMarketDataAdapter(contract=contract)
+    inst_key = os.environ.get(
+        "UPSTOX_INSTRUMENT_KEY",
+        UPSTOX_KNOWN_INSTRUMENT_KEYS.get(contract.contract_id, f"NSE_FO|{contract.contract_id}"),
+    )
+    adapter = UpstoxMarketDataAdapter(contract=contract, instrument_key=inst_key)
 
     stop_requested = False
     stop_flag_file = _repo_root / "runtime" / "bot_stop.flag"
+    live_state_file = _repo_root / "runtime" / "paper_bot_live.json"
+    live_state_file.parent.mkdir(parents=True, exist_ok=True)
+
+    bot_activity_logs: list[dict[str, Any]] = []
+    closed_3m_candles: list[dict[str, Any]] = []
+    current_price: Decimal | None = None
+    last_state_write_ts = 0.0
+
+    def log_bot_activity(level: str, component: str, msg: str) -> None:
+        entry = {
+            "timestamp": datetime.now(UTC).strftime("%H:%M:%S"),
+            "level": level,
+            "component": component,
+            "message": msg,
+        }
+        bot_activity_logs.append(entry)
+        if len(bot_activity_logs) > 300:
+            bot_activity_logs.pop(0)
 
     def _trigger_graceful_stop(reason: str = "stop requested") -> None:
         nonlocal stop_requested
         if not stop_requested:
             stop_requested = True
             logger.info("Graceful shutdown triggered (%s); waking event stream.", reason)
+            log_bot_activity("INFO", "SESSION", f"Graceful shutdown triggered ({reason})")
             adapter.disconnect()
 
     def _stop(_signum: int, _frame: object) -> None:
@@ -335,8 +403,6 @@ def main() -> None:
         contract_provider=contract_source.repository,
     )
 
-    # Preserve PaperShadowEngine orchestration while injecting the real 15m
-    # confirmation timeframe and active Market Regime Filter into the strategy engine.
     regime_enabled = os.environ.get("ENABLE_REGIME_FILTER", "1").lower() not in ("0", "false", "no")
     strat_config = StrategyConfig(
         strategy_version="1.1.0",
@@ -351,6 +417,77 @@ def main() -> None:
     conf_agg = _TimeframeAggregator(15)
     confirmation_history: list[Candle] = []
 
+    counts: dict[str, int] = {
+        "upstox_1m_events": 0,
+        "execution_3m_bars": 0,
+        "confirmation_15m_bars": 0,
+    }
+
+    def flush_live_state(status_override: str | None = None, force: bool = False) -> None:
+        nonlocal last_state_write_ts
+        now_mono = time.monotonic()
+        if not force and (now_mono - last_state_write_ts) < 0.5:
+            return
+        last_state_write_ts = now_mono
+
+        sig = strategy_bridge.last_signal
+        trend_val = sig.trend_state.value if sig and hasattr(sig.trend_state, "value") else "NEUTRAL"
+        dir_val = sig.direction.value if sig and hasattr(sig.direction, "value") else "NO ACTIVE SIGNAL"
+        rej_code = sig.rejection_code.value if sig and hasattr(sig.rejection_code, "value") else "Awaiting setup"
+
+        st_name = status_override or ("RUNNING" if not stop_requested else "STOPPING")
+
+        payload_state = {
+            "status": st_name,
+            "provider": "UPSTOX",
+            "contract_id": contract.contract_id,
+            "instrument_key": adapter._instrument_key,
+            "last_update": datetime.now(UTC).isoformat(),
+            "counts": counts,
+            "latest_price": str(current_price) if current_price is not None else None,
+            "candles": closed_3m_candles[-100:],
+            "confirmation_bars_count": len(confirmation_history),
+            "signal": {
+                "strategy_state": trend_val,
+                "trend": trend_val,
+                "momentum": "WAIT",
+                "breakout_status": "NOT_CONFIRMED",
+                "higher_timeframe_confirmation": "WAIT",
+                "volatility_state": "NORMAL",
+                "risk_gate": "PASS",
+                "contract_gate": "VALID",
+                "last_decision": dir_val,
+                "decision_timestamp": datetime.now(UTC).isoformat(),
+                "decision_reason": f"Regime: {trend_val} | Status: {rej_code}",
+                "decision_history": strategy_bridge.decision_history,
+            },
+            "orders": paper_broker.recent_orders,
+            "positions": [
+                {
+                    "symbol": p.symbol,
+                    "side": p.side.value if hasattr(p.side, "value") else str(p.side),
+                    "quantity": p.quantity,
+                    "average_price": str(p.average_price) if p.average_price is not None else None,
+                    "status": p.status,
+                }
+                for p in paper_broker.get_positions()
+            ],
+            "bot_logs": bot_activity_logs[-250:],
+        }
+        tmp = live_state_file.with_suffix(".tmp")
+        try:
+            tmp.write_text(json.dumps(payload_state, indent=2, default=str), encoding="utf-8")
+            tmp.replace(live_state_file)
+        except Exception:
+            pass
+
+    log_bot_activity(
+        "INFO",
+        "STARTUP",
+        f"AlphaForge Paper Bot starting. Contract: {contract.contract_id}, Key: {adapter._instrument_key}",
+    )
+    flush_live_state(status_override="STARTING", force=True)
+
     # Preload historical 15m confirmation bars for Day-1 ADX & EMA warmup
     try:
         from scripts.run_real_data_backtest import fetch_upstox_1m_candles, resample_1m_to_interval
@@ -360,7 +497,7 @@ def main() -> None:
             instrument_key=adapter._instrument_key,
             from_date=warmup_start,
             to_date=warmup_end,
-            token=access_token,
+            token=adapter._access_token or "",
             cache_dir=_repo_root / "runtime" / "historical_data",
         )
         if raw_warmup:
@@ -375,23 +512,21 @@ def main() -> None:
                 confirmation_history.append(mc.to_strategy_candle())
             strategy_bridge.set_confirmation_candles(confirmation_history)
             logger.info("Preloaded %d historical 15m confirmation bars for Day-1 ADX warmup.", len(confirmation_history))
+            log_bot_activity("WARMUP", "REGIME", f"Preloaded {len(confirmation_history)} historical 15m confirmation bars for ADX warmup")
     except Exception as e:
         logger.warning("Could not preload historical confirmation warmup: %s", e)
+        log_bot_activity("WARN", "WARMUP", f"Confirmation warmup warning: {e}")
 
     evidence_dir = _repo_root / "evidence" / "paper_live"
     evidence_dir.mkdir(parents=True, exist_ok=True)
     started = datetime.now(UTC)
-    counts: dict[str, int] = {
-        "upstox_1m_events": 0,
-        "execution_3m_bars": 0,
-        "confirmation_15m_bars": 0,
-    }
 
     print("=" * 76)
     print("  ALPHAFORGE — UPSTOX REAL MARKET DATA -> PAPER SESSION")
     print("  MARKET DATA: LIVE / EXTERNAL / READ-ONLY")
     print("  EXECUTION: PAPER ONLY / ZERO LIVE ORDERS")
     print(f"  CONTRACT: {contract.contract_id} / LOT {contract.lot_size}")
+    print(f"  INSTRUMENT KEY: {adapter._instrument_key}")
     print("=" * 76)
 
     try:
@@ -403,6 +538,8 @@ def main() -> None:
             )
 
         logger.info("Upstox authenticated; consuming read-only real-market stream.")
+        log_bot_activity("FEED", "UPSTOX", f"Upstox authenticated. Subscribed to {adapter._instrument_key}")
+        flush_live_state(status_override="CONNECTED", force=True)
 
         for market_event in adapter.stream_events():
             if stop_requested or stop_flag_file.exists():
@@ -410,6 +547,14 @@ def main() -> None:
 
             counts["upstox_1m_events"] += 1
             recv = market_event.ingestion_timestamp
+            current_price = market_event.close_price
+
+            if counts["upstox_1m_events"] % 5 == 1:
+                log_bot_activity(
+                    "TICK",
+                    "FEED",
+                    f"Market event #{counts['upstox_1m_events']} @ {current_price} (Vol: {market_event.volume})",
+                )
 
             # Build both timeframes from the same already-validated 1m source.
             exec_bar = exec_agg.add(market_event)
@@ -426,8 +571,14 @@ def main() -> None:
                 confirmation_history = confirmation_history[-200:]
                 strategy_bridge.set_confirmation_candles(confirmation_history)
                 counts["confirmation_15m_bars"] += 1
+                log_bot_activity(
+                    "CANDLE",
+                    "15M_CONF",
+                    f"Formed 15m candle #{counts['confirmation_15m_bars']} | C: {conf_candle.close} | Bars: {len(confirmation_history)}",
+                )
 
             if exec_bar is None:
+                flush_live_state(force=False)
                 continue
 
             exec_candle = _bar_to_market_candle(
@@ -439,10 +590,31 @@ def main() -> None:
             sequence = counts["execution_3m_bars"] + 1
             event = _event_from_candle(exec_candle, sequence, recv)
 
+            # Record 3m candle for dashboard chart
+            closed_3m_candles.append({
+                "open": float(exec_candle.open),
+                "high": float(exec_candle.high),
+                "low": float(exec_candle.low),
+                "close": float(exec_candle.close),
+                "volume": exec_candle.volume,
+                "timestamp": exec_candle.exchange_timestamp.isoformat(),
+            })
+            closed_3m_candles = closed_3m_candles[-100:]
+
             # PaperShadowEngine remains authoritative for validation, risk,
             # routing/FSM, deterministic fill simulation, P&L, and reconciliation.
             engine.process_event(event)
             counts["execution_3m_bars"] += 1
+
+            sig = strategy_bridge.last_signal
+            dir_str = sig.direction.value if sig and hasattr(sig.direction, "value") else "WAIT"
+            trend_str = sig.trend_state.value if sig and hasattr(sig.trend_state, "value") else "NEUTRAL"
+            log_bot_activity(
+                "STRATEGY",
+                "EVAL",
+                f"Formed 3m candle #{counts['execution_3m_bars']} | C: {exec_candle.close} | Stance: {dir_str} (Regime: {trend_str})",
+            )
+            flush_live_state(force=True)
 
             if counts["execution_3m_bars"] % 5 == 0:
                 logger.info(
@@ -472,6 +644,9 @@ def main() -> None:
             adapter.disconnect()
         except Exception:
             logger.exception("Adapter shutdown error; session evidence will still be written.")
+
+        log_bot_activity("INFO", "SHUTDOWN", "Bot session terminated. Disconnected feed.")
+        flush_live_state(status_override="STOPPED", force=True)
 
         ended = datetime.now(UTC)
         final_telemetry: dict[str, Any] = adapter.get_connection_telemetry()

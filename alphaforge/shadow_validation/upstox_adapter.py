@@ -73,6 +73,13 @@ UPSTOX_AUTH_ENDPOINT = "https://api.upstox.com/v3/feed/market-data-feed/authoriz
 UPSTOX_ACCESS_TOKEN_ENV = "UPSTOX_ACCESS_TOKEN"  # noqa: S105
 UPSTOX_INSTRUMENT_KEY_ENV = "UPSTOX_INSTRUMENT_KEY"
 
+# Canonical NIFTY Futures instrument key mapping for Upstox API v2/v3
+UPSTOX_KNOWN_INSTRUMENT_KEYS: dict[str, str] = {
+    "NIFTY26SEPFUT": "NSE_FO|68407",
+    "NIFTY26OCTFUT": "NSE_FO|48704",
+    "NIFTY26NOVFUT": "NSE_FO|61471",
+}
+
 # NSE/NFO session boundaries in UTC (IST 09:15-15:30 = UTC 03:45-10:00)
 NSE_SESSION_START_UTC = datetime.min.replace(hour=3, minute=45, tzinfo=UTC).time()
 NSE_SESSION_END_UTC = datetime.min.replace(hour=10, minute=0, tzinfo=UTC).time()
@@ -644,9 +651,14 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
 
     def _is_target_instrument(self, instrument_key: str) -> bool:
         """Check if the instrument key matches our configured subscription."""
-        return instrument_key == self._instrument_key or (
-            self._contract.underlying_symbol in instrument_key
-            and ("FO" in instrument_key or "FUT" in instrument_key)
+        return (
+            instrument_key == self._instrument_key
+            or instrument_key.endswith(f"|{self._contract.contract_id}")
+            or instrument_key.endswith(f":{self._contract.contract_id}")
+            or (
+                self._contract.underlying_symbol in instrument_key
+                and ("FO" in instrument_key or "FUT" in instrument_key)
+            )
         )
 
     @property

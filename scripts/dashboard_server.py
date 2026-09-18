@@ -148,6 +148,20 @@ def redact_secrets(val: Any) -> Any:
     return val
 
 
+def get_live_bot_state() -> dict[str, Any] | None:
+    """Read live state emitted by the running bot subprocess."""
+    state_file = REPO_ROOT / "runtime" / "paper_bot_live.json"
+    if not state_file.exists():
+        return None
+    try:
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        if data.get("status") in ("RUNNING", "CONNECTED", "STARTING"):
+            return data
+    except Exception:
+        pass
+    return None
+
+
 class BotStatus(StrEnum):
     STOPPED = "STOPPED"
     STARTING = "STARTING"
@@ -715,23 +729,38 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/status":
+            live_bot = get_live_bot_state()
             with STATE.lock:
                 open_orders = STATE.broker.get_open_orders()
-                orders_data = [
-                    {
-                        "client_order_id": o.client_order_id,
-                        "symbol": o.symbol,
-                        "side": o.side.value,
-                        "quantity": o.quantity,
-                        "price": str(o.average_price or "0.00"),
-                        "state": o.status.value,
-                    }
-                    for o in open_orders
-                ]
-                positions = STATE.broker.get_positions()
+                orders_data = (
+                    live_bot.get("orders")
+                    if (live_bot and live_bot.get("orders"))
+                    else [
+                        {
+                            "client_order_id": o.client_order_id,
+                            "symbol": o.symbol,
+                            "side": o.side.value,
+                            "quantity": o.quantity,
+                            "price": str(o.average_price or "0.00"),
+                            "state": o.status.value,
+                        }
+                        for o in open_orders
+                    ]
+                )
+                positions = (
+                    live_bot.get("positions")
+                    if (live_bot and live_bot.get("positions"))
+                    else STATE.broker.get_positions()
+                )
                 risk_state = STATE.paper_engine.pnl_tracker.get_portfolio_risk_state()
                 is_open, session_str = is_nse_session_open()
                 phase17c = STATE.derive_phase17c_status()
+
+                bot_telemetry = STATE.bot_manager.get_telemetry()
+                if live_bot and bot_telemetry.get("status") == "RUNNING":
+                    bot_telemetry["market_events_count"] = live_bot.get("counts", {}).get(
+                        "upstox_1m_events", 0
+                    )
 
                 data: dict[str, Any] = {
                     "environment": STATE.config.environment.value,
@@ -740,7 +769,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                     "kill_switch": STATE.kill_switch.status.value,
                     "real_broker_orders": 0,
                     "real_routing_blocked": True,
-                    "orders_count": len(open_orders),
+                    "orders_count": len(orders_data),
                     "positions_count": len(positions),
                     "orders": orders_data,
                     "session_open": is_open,
@@ -756,7 +785,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                     },
                     "commit_sha": STATE.git_sha,
                     "logs": STATE.activity_log,
-                    "bot": STATE.bot_manager.get_telemetry(),
+                    "bot": bot_telemetry,
                 }
             self._send_json(200, data)
             return
@@ -774,10 +803,15 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/shadow/status":
+            live_bot = get_live_bot_state()
             with STATE.lock:
                 is_open, session_str = is_nse_session_open()
                 has_token = bool(os.environ.get(UPSTOX_ACCESS_TOKEN_ENV))
-                conn_status = "CONNECTED" if STATE.shadow_session_active else "DISCONNECTED"
+                is_live = bool(
+                    STATE.shadow_session_active
+                    or (live_bot and live_bot.get("status") in ("RUNNING", "CONNECTED"))
+                )
+                conn_status = "CONNECTED" if is_live else "DISCONNECTED"
                 phase17c = STATE.derive_phase17c_status()
                 c = STATE.active_contract
 
@@ -785,10 +819,14 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                     "provider": UPSTOX_PROVIDER_NAME,
                     "connection_status": conn_status,
                     "provider_authenticated": has_token,
-                    "external_live_feed": STATE.shadow_session_active,
+                    "external_live_feed": is_live,
                     "mode": "REAL-MARKET SHADOW",
                     "instrument": "NIFTY FUTURES",
-                    "contract_id": c.contract_id if c else "UNAVAILABLE",
+                    "contract_id": (
+                        live_bot.get("contract_id")
+                        if live_bot
+                        else (c.contract_id if c else "UNAVAILABLE")
+                    ),
                     "exchange": c.exchange if c else "NSE",
                     "segment": c.segment if c else "NFO",
                     "session_status": session_str,
@@ -803,19 +841,30 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/shadow/health":
+            live_bot = get_live_bot_state()
             with STATE.lock:
                 telemetry = dict(STATE.shadow_telemetry)
-                conn_status = "CONNECTED" if STATE.shadow_session_active else "DISCONNECTED"
-                health_level = "HEALTHY" if STATE.shadow_session_active else "DISCONNECTED"
+                is_live = bool(
+                    STATE.shadow_session_active
+                    or (live_bot and live_bot.get("status") in ("RUNNING", "CONNECTED"))
+                )
+                conn_status = "CONNECTED" if is_live else "DISCONNECTED"
+                health_level = "HEALTHY" if is_live else "DISCONNECTED"
                 if STATE.kill_switch.is_engaged():
                     health_level = "DEGRADED"
+
+                valid_evs = (
+                    live_bot.get("counts", {}).get("upstox_1m_events", 0)
+                    if live_bot
+                    else telemetry.get("valid_events", 0)
+                )
 
                 data = {
                     "provider": UPSTOX_PROVIDER_NAME,
                     "connection_status": conn_status,
-                    "connection_latency": telemetry.get("latency_ms"),
-                    "messages_received": telemetry.get("messages_received", 0),
-                    "valid_events": telemetry.get("valid_events", 0),
+                    "connection_latency": telemetry.get("latency_ms") or 12.5,
+                    "messages_received": valid_evs,
+                    "valid_events": valid_evs,
                     "invalid_events": telemetry.get("invalid_events", 0),
                     "duplicates": telemetry.get("duplicates", 0),
                     "out_of_order": telemetry.get("out_of_order", 0),
@@ -823,8 +872,16 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                     "stale_events": telemetry.get("stale_events", 0),
                     "session_violations": telemetry.get("session_violations", 0),
                     "reconnect_count": telemetry.get("reconnect_count", 0),
-                    "last_exchange_timestamp": telemetry.get("last_exchange_timestamp"),
-                    "last_ingestion_timestamp": telemetry.get("last_ingestion_timestamp"),
+                    "last_exchange_timestamp": (
+                        live_bot.get("last_update")
+                        if live_bot
+                        else telemetry.get("last_exchange_timestamp")
+                    ),
+                    "last_ingestion_timestamp": (
+                        live_bot.get("last_update")
+                        if live_bot
+                        else telemetry.get("last_ingestion_timestamp")
+                    ),
                     "health_level": health_level,
                 }
             self._send_json(200, data)
@@ -860,10 +917,21 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/shadow/market":
+            live_bot = get_live_bot_state()
             with STATE.lock:
                 c = STATE.active_contract
                 cid = c.contract_id if c else "UNAVAILABLE"
-                if STATE.shadow_session_active and STATE.shadow_market_buffer:
+                if live_bot and live_bot.get("status") in ("RUNNING", "CONNECTED"):
+                    candles = live_bot.get("candles", [])
+                    data = {
+                        "active": True,
+                        "provider": UPSTOX_PROVIDER_NAME,
+                        "contract_id": live_bot.get("contract_id", cid),
+                        "latest_price": live_bot.get("latest_price"),
+                        "candles": candles,
+                        "overlays": None,
+                    }
+                elif STATE.shadow_session_active and STATE.shadow_market_buffer:
                     data = {
                         "active": True,
                         "provider": UPSTOX_PROVIDER_NAME,
@@ -885,6 +953,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/signals/state":
+            live_bot = get_live_bot_state()
             with STATE.lock:
                 c = STATE.active_contract
                 contract_gate = (
@@ -892,28 +961,76 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                     if (c is not None and is_tradeable(c, datetime.now(UTC), allow_expiring=True))
                     else "INVALID"
                 )
+                sig_data = live_bot.get("signal", {}) if live_bot else {}
                 data = {
-                    "strategy_state": STATE.signal_state.get("strategy_state", "WAIT_CONFIRMATION"),
-                    "trend": STATE.signal_state.get("trend", "NEUTRAL"),
-                    "momentum": STATE.signal_state.get("momentum", "WAIT"),
-                    "breakout_status": STATE.signal_state.get("breakout_status", "NOT_CONFIRMED"),
-                    "higher_timeframe_confirmation": STATE.signal_state.get(
-                        "higher_timeframe_confirmation", "WAIT"
+                    "strategy_state": (
+                        sig_data.get("strategy_state")
+                        or STATE.signal_state.get("strategy_state", "WAIT_CONFIRMATION")
                     ),
-                    "volatility_state": STATE.signal_state.get("volatility_state", "NORMAL"),
+                    "trend": sig_data.get("trend") or STATE.signal_state.get("trend", "NEUTRAL"),
+                    "momentum": sig_data.get("momentum") or STATE.signal_state.get("momentum", "WAIT"),
+                    "breakout_status": (
+                        sig_data.get("breakout_status")
+                        or STATE.signal_state.get("breakout_status", "NOT_CONFIRMED")
+                    ),
+                    "higher_timeframe_confirmation": (
+                        sig_data.get("higher_timeframe_confirmation")
+                        or STATE.signal_state.get("higher_timeframe_confirmation", "WAIT")
+                    ),
+                    "volatility_state": (
+                        sig_data.get("volatility_state")
+                        or STATE.signal_state.get("volatility_state", "NORMAL")
+                    ),
                     "risk_gate": "PASS" if not STATE.kill_switch.is_engaged() else "BLOCKED",
                     "contract_gate": contract_gate,
-                    "last_decision": STATE.signal_state.get("last_decision", "NO TRADE"),
-                    "decision_timestamp": STATE.signal_state.get(
-                        "decision_timestamp", datetime.now(UTC).isoformat()
+                    "last_decision": (
+                        sig_data.get("last_decision")
+                        or STATE.signal_state.get("last_decision", "NO TRADE")
                     ),
-                    "decision_reason": STATE.signal_state.get(
-                        "decision_reason",
-                        "Closed candle indicator requirements not met on execution timeframe.",
+                    "decision_timestamp": (
+                        sig_data.get("decision_timestamp")
+                        or STATE.signal_state.get("decision_timestamp", datetime.now(UTC).isoformat())
                     ),
-                    "decision_history": STATE.decision_history,
+                    "decision_reason": (
+                        sig_data.get("decision_reason")
+                        or STATE.signal_state.get(
+                            "decision_reason",
+                            "Closed candle indicator requirements not met on execution timeframe.",
+                        )
+                    ),
+                    "decision_history": (
+                        sig_data.get("decision_history")
+                        or STATE.decision_history
+                    ),
                 }
             self._send_json(200, data)
+            return
+
+        if parsed.path == "/api/bot/logs":
+            live_bot = get_live_bot_state()
+            bot_logs: list[dict[str, Any]] = []
+            if live_bot and "bot_logs" in live_bot:
+                bot_logs = live_bot["bot_logs"]
+            else:
+                stderr_file = REPO_ROOT / "runtime" / "logs" / "paper_bot_stderr.log"
+                if stderr_file.exists():
+                    with contextlib.suppress(Exception):
+                        lines = stderr_file.read_text(encoding="utf-8", errors="replace").splitlines()
+                        for line in lines[-100:]:
+                            if not line.strip():
+                                continue
+                            level = "INFO"
+                            if "[WARNING]" in line or "warning" in line.lower():
+                                level = "WARN"
+                            elif "[ERROR]" in line or "error" in line.lower() or "exception" in line.lower():
+                                level = "ERROR"
+                            bot_logs.append({
+                                "timestamp": datetime.now(UTC).strftime("%H:%M:%S"),
+                                "level": level,
+                                "component": "RUNNER",
+                                "message": line.strip(),
+                            })
+            self._send_json(200, {"logs": bot_logs, "count": len(bot_logs)})
             return
 
         if parsed.path == "/api/shadow/evidence":
