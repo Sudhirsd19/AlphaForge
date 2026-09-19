@@ -1390,6 +1390,45 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                     STATE.kill_switch.disarm(reason=reason)
                     STATE.log_event("SECURITY", "KILL_SWITCH", f"Kill switch DISARMED: {reason}")
             self._send_json(200, {"status": STATE.kill_switch.status.value})
+        if parsed.path == "/api/token/refresh":
+            try:
+                from alphaforge.shadow_validation.upstox_auth import UpstoxOAuthAuthenticator
+                api_key = os.environ.get("UPSTOX_API_KEY", "")
+                api_secret = os.environ.get("UPSTOX_API_SECRET", "")
+                redirect_uri = os.environ.get("UPSTOX_REDIRECT_URI", "")
+                mobile = os.environ.get("UPSTOX_MOBILE", "")
+                pin = os.environ.get("UPSTOX_PIN", "")
+                totp_key = os.environ.get("UPSTOX_TOTP_KEY", "")
+
+                if not all([api_key, api_secret, redirect_uri, mobile, pin, totp_key]):
+                    self._send_json(400, {"success": False, "error": "Missing Upstox TOTP credentials in environment"})
+                    return
+
+                auth = UpstoxOAuthAuthenticator(
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    redirect_uri=redirect_uri,
+                    mobile=mobile,
+                    pin=pin,
+                    totp_key=totp_key,
+                )
+                res = auth.authenticate(max_retries=2)
+                new_token = res["access_token"]
+                os.environ[UPSTOX_ACCESS_TOKEN_ENV] = new_token
+                env_path = REPO_ROOT / ".env"
+                if env_path.exists():
+                    from scripts.refresh_upstox_token import save_env_var
+                    save_env_var(env_path, UPSTOX_ACCESS_TOKEN_ENV, new_token)
+
+                STATE.log_event("SECURITY", "AUTH", f"Upstox access token refreshed for {res.get('user_name', 'user')}")
+                self._send_json(200, {
+                    "success": True,
+                    "message": "Upstox token refreshed successfully",
+                    "user": res.get("user_name"),
+                })
+            except Exception as exc:
+                STATE.log_event("SECURITY", "AUTH_ERROR", f"Token refresh failed: {exc}")
+                self._send_json(500, {"success": False, "error": str(exc)})
             return
 
         if parsed.path == "/api/bot/start":

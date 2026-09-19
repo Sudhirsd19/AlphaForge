@@ -33,6 +33,7 @@ import uuid
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from alphaforge.contract.enums import ContractStatus
@@ -361,6 +362,20 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
             raise UpstoxConnectionError(msg) from exc
 
         if response.status_code == 401:  # noqa: PLR2004
+            refreshed = self._attempt_auto_token_refresh()
+            if refreshed:
+                headers["Authorization"] = f"Bearer {self._access_token}"
+                try:
+                    response = httpx.get(
+                        UPSTOX_AUTH_ENDPOINT,
+                        headers=headers,
+                        timeout=10.0,
+                    )
+                except Exception as exc:
+                    msg = f"UpstoxMarketDataAdapter: Retry after token refresh failed — {exc}"
+                    raise UpstoxConnectionError(msg) from exc
+
+        if response.status_code == 401:  # noqa: PLR2004
             msg = (
                 "UpstoxMarketDataAdapter: Authentication failed (HTTP 401). "
                 "Access token is invalid or expired. Failing closed."
@@ -392,6 +407,47 @@ class UpstoxMarketDataAdapter(AbstractMarketDataStreamAdapter):
             raise UpstoxConnectionError(msg)
 
         return str(ws_uri)
+
+    def _attempt_auto_token_refresh(self) -> bool:
+        """Attempt to automatically refresh expired Upstox token using TOTP credentials."""
+        api_key = os.environ.get("UPSTOX_API_KEY", "")
+        api_secret = os.environ.get("UPSTOX_API_SECRET", "")
+        redirect_uri = os.environ.get("UPSTOX_REDIRECT_URI", "")
+        mobile = os.environ.get("UPSTOX_MOBILE", "")
+        pin = os.environ.get("UPSTOX_PIN", "")
+        totp_key = os.environ.get("UPSTOX_TOTP_KEY", "")
+
+        if not all([api_key, api_secret, redirect_uri, mobile, pin, totp_key]):
+            return False
+
+        try:
+            logger.info("UpstoxMarketDataAdapter: Attempting automated OAuth token refresh with TOTP...")
+            from alphaforge.shadow_validation.upstox_auth import UpstoxOAuthAuthenticator  # noqa: PLC0415
+            auth = UpstoxOAuthAuthenticator(
+                api_key=api_key,
+                api_secret=api_secret,
+                redirect_uri=redirect_uri,
+                mobile=mobile,
+                pin=pin,
+                totp_key=totp_key,
+            )
+            res = auth.authenticate(max_retries=2)
+            new_token = res["access_token"]
+            self._access_token = new_token
+            os.environ[UPSTOX_ACCESS_TOKEN_ENV] = new_token
+
+            # Update .env file if it exists
+            env_path = Path(".env")
+            if env_path.exists():
+                with contextlib.suppress(Exception):
+                    from scripts.refresh_upstox_token import save_env_var  # noqa: PLC0415
+                    save_env_var(env_path, UPSTOX_ACCESS_TOKEN_ENV, new_token)
+
+            logger.info("UpstoxMarketDataAdapter: Automated token refresh succeeded.")
+            return True
+        except Exception as exc:
+            logger.warning(f"UpstoxMarketDataAdapter: Automated token refresh failed: {exc}")
+            return False
 
     def _establish_websocket(self) -> None:
         """Establish async WebSocket connection. Placeholder for actual async runtime."""

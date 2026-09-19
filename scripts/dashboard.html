@@ -466,7 +466,10 @@
     <!-- Error Notice Banner -->
     <div id="bot-error-banner" class="bot-error-banner">
       <span id="bot-error-msg">⚠ Error</span>
-      <button class="btn-action secondary" style="padding: 2px 8px; font-size: 10px;" onclick="dismissBotError()">Dismiss</button>
+      <div style="display: flex; gap: 6px; align-items: center;">
+        <button id="btn-token-refresh" class="btn-action secondary" style="padding: 2px 8px; font-size: 10px; background: #0284c7; color: white; border: none; display: none;" onclick="autoRefreshToken()">🔄 Refresh Token</button>
+        <button class="btn-action secondary" style="padding: 2px 8px; font-size: 10px;" onclick="dismissBotError()">Dismiss</button>
+      </div>
     </div>
 
     <!-- Navigation Tabs (Touch-friendly & Horizontal Scrolling) -->
@@ -1228,13 +1231,47 @@
       // 5. Error Banner
       const errBanner = document.getElementById('bot-error-banner');
       const errMsg = document.getElementById('bot-error-msg');
+      const btnRef = document.getElementById('btn-token-refresh');
       if (errBanner && errMsg) {
         if (bot.error_message && currentBotStatus === 'ERROR') {
           errMsg.textContent = '⚠ Bot Error: ' + bot.error_message;
           errBanner.style.display = 'flex';
+          const isAuthErr = bot.error_message.includes('401') || bot.error_message.includes('token') || bot.error_message.includes('Authentication');
+          if (btnRef) btnRef.style.display = isAuthErr ? 'inline-block' : 'none';
         } else if (currentBotStatus !== 'ERROR') {
           errBanner.style.display = 'none';
         }
+      }
+    }
+
+    async function autoRefreshToken() {
+      const btn = document.getElementById('btn-token-refresh');
+      if (btn) {
+        btn.textContent = '🔄 Refreshing...';
+        btn.disabled = true;
+      }
+      try {
+        const res = await fetch('/api/token/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+          body: JSON.stringify({})
+        });
+        const data = await parseSafeJson(res);
+        if (data.success) {
+          alert('Upstox access token refreshed successfully for ' + (data.user || 'user') + '! Starting bot in PAPER mode...');
+          dismissBotError();
+          await startBot('PAPER');
+        } else {
+          alert('Token refresh error: ' + (data.error || 'Failed to refresh token'));
+        }
+      } catch (err) {
+        alert('Token refresh request failed: ' + (err.message || err));
+      } finally {
+        if (btn) {
+          btn.textContent = '🔄 Refresh Token';
+          btn.disabled = false;
+        }
+        await fetchAllTelemetry();
       }
     }
 
