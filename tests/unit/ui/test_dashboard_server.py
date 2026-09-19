@@ -259,6 +259,31 @@ def test_synthetic_forward_is_labeled(server_url: str) -> None:
     assert data["data_source"] != "REAL_MARKET_SHADOW"
 
 
+def test_backtest_latest_endpoint(server_url: str) -> None:
+    """Verifies GET /api/backtest/latest returns latest report if present."""
+    status, data, _ = _get(f"{server_url}/api/backtest/latest")
+    assert status == 200
+    assert "success" in data
+    if data["success"]:
+        assert "data" in data
+        assert data["data"]["strategy_id"] == "AF_ORB_MOMENTUM_V1"
+
+
+def test_real_forward_run_endpoint(server_url: str) -> None:
+    """Verifies POST /api/forward/run with use_real=True executes real backtest or falls back."""
+    with STATE.lock:
+        STATE.kill_switch.disarm(reason="pytest real forward run")
+
+    status, data, _ = _post(
+        f"{server_url}/api/forward/run",
+        {"mode": "PAPER", "candles_count": 150, "use_real": True},
+    )
+    assert status == 200
+    assert data["success"] is True
+    assert "report" in data
+    assert "trades" in data
+
+
 def test_paper_order_simulator(server_url: str) -> None:
     """Verifies order submission is strictly a PaperBroker simulator."""
     with STATE.lock:

@@ -37,6 +37,7 @@ from alphaforge.backtest.models import BacktestConfig, FinalPositionPolicy
 from alphaforge.contract.models import ContractMaster
 from alphaforge.data.enums import InstrumentType
 from alphaforge.data.models import MarketCandle
+from alphaforge.risk.models import RiskConfig
 from alphaforge.shadow_validation.contract_source import get_current_active_contract
 from alphaforge.strategy.config import StrategyConfig
 
@@ -308,6 +309,17 @@ def run_real_backtest(
         min_ema_spread_pct=Decimal(str(min_spread)),
     )
 
+    # Derivatives / Futures Risk Sizing:
+    # 1 lot NIFTY Futures (50 qty * ~25,000 index = ~Rs. 12,50,000 notional).
+    # On a Rs. 10 Lakh initial capital account, single position notional is ~1.25x (125%).
+    # Set futures risk boundaries so trades are not rejected by cash equity rules:
+    risk_cfg = RiskConfig(
+        max_single_position_notional=Decimal("2.00"),
+        max_portfolio_notional=Decimal("5.00"),
+        max_risk_per_trade=Decimal("0.0200"),
+        max_portfolio_risk=Decimal("0.0500"),
+    )
+
     logger.info("Launching AlphaForge Pure Deterministic Backtest Engine...")
     logger.info("  Strategy: %s v%s", config.strategy_id, config.strategy_version)
     logger.info("  Regime Filter: %s (Min ADX: %.1f, Min Spread: %.4f)", "ENABLED" if regime_filter else "DISABLED", min_adx, min_spread)
@@ -321,6 +333,7 @@ def run_real_backtest(
         dataset=dataset_exec,
         contract_master=contract,
         strategy_config=strat_cfg,
+        risk_config=risk_cfg,
         confirmation_dataset=dataset_conf,
     )
     result = engine.run()

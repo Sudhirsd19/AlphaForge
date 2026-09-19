@@ -1072,27 +1072,33 @@
     <div id="tab-backtest" class="tab-view">
       <div class="op-panel">
         <div class="op-panel-header">
-          <span class="op-panel-title">Run Historical Strategy Simulation</span>
-          <span class="status-tag tag-cyan">BACKTEST</span>
+          <span class="op-panel-title">Institutional Strategy Backtest &amp; Historical Simulation</span>
+          <span class="status-tag tag-cyan">BACKTEST ENGINE</span>
         </div>
-        <div class="grid-row-3">
+        <div class="grid-row-4">
+          <div class="form-ctrl-group">
+            <label class="form-ctrl-label">Market Feed</label>
+            <div style="font-size: 13px; font-weight: 600; color: #38bdf8; padding-top: 6px;">NSE NIFTY Futures (NIFTY26SEPFUT)</div>
+          </div>
           <div class="form-ctrl-group">
             <label class="form-ctrl-label">Simulation Mode</label>
             <select id="fwd-mode" class="form-select">
-              <option value="PAPER">PAPER (Simulation)</option>
+              <option value="PAPER">PAPER (Fill Engine + Slippage)</option>
               <option value="SHADOW">SHADOW (Passive Benchmark)</option>
             </select>
           </div>
           <div class="form-ctrl-group">
-            <label class="form-ctrl-label">Bars Count</label>
+            <label class="form-ctrl-label">Historical Window</label>
             <select id="fwd-candles" class="form-select">
-              <option value="50">50 NIFTY Bars (Fast)</option>
-              <option value="150" selected>150 NIFTY Bars (Standard)</option>
-              <option value="300">300 NIFTY Bars (Deep Walk)</option>
+              <option value="2695" selected>Full Month (~30 Days / 2,695 Bars)</option>
+              <option value="1500">20 Trading Days (1,500 Bars)</option>
+              <option value="750">10 Trading Days (750 Bars)</option>
+              <option value="375">5 Trading Days (375 Bars)</option>
+              <option value="150">2 Trading Days (150 Bars)</option>
             </select>
           </div>
           <div class="form-ctrl-group" style="display: flex; align-items: flex-end;">
-            <button class="btn-action" style="width: 100%;" onclick="runForwardBatch()">&#9654; Run Simulation</button>
+            <button id="btn-run-simulation" class="btn-action" style="width: 100%;" onclick="runForwardBatch()">&#9654; Run Simulation</button>
           </div>
         </div>
       </div>
@@ -1107,12 +1113,45 @@
           <div class="empty-state-desc">Click Run Simulation above to test the strategy on historical bars.</div>
         </div>
         <div id="bt-metrics-content" style="display: none;">
-          <div class="grid-row-4">
+          <div class="grid-row-4" style="margin-bottom: 12px;">
             <div class="kv-item"><div class="kv-label">Processed Bars</div><div class="kv-value" id="bt-bars">0</div></div>
-            <div class="kv-item"><div class="kv-label">Trades Executed</div><div class="kv-value" id="bt-trades">0</div></div>
+            <div class="kv-item"><div class="kv-label">Total Trades</div><div class="kv-value" id="bt-trades">0</div></div>
             <div class="kv-item"><div class="kv-label">Win Rate</div><div class="kv-value" id="bt-winrate">0.0%</div></div>
-            <div class="kv-item"><div class="kv-label">Simulated P&amp;L</div><div class="kv-value" id="bt-pnl">₹0.00</div></div>
+            <div class="kv-item"><div class="kv-label">Net Realized P&amp;L</div><div class="kv-value" id="bt-pnl" style="font-weight: 700;">₹0.00</div></div>
           </div>
+          <div class="grid-row-4">
+            <div class="kv-item"><div class="kv-label">Profit Factor</div><div class="kv-value" id="bt-profit-factor" style="color: #38bdf8;">N/A</div></div>
+            <div class="kv-item"><div class="kv-label">Payoff Ratio</div><div class="kv-value" id="bt-payoff-ratio" style="color: #a78bfa;">N/A</div></div>
+            <div class="kv-item"><div class="kv-label">Max Drawdown</div><div class="kv-value" id="bt-max-dd" style="color: #fbbf24;">₹0.00</div></div>
+            <div class="kv-item"><div class="kv-label">Risk Gates Passed</div><div class="kv-value" id="bt-risk-gates" style="color: #34d399;">—</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Simulated Trades Execution Log Table -->
+      <div class="op-panel" id="bt-trades-panel" style="display: none; margin-top: 14px;">
+        <div class="op-panel-header">
+          <span class="op-panel-title">&#128202; Simulated Trades Execution Log</span>
+          <span class="status-tag tag-cyan" id="bt-trades-count-badge">0 TRADES</span>
+        </div>
+        <div style="max-height: 420px; overflow-y: auto;">
+          <table class="op-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Side</th>
+                <th>Entry Time</th>
+                <th>Entry Px</th>
+                <th>Exit Time</th>
+                <th>Exit Px</th>
+                <th>Net P&amp;L (₹)</th>
+                <th>Exit Reason</th>
+              </tr>
+            </thead>
+            <tbody id="bt-trades-tbody">
+              <tr><td colspan="8" style="text-align: center; color: var(--text-dim); padding: 20px;">No trades generated in this window.</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -2097,29 +2136,150 @@
       }
     }
 
-    // Synthetic Forward Batch Run
+    // Render Backtest KPIs and Trades Execution Table
+    function renderBacktestResults(report, trades, runId, dataSource) {
+      const emptyState = document.getElementById('bt-empty-state');
+      const metricsContent = document.getElementById('bt-metrics-content');
+      const tradesPanel = document.getElementById('bt-trades-panel');
+      if (emptyState) emptyState.style.display = 'none';
+      if (metricsContent) metricsContent.style.display = 'block';
+      if (tradesPanel) tradesPanel.style.display = 'block';
+
+      const dsLabel = dataSource ? ' • ' + dataSource : '';
+      const badge = document.getElementById('bt-status-badge');
+      if (badge) badge.textContent = 'RUN: ' + (runId || report.run_id || 'COMPLETED') + dsLabel;
+
+      const bars = report.processed_candles || report.total_candles_3m || 0;
+      document.getElementById('bt-bars').textContent = Number(bars).toLocaleString();
+
+      const totalTrades = report.total_trades || 0;
+      const wins = report.winning_trades || 0;
+      const losses = report.losing_trades || 0;
+      document.getElementById('bt-trades').textContent = `${totalTrades} (${wins}W / ${losses}L)`;
+
+      const winRateNum = Number(report.win_rate || 0);
+      document.getElementById('bt-winrate').textContent = winRateNum.toFixed(1) + '%';
+
+      const pnlVal = Number(report.total_realized_pnl || report.total_return || 0);
+      const pnlEl = document.getElementById('bt-pnl');
+      const pnlSign = pnlVal >= 0 ? '+' : '';
+      pnlEl.textContent = pnlSign + '₹' + Math.abs(pnlVal).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      pnlEl.style.color = pnlVal >= 0 ? '#34d399' : '#f87171';
+
+      const pf = report.profit_factor !== null && report.profit_factor !== undefined ? String(report.profit_factor) : 'N/A';
+      document.getElementById('bt-profit-factor').textContent = pf;
+
+      const payoff = report.payoff_ratio !== null && report.payoff_ratio !== undefined ? String(report.payoff_ratio) : 'N/A';
+      document.getElementById('bt-payoff-ratio').textContent = payoff;
+
+      const maxDd = Number(report.max_drawdown || 0);
+      const ddPct = report.max_drawdown_pct ? ` (${Number(report.max_drawdown_pct).toFixed(2)}%)` : '';
+      document.getElementById('bt-max-dd').textContent = '₹' + maxDd.toLocaleString('en-IN', {minimumFractionDigits: 2}) + ddPct;
+
+      const evalCount = report.risk_evaluations || 0;
+      const appCount = report.risk_approved || 0;
+      const rejCount = report.risk_rejected || 0;
+      document.getElementById('bt-risk-gates').textContent = evalCount > 0 ? `${appCount} Approved / ${rejCount} Rejected` : 'ALL PASSED (0 Rejected)';
+
+      // Populate Trades Table
+      const tbody = document.getElementById('bt-trades-tbody');
+      const countBadge = document.getElementById('bt-trades-count-badge');
+      if (tbody && trades) {
+        if (countBadge) countBadge.textContent = trades.length + ' TRADES';
+        if (trades.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-dim); padding: 24px;">No trades generated in this window. Strategy filters were inactive.</td></tr>';
+        } else {
+          tbody.innerHTML = trades.map((t, i) => {
+            const sideTag = t.side === 'LONG'
+              ? '<span class="status-tag tag-green">BUY / LONG</span>'
+              : '<span class="status-tag tag-purple">SELL / SHORT</span>';
+            const netPnl = Number(t.net_pnl || 0);
+            const netSign = netPnl >= 0 ? '+' : '';
+            const pnlColor = netPnl >= 0 ? '#34d399' : '#f87171';
+            const reasonTag = (t.exit_reason || '').includes('TARGET')
+              ? '<span class="status-tag tag-green">TARGET</span>'
+              : '<span class="status-tag tag-amber">STOP_LOSS</span>';
+            const entryTs = t.entry_timestamp ? t.entry_timestamp.replace('T', ' ').substring(5, 16) : '—';
+            const exitTs = t.exit_timestamp ? t.exit_timestamp.replace('T', ' ').substring(5, 16) : '—';
+            const entryPx = Number(t.entry_price || 0).toFixed(2);
+            const exitPx = Number(t.exit_price || 0).toFixed(2);
+            return `
+              <tr>
+                <td><strong>#${i + 1}</strong></td>
+                <td>${sideTag}</td>
+                <td>${entryTs}</td>
+                <td style="font-family: monospace;">₹${entryPx}</td>
+                <td>${exitTs}</td>
+                <td style="font-family: monospace;">₹${exitPx}</td>
+                <td style="font-family: monospace; font-weight: 700; color: ${pnlColor};">${netSign}₹${netPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                <td>${reasonTag}</td>
+              </tr>
+            `;
+          }).join('');
+        }
+      }
+    }
+
+    // Load Authoritative Real Backtest Report from disk
+    async function loadLatestBacktestReport() {
+      try {
+        const res = await fetch('/api/backtest/latest');
+        const data = await res.json();
+        if (data.success && data.data) {
+          const rep = data.data;
+          const gateF = (rep.quant_gates || []).find(g => g.gate_id === 'Gate F') || {};
+          const reportObj = {
+            run_id: rep.run_id,
+            processed_candles: rep.total_candles_3m,
+            total_trades: rep.metrics.total_trades,
+            winning_trades: rep.metrics.winning_trades,
+            losing_trades: rep.metrics.losing_trades,
+            win_rate: Number(rep.metrics.win_rate) * 100,
+            total_realized_pnl: rep.metrics.total_return,
+            profit_factor: rep.metrics.profit_factor,
+            payoff_ratio: rep.metrics.payoff_ratio,
+            max_drawdown: rep.metrics.max_drawdown,
+            max_drawdown_pct: rep.metrics.max_drawdown_pct,
+            risk_evaluations: gateF.evidence ? gateF.evidence.risk_calls : 0,
+            risk_approved: gateF.evidence ? gateF.evidence.approved_signals : 0,
+            risk_rejected: gateF.evidence ? gateF.evidence.rejected_signals : 0,
+          };
+          renderBacktestResults(reportObj, rep.trades || [], rep.run_id, 'UPSTOX HISTORICAL (AUTHORITATIVE)');
+        }
+      } catch (e) {
+        console.warn('Could not load latest backtest report:', e);
+      }
+    }
+
+    // Interactive Forward Batch & Real Backtest Run
     async function runForwardBatch() {
       const mode = document.getElementById('fwd-mode').value;
       const count = document.getElementById('fwd-candles').value;
+      const btn = document.getElementById('btn-run-simulation');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Simulating...';
+      }
       try {
         const res = await fetch('/api/forward/run', {
           method: 'POST',
           headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
-          body: JSON.stringify({ mode: mode, candles_count: count })
+          body: JSON.stringify({ mode: mode, candles_count: count, use_real: true })
         });
         const data = await res.json();
         if (data.success) {
-          document.getElementById('bt-empty-state').style.display = 'none';
-          document.getElementById('bt-metrics-content').style.display = 'block';
-          document.getElementById('bt-status-badge').textContent = 'SIMULATION RUN: ' + data.run_id;
-          document.getElementById('bt-bars').textContent = data.report.processed_candles;
-          document.getElementById('bt-trades').textContent = data.report.total_trades;
-          document.getElementById('bt-winrate').textContent = data.report.win_rate + '%';
-          document.getElementById('bt-pnl').textContent = '₹' + Number(data.report.total_realized_pnl).toLocaleString('en-IN', {minimumFractionDigits: 2});
+          renderBacktestResults(data.report, data.trades, data.run_id, data.data_source);
           fetchAllTelemetry();
+        } else {
+          alert('Simulation failed: ' + (data.error || 'Unknown error'));
         }
       } catch (e) {
         alert('Simulation error: ' + e);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '▶ Run Simulation';
+        }
       }
     }
 
@@ -2186,6 +2346,7 @@
       await initCsrfToken();
       fetchAllTelemetry();
       loadEvidencePackages();
+      loadLatestBacktestReport();
       drawMarketChart();
       initBotLogsScrollListener();
       setInterval(fetchAllTelemetry, 3000);
