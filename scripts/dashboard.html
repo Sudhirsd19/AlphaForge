@@ -1147,6 +1147,7 @@
           <span class="op-panel-title">&#128421; Live Bot Activity Feed &amp; Execution Stream</span>
           <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
             <span style="font-size: 11px; color: var(--text-dim);" id="bot-tab-last-heartbeat">Heartbeat: Waiting...</span>
+            <button id="bot-logs-jump-bottom" class="btn-action secondary" style="display: none; padding: 2px 8px; font-size: 10px; color: #38bdf8;" onclick="scrollBotLogsToBottom()">↓ Jump to Bottom</button>
             <label style="display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); cursor: pointer;">
               <input type="checkbox" id="bot-logs-autoscroll" checked style="cursor: pointer;"> Auto-Scroll
             </label>
@@ -1760,13 +1761,74 @@
         .replace(/'/g, '&#039;');
     }
 
+    function initBotLogsScrollListener() {
+      const box = document.getElementById('bot-logs-scroll-box');
+      if (!box || box._scrollInit) return;
+      box._scrollInit = true;
+
+      box.addEventListener('scroll', () => {
+        const atBottom = (box.scrollHeight - box.scrollTop - box.clientHeight <= 40);
+        const autoScroll = document.getElementById('bot-logs-autoscroll');
+        const jumpBtn = document.getElementById('bot-logs-jump-bottom');
+
+        if (autoScroll) {
+          autoScroll.checked = atBottom;
+        }
+        if (jumpBtn) {
+          jumpBtn.style.display = atBottom ? 'none' : 'inline-flex';
+        }
+      }, { passive: true });
+
+      const autoScroll = document.getElementById('bot-logs-autoscroll');
+      if (autoScroll) {
+        autoScroll.addEventListener('change', (e) => {
+          if (e.target.checked) scrollBotLogsToBottom();
+        });
+      }
+    }
+
+    function scrollBotLogsToBottom() {
+      const box = document.getElementById('bot-logs-scroll-box');
+      const autoScroll = document.getElementById('bot-logs-autoscroll');
+      const jumpBtn = document.getElementById('bot-logs-jump-bottom');
+      if (box) {
+        box.scrollTop = box.scrollHeight;
+      }
+      if (autoScroll) {
+        autoScroll.checked = true;
+      }
+      if (jumpBtn) {
+        jumpBtn.style.display = 'none';
+      }
+    }
+
     function renderBotLogs(logs) {
       if (!logs || !Array.isArray(logs)) return;
-      cachedBotLogs = logs;
+
+      initBotLogsScrollListener();
+
       const container = document.getElementById('bot-logs-container');
       const badge = document.getElementById('bot-logs-count-badge');
+      const box = document.getElementById('bot-logs-scroll-box');
+      const autoScroll = document.getElementById('bot-logs-autoscroll');
+      const jumpBtn = document.getElementById('bot-logs-jump-bottom');
+
       if (badge) badge.textContent = `${logs.length} EVENTS`;
       if (!container) return;
+
+      // Avoid DOM rebuild if log data hasn't changed at all
+      if (cachedBotLogs.length === logs.length && logs.length > 0) {
+        const lastOld = cachedBotLogs[cachedBotLogs.length - 1];
+        const lastNew = logs[logs.length - 1];
+        if (lastOld && lastNew && lastOld.timestamp === lastNew.timestamp && lastOld.message === lastNew.message) {
+          return;
+        }
+      }
+
+      // Check whether user is currently near the bottom (within 40px)
+      const isAtBottom = box ? (box.scrollHeight - box.scrollTop - box.clientHeight <= 40) : true;
+      const prevScrollTop = box ? box.scrollTop : 0;
+      cachedBotLogs = logs;
 
       if (logs.length === 0) {
         if (currentBotStatus === 'RUNNING') {
@@ -1814,10 +1876,14 @@
         hbEl.style.color = '#34d399';
       }
 
-      const autoScroll = document.getElementById('bot-logs-autoscroll');
-      const box = document.getElementById('bot-logs-scroll-box');
-      if (box && (!autoScroll || autoScroll.checked)) {
-        box.scrollTop = box.scrollHeight;
+      if (box) {
+        if (autoScroll && autoScroll.checked && isAtBottom) {
+          box.scrollTop = box.scrollHeight;
+          if (jumpBtn) jumpBtn.style.display = 'none';
+        } else if (!isAtBottom) {
+          box.scrollTop = prevScrollTop;
+          if (jumpBtn) jumpBtn.style.display = 'inline-flex';
+        }
       }
     }
 
@@ -2121,6 +2187,7 @@
       fetchAllTelemetry();
       loadEvidencePackages();
       drawMarketChart();
+      initBotLogsScrollListener();
       setInterval(fetchAllTelemetry, 3000);
       window.addEventListener('resize', drawMarketChart);
     });
