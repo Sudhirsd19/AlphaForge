@@ -1008,9 +1008,10 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/bot/logs":
             live_bot = get_live_bot_state(only_active=False)
+            bot_telemetry = STATE.bot_manager.get_telemetry()
             bot_logs: list[dict[str, Any]] = []
-            if live_bot and "bot_logs" in live_bot:
-                bot_logs = live_bot["bot_logs"]
+            if live_bot and "bot_logs" in live_bot and live_bot["bot_logs"]:
+                bot_logs = list(live_bot["bot_logs"])
             else:
                 stderr_file = REPO_ROOT / "runtime" / "logs" / "paper_bot_stderr.log"
                 if stderr_file.exists():
@@ -1030,7 +1031,40 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                                 "component": "RUNNER",
                                 "message": line.strip(),
                             })
-            self._send_json(200, {"logs": bot_logs, "count": len(bot_logs)})
+
+            if not bot_logs:
+                st = bot_telemetry.get("status", "STOPPED")
+                if st == "RUNNING":
+                    bot_logs.append({
+                        "timestamp": datetime.now(UTC).strftime("%H:%M:%S"),
+                        "level": "INFO",
+                        "component": "SYSTEM",
+                        "message": (
+                            f"Bot engine is RUNNING (PID {bot_telemetry.get('pid')}). "
+                            "Subscribed to Upstox feed. Waiting for initial tick or heartbeat..."
+                        ),
+                    })
+                elif st == "ERROR":
+                    err = bot_telemetry.get("error_message") or "Unknown startup error"
+                    bot_logs.append({
+                        "timestamp": datetime.now(UTC).strftime("%H:%M:%S"),
+                        "level": "ERROR",
+                        "component": "SYSTEM",
+                        "message": f"Bot encountered an error: {err}",
+                    })
+                else:
+                    bot_logs.append({
+                        "timestamp": datetime.now(UTC).strftime("%H:%M:%S"),
+                        "level": "INFO",
+                        "component": "SYSTEM",
+                        "message": "Bot engine is currently STOPPED. Click 'START BOT (PAPER)' in top bar to launch.",
+                    })
+
+            self._send_json(200, {
+                "logs": bot_logs,
+                "count": len(bot_logs),
+                "bot": bot_telemetry,
+            })
             return
 
         if parsed.path == "/api/shadow/evidence":

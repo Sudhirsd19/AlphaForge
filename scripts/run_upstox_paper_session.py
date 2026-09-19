@@ -306,6 +306,19 @@ class _ObservedPaperBroker(PaperBroker):
         return order
 
 
+def _is_nse_session_open(dt_utc: datetime | None = None) -> tuple[bool, str]:
+    """Check if NSE trading session is active (09:15-15:30 IST = 03:45-10:00 UTC)."""
+    now = dt_utc or datetime.now(UTC)
+    if now.weekday() >= 5:
+        return False, "CLOSED (WEEKEND)"
+    t = now.time()
+    session_start = datetime.min.replace(hour=3, minute=45, tzinfo=UTC).time()
+    session_end = datetime.min.replace(hour=10, minute=0, tzinfo=UTC).time()
+    if session_start <= t <= session_end:
+        return True, "OPEN (REGULAR)"
+    return False, "CLOSED (OFF-HOURS)"
+
+
 def main() -> None:
     """Run a live Upstox-feed-driven paper session until interrupted."""
     parser = argparse.ArgumentParser(
@@ -348,17 +361,20 @@ def main() -> None:
     closed_3m_candles: list[dict[str, Any]] = []
     current_price: Decimal | None = None
     last_state_write_ts = 0.0
+    started = datetime.now(UTC)
+    state_lock = threading.Lock()
 
     def log_bot_activity(level: str, component: str, msg: str) -> None:
-        entry = {
-            "timestamp": datetime.now(UTC).strftime("%H:%M:%S"),
-            "level": level,
-            "component": component,
-            "message": msg,
-        }
-        bot_activity_logs.append(entry)
-        if len(bot_activity_logs) > 300:
-            bot_activity_logs.pop(0)
+        with state_lock:
+            entry = {
+                "timestamp": datetime.now(UTC).strftime("%H:%M:%S"),
+                "level": level,
+                "component": component,
+                "message": msg,
+            }
+            bot_activity_logs.append(entry)
+            if len(bot_activity_logs) > 300:
+                bot_activity_logs.pop(0)
 
     def _trigger_graceful_stop(reason: str = "stop requested") -> None:
         nonlocal stop_requested
@@ -425,61 +441,98 @@ def main() -> None:
 
     def flush_live_state(status_override: str | None = None, force: bool = False) -> None:
         nonlocal last_state_write_ts
-        now_mono = time.monotonic()
-        if not force and (now_mono - last_state_write_ts) < 0.5:
-            return
-        last_state_write_ts = now_mono
+        with state_lock:
+            now_mono = time.monotonic()
+            if not force and (now_mono - last_state_write_ts) < 0.5:
+                return
+            last_state_write_ts = now_mono
 
-        sig = strategy_bridge.last_signal
-        trend_val = sig.trend_state.value if sig and hasattr(sig.trend_state, "value") else "NEUTRAL"
-        dir_val = sig.direction.value if sig and hasattr(sig.direction, "value") else "NO ACTIVE SIGNAL"
-        rej_code = sig.rejection_code.value if sig and hasattr(sig.rejection_code, "value") else "Awaiting setup"
+            sig = strategy_bridge.last_signal
+            trend_val = sig.trend_state.value if sig and hasattr(sig.trend_state, "value") else "NEUTRAL"
+            dir_val = sig.direction.value if sig and hasattr(sig.direction, "value") else "NO ACTIVE SIGNAL"
+            rej_code = sig.rejection_code.value if sig and hasattr(sig.rejection_code, "value") else "Awaiting setup"
 
-        st_name = status_override or ("RUNNING" if not stop_requested else "STOPPING")
+            st_name = status_override or ("RUNNING" if not stop_requested else "STOPPING")
 
-        payload_state = {
-            "status": st_name,
-            "provider": "UPSTOX",
-            "contract_id": contract.contract_id,
-            "instrument_key": adapter._instrument_key,
-            "last_update": datetime.now(UTC).isoformat(),
-            "counts": counts,
-            "latest_price": str(current_price) if current_price is not None else None,
-            "candles": closed_3m_candles[-100:],
-            "confirmation_bars_count": len(confirmation_history),
-            "signal": {
-                "strategy_state": trend_val,
-                "trend": trend_val,
-                "momentum": "WAIT",
-                "breakout_status": "NOT_CONFIRMED",
-                "higher_timeframe_confirmation": "WAIT",
-                "volatility_state": "NORMAL",
-                "risk_gate": "PASS",
-                "contract_gate": "VALID",
-                "last_decision": dir_val,
-                "decision_timestamp": datetime.now(UTC).isoformat(),
-                "decision_reason": f"Regime: {trend_val} | Status: {rej_code}",
-                "decision_history": strategy_bridge.decision_history,
-            },
-            "orders": paper_broker.recent_orders,
-            "positions": [
-                {
-                    "symbol": p.symbol,
-                    "side": p.side.value if hasattr(p.side, "value") else str(p.side),
-                    "quantity": p.quantity,
-                    "average_price": str(p.average_price) if p.average_price is not None else None,
-                    "status": p.status,
-                }
-                for p in paper_broker.get_positions()
-            ],
-            "bot_logs": bot_activity_logs[-250:],
-        }
-        tmp = live_state_file.with_suffix(".tmp")
-        try:
-            tmp.write_text(json.dumps(payload_state, indent=2, default=str), encoding="utf-8")
-            tmp.replace(live_state_file)
-        except Exception:
-            pass
+            payload_state = {
+                "status": st_name,
+                "provider": "UPSTOX",
+                "contract_id": contract.contract_id,
+                "instrument_key": adapter._instrument_key,
+                "last_update": datetime.now(UTC).isoformat(),
+                "counts": dict(counts),
+                "latest_price": str(current_price) if current_price is not None else None,
+                "candles": list(closed_3m_candles[-100:]),
+                "confirmation_bars_count": len(confirmation_history),
+                "signal": {
+                    "strategy_state": trend_val,
+                    "trend": trend_val,
+                    "momentum": "WAIT",
+                    "breakout_status": "NOT_CONFIRMED",
+                    "higher_timeframe_confirmation": "WAIT",
+                    "volatility_state": "NORMAL",
+                    "risk_gate": "PASS",
+                    "contract_gate": "VALID",
+                    "last_decision": dir_val,
+                    "decision_timestamp": datetime.now(UTC).isoformat(),
+                    "decision_reason": f"Regime: {trend_val} | Status: {rej_code}",
+                    "decision_history": list(strategy_bridge.decision_history),
+                },
+                "orders": list(paper_broker.recent_orders),
+                "positions": [
+                    {
+                        "symbol": p.symbol,
+                        "side": p.side.value if hasattr(p.side, "value") else str(p.side),
+                        "quantity": p.quantity,
+                        "average_price": str(p.average_price) if p.average_price is not None else None,
+                        "status": p.status,
+                    }
+                    for p in paper_broker.get_positions()
+                ],
+                "bot_logs": list(bot_activity_logs[-250:]),
+            }
+            tmp = live_state_file.with_suffix(".tmp")
+            try:
+                tmp.write_text(json.dumps(payload_state, indent=2, default=str), encoding="utf-8")
+                tmp.replace(live_state_file)
+            except Exception:
+                pass
+
+    def _heartbeat_worker() -> None:
+        last_heartbeat = time.monotonic()
+        while not stop_requested and not stop_flag_file.exists():
+            time.sleep(1.0)
+            now_mono = time.monotonic()
+            if now_mono - last_heartbeat >= 15.0:
+                last_heartbeat = now_mono
+                uptime_sec = int((datetime.now(UTC) - started).total_seconds())
+                mins, secs = divmod(uptime_sec, 60)
+                hrs, mins = divmod(mins, 60)
+                uptime_str = f"{hrs:02d}h {mins:02d}m {secs:02d}s" if hrs else f"{mins:02d}m {secs:02d}s"
+
+                is_open, session_status = _is_nse_session_open()
+                t_events = counts.get("upstox_1m_events", 0)
+                e_bars = counts.get("execution_3m_bars", 0)
+                c_bars = counts.get("confirmation_15m_bars", 0)
+
+                if is_open:
+                    msg = (
+                        f"Heartbeat OK | Uptime: {uptime_str} | Feed: STREAMING | Market: OPEN "
+                        f"| Ticks: {t_events} | 3m Bars: {e_bars} | 15m Bars: {c_bars}"
+                    )
+                else:
+                    msg = (
+                        f"Heartbeat OK | Uptime: {uptime_str} | Feed: CONNECTED | Market: {session_status} "
+                        f"(Waiting for next session) | 0 Real Orders Enforced"
+                    )
+                log_bot_activity("HEARTBEAT", "HEALTH", msg)
+                flush_live_state(force=True)
+
+    heartbeat_thread = threading.Thread(
+        target=_heartbeat_worker,
+        name="BotHeartbeatWorker",
+        daemon=True,
+    )
 
     log_bot_activity(
         "INFO",
@@ -529,6 +582,7 @@ def main() -> None:
     print(f"  INSTRUMENT KEY: {adapter._instrument_key}")
     print("=" * 76)
 
+    has_error = False
     try:
         adapter.connect()
         telemetry = adapter.get_connection_telemetry()
@@ -540,6 +594,7 @@ def main() -> None:
         logger.info("Upstox authenticated; consuming read-only real-market stream.")
         log_bot_activity("FEED", "UPSTOX", f"Upstox authenticated. Subscribed to {adapter._instrument_key}")
         flush_live_state(status_override="CONNECTED", force=True)
+        heartbeat_thread.start()
 
         for market_event in adapter.stream_events():
             if stop_requested or stop_flag_file.exists():
@@ -635,6 +690,13 @@ def main() -> None:
                 stop_requested = True
                 break
 
+    except Exception as exc:
+        has_error = True
+        logger.exception("Session fatal error: %s", exc)
+        log_bot_activity("ERROR", "FATAL", f"Bot fatal error: {exc}")
+        flush_live_state(status_override="ERROR", force=True)
+        raise
+
     finally:
         # Never flush/evaluate a partial 3m or 15m bucket at shutdown.
         exec_agg.discard_open_bucket()
@@ -646,7 +708,7 @@ def main() -> None:
             logger.exception("Adapter shutdown error; session evidence will still be written.")
 
         log_bot_activity("INFO", "SHUTDOWN", "Bot session terminated. Disconnected feed.")
-        flush_live_state(status_override="STOPPED", force=True)
+        flush_live_state(status_override="ERROR" if has_error else "STOPPED", force=True)
 
         ended = datetime.now(UTC)
         final_telemetry: dict[str, Any] = adapter.get_connection_telemetry()

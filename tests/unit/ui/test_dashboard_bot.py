@@ -485,3 +485,18 @@ def test_graceful_stop_when_market_stream_has_no_ticks(
     consumer_thread.join(timeout=1.0)
     assert not consumer_thread.is_alive()
 
+
+def test_api_bot_logs_response(bot_server_url: str) -> None:
+    """Verify /api/bot/logs returns a valid structured response with bot telemetry."""
+    req = urllib.request.Request(f"{bot_server_url}/api/bot/logs")
+    with urllib.request.urlopen(req, timeout=5) as response:
+        assert response.status == 200
+        data = json.loads(response.read().decode("utf-8"))
+        assert "logs" in data
+        assert "count" in data
+        assert "bot" in data
+        assert isinstance(data["logs"], list)
+        assert data["count"] == len(data["logs"])
+        assert "status" in data["bot"]
+        assert len(data["logs"]) > 0  # Contextual message provided even if stopped
+

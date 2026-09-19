@@ -1118,10 +1118,34 @@
 
     <!-- ==================== TAB 11: BOT LOGS ==================== -->
     <div id="tab-botlogs" class="tab-view">
+      <!-- Live Bot Health & Connectivity Status Grid -->
+      <div class="grid-row-4" style="margin-bottom: 12px;">
+        <div class="kv-item" style="border-left: 3px solid #38bdf8;">
+          <div class="kv-label">Bot Engine Status</div>
+          <div class="kv-value" id="bot-tab-status" style="display: flex; align-items: center; gap: 8px;">
+            <span class="bot-pulse-dot" id="bot-tab-pulse-dot" style="width: 8px; height: 8px;"></span>
+            <span id="bot-tab-status-text" style="font-weight: 700;">STOPPED</span>
+          </div>
+        </div>
+        <div class="kv-item" style="border-left: 3px solid #34d399;">
+          <div class="kv-label">Process ID &amp; Uptime</div>
+          <div class="kv-value" id="bot-tab-pid-uptime" style="font-size: 13px;">PID: — | Uptime: 0s</div>
+        </div>
+        <div class="kv-item" style="border-left: 3px solid #fbbf24;">
+          <div class="kv-label">Market Session</div>
+          <div class="kv-value" id="bot-tab-market" style="font-size: 13px;">CLOSED (WEEKEND)</div>
+        </div>
+        <div class="kv-item" style="border-left: 3px solid #a78bfa;">
+          <div class="kv-label">Data Feed &amp; Execution Safety</div>
+          <div class="kv-value" id="bot-tab-feed" style="font-size: 12px; color: #a78bfa;">UPSTOX (0 Real Orders)</div>
+        </div>
+      </div>
+
       <div class="op-panel">
         <div class="op-panel-header">
           <span class="op-panel-title">&#128421; Live Bot Activity Feed &amp; Execution Stream</span>
           <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <span style="font-size: 11px; color: var(--text-dim);" id="bot-tab-last-heartbeat">Heartbeat: Waiting...</span>
             <label style="display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); cursor: pointer;">
               <input type="checkbox" id="bot-logs-autoscroll" checked style="cursor: pointer;"> Auto-Scroll
             </label>
@@ -1200,6 +1224,40 @@
       if (mktBadge) {
         mktBadge.textContent = 'MARKET: ' + (bot.market_status || 'EVALUATING');
         mktBadge.className = bot.is_market_open ? 'status-tag tag-green' : 'status-tag tag-amber';
+      }
+
+      // 3.5. Update Bot Logs Tab Indicators
+      const tabStatusText = document.getElementById('bot-tab-status-text');
+      const tabPulseDot = document.getElementById('bot-tab-pulse-dot');
+      const tabPidUptime = document.getElementById('bot-tab-pid-uptime');
+      const tabMarket = document.getElementById('bot-tab-market');
+
+      if (tabStatusText) {
+        tabStatusText.textContent = currentBotStatus === 'RUNNING' ? 'RUNNING (PAPER)' : currentBotStatus;
+        tabStatusText.style.color = currentBotStatus === 'RUNNING' ? '#34d399' :
+                                    currentBotStatus === 'ERROR' ? '#f87171' :
+                                    currentBotStatus === 'STARTING' ? '#38bdf8' : 'var(--text-muted)';
+      }
+      if (tabPulseDot) {
+        tabPulseDot.className = 'bot-pulse-dot';
+        if (currentBotStatus === 'RUNNING') tabPulseDot.classList.add('running');
+        else if (currentBotStatus === 'STARTING') tabPulseDot.classList.add('starting');
+        else if (currentBotStatus === 'STOPPING') tabPulseDot.classList.add('stopping');
+        else if (currentBotStatus === 'ERROR') tabPulseDot.classList.add('error');
+      }
+      if (tabPidUptime) {
+        if (bot.pid && currentBotStatus === 'RUNNING') {
+          const s = bot.uptime_seconds || 0;
+          const fmt = s >= 3600 ? `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m` :
+                      s >= 60 ? `${Math.floor(s/60)}m ${s%60}s` : `${s}s`;
+          tabPidUptime.textContent = `PID: ${bot.pid} | Uptime: ${fmt}`;
+        } else {
+          tabPidUptime.textContent = 'PID: — | Offline';
+        }
+      }
+      if (tabMarket) {
+        tabMarket.textContent = bot.market_status || (bot.is_market_open ? 'OPEN (REGULAR)' : 'CLOSED (WEEKEND)');
+        tabMarket.style.color = bot.is_market_open ? '#34d399' : '#fbbf24';
       }
 
       // 4. Toggle Button
@@ -1371,6 +1429,10 @@
       if (idx >= 0 && btns[idx]) btns[idx].classList.add('active');
 
       if (tabId === 'market' || tabId === 'overview') drawMarketChart();
+      if (tabId === 'botlogs') {
+        if (cachedBotLogs && cachedBotLogs.length > 0) renderBotLogs(cachedBotLogs);
+        fetchAllTelemetry();
+      }
     }
 
     // Auto-Polling
@@ -1706,9 +1768,17 @@
       if (!container) return;
 
       if (logs.length === 0) {
-        container.innerHTML = '<div style="color: var(--text-dim); text-align: center; padding: 40px 0;">Awaiting bot activity logs...</div>';
+        if (currentBotStatus === 'RUNNING') {
+          container.innerHTML = '<div style="color: #38bdf8; text-align: center; padding: 40px 0;">⚡ Bot engine is RUNNING. Awaiting market data stream or heartbeat...</div>';
+        } else if (currentBotStatus === 'ERROR') {
+          container.innerHTML = '<div style="color: #f87171; text-align: center; padding: 40px 0;">⚠ Bot encountered an error. Check top banner or click RETRY BOT (PAPER).</div>';
+        } else {
+          container.innerHTML = '<div style="color: var(--text-dim); text-align: center; padding: 40px 0;">⏹ Bot engine is currently STOPPED. Click <strong>START BOT (PAPER)</strong> in the top bar to begin.</div>';
+        }
         return;
       }
+
+      let latestHeartbeatTs = null;
 
       container.innerHTML = logs.map(l => {
         let ts = escapeHtml(l.timestamp || '');
@@ -1720,17 +1790,28 @@
         let msgColor = '#cbd5e1';
         if (lvl === 'ERROR') { tagColor = 'tag-red'; msgColor = '#fca5a5'; }
         else if (lvl === 'WARN') { tagColor = 'tag-amber'; msgColor = '#fde68a'; }
+        else if (lvl === 'HEARTBEAT') {
+          tagColor = 'tag-green';
+          msgColor = '#6ee7b7';
+          latestHeartbeatTs = ts;
+        }
         else if (lvl === 'SIGNAL' || cat === 'SIGNAL' || cat === 'REGIME') { tagColor = 'tag-cyan'; msgColor = '#c4b5fd'; }
         else if (lvl === 'ORDER' || lvl === 'FILL' || cat === 'ORDER' || cat === 'FILL') { tagColor = 'tag-green'; msgColor = '#86efac'; }
         else if (lvl === 'TICK') { tagColor = 'tag-slate'; msgColor = '#94a3b8'; }
 
         return `<div style="display: flex; gap: 8px; align-items: flex-start; padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.03);">
           <span style="color: var(--text-dim); font-size: 10px; min-width: 60px;">${ts}</span>
-          <span class="status-tag ${tagColor}" style="font-size: 9px; padding: 1px 5px; min-width: 50px; text-align: center;">${lvl}</span>
+          <span class="status-tag ${tagColor}" style="font-size: 9px; padding: 1px 5px; min-width: 55px; text-align: center;">${lvl}</span>
           <span style="color: var(--text-muted); font-size: 10px; min-width: 70px;">[${cat}]</span>
           <span style="color: ${msgColor}; flex: 1; word-break: break-all;">${msg}</span>
         </div>`;
       }).join('');
+
+      const hbEl = document.getElementById('bot-tab-last-heartbeat');
+      if (hbEl && latestHeartbeatTs) {
+        hbEl.textContent = `Heartbeat: ${latestHeartbeatTs} (Active)`;
+        hbEl.style.color = '#34d399';
+      }
 
       const autoScroll = document.getElementById('bot-logs-autoscroll');
       const box = document.getElementById('bot-logs-scroll-box');
