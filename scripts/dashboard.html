@@ -276,10 +276,19 @@
     /* Chart Canvas Container */
     .chart-container {
       background: #050812; border: 1px solid var(--card-border);
-      border-radius: 5px; padding: 8px; position: relative;
-      height: 300px; display: flex; flex-direction: column;
+      border-radius: 6px; padding: 4px; position: relative;
+      height: 310px; display: flex; flex-direction: column;
+      touch-action: pan-y;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
     }
-    .chart-canvas { width: 100%; flex-grow: 1; }
+    .chart-container.primary-chart { height: 380px; }
+    .chart-canvas {
+      width: 100%; height: 100%; flex-grow: 1; display: block;
+      touch-action: pan-y;
+      pointer-events: none;
+    }
 
     .empty-state-card {
       background: #080d1a; border: 1px dashed #1e2c47;
@@ -385,7 +394,8 @@
       .grid-row-3 { grid-template-columns: 1fr; }
       .grid-row-2 { grid-template-columns: 1fr; }
 
-      .chart-container { height: 240px; }
+      .chart-container { height: 260px; }
+      .chart-container.primary-chart { height: 290px; }
       .kv-grid { grid-template-columns: repeat(2, 1fr); }
     }
   </style>
@@ -701,7 +711,7 @@
           <span class="op-panel-title">NIFTY Futures &mdash; Live Chart</span>
           <span class="status-tag tag-slate" id="mkt-feed-source">UPSTOX WEBSOCKET</span>
         </div>
-        <div class="chart-container" style="height: 420px;">
+        <div class="chart-container primary-chart">
           <canvas id="primaryMarketChart" class="chart-canvas"></canvas>
           <div id="primary-chart-empty" class="empty-state-card" style="position: absolute; inset: 30px;">
             <div class="empty-state-title">WAITING FOR MARKET DATA</div>
@@ -1478,7 +1488,7 @@
       const idx = tabMap.indexOf(tabId);
       if (idx >= 0 && btns[idx]) btns[idx].classList.add('active');
 
-      if (tabId === 'market' || tabId === 'overview') drawMarketChart();
+      if (tabId === 'market' || tabId === 'overview') requestAnimationFrame(() => drawMarketChart());
       if (tabId === 'botlogs') {
         if (cachedBotLogs && cachedBotLogs.length > 0) renderBotLogs(cachedBotLogs);
         fetchAllTelemetry();
@@ -1935,28 +1945,48 @@
       }
     }
 
-    // Chart Canvas Candlestick Rendering
+    // Chart Canvas Candlestick Rendering (High-DPI Retina, Anti-Jitter, TradingView Precision)
     function drawMarketChart(candles) {
       if (candles !== undefined) cachedCandles = candles;
-      const data = cachedCandles || [];
+      const allData = cachedCandles || [];
       const canvas1 = document.getElementById('marketChartCanvas');
       const canvas2 = document.getElementById('primaryMarketChart');
 
       [canvas1, canvas2].forEach(c => {
         if (!c) return;
-        const w = c.clientWidth || 600;
-        const h = c.clientHeight || 300;
-        c.width = w;
-        c.height = h;
-        const ctx = c.getContext('2d');
+        // Don't render if element is hidden in an inactive tab
+        if (c.offsetParent === null && c.clientWidth === 0) return;
 
-        // Dark background
-        ctx.fillStyle = '#050812';
+        const rect = c.getBoundingClientRect();
+        const w = Math.floor(rect.width || c.clientWidth || 340);
+        const h = Math.floor(rect.height || c.clientHeight || 270);
+        if (w <= 0 || h <= 0) return;
+
+        // High-DPI / Retina display support (iPhone 3x, Retina 2x)
+        const dpr = Math.min(window.devicePixelRatio || 1, 3);
+        const targetW = Math.round(w * dpr);
+        const targetH = Math.round(h * dpr);
+
+        // Crucial Anti-Fluctuation Check: Only re-allocate canvas GPU buffer if dimensions changed
+        if (c.width !== targetW || c.height !== targetH) {
+          c.width = targetW;
+          c.height = targetH;
+        }
+
+        const ctx = c.getContext('2d');
+        ctx.resetTransform();
+        ctx.scale(dpr, dpr);
+
+        // Smooth modern institutional gradient background
+        const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
+        bgGrad.addColorStop(0, '#070b18');
+        bgGrad.addColorStop(1, '#040711');
+        ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, w, h);
 
-        if (!data || data.length === 0) {
-          // Subtle gridlines
-          ctx.strokeStyle = '#0f172a';
+        if (!allData || allData.length === 0) {
+          // Subtle empty state grid
+          ctx.strokeStyle = 'rgba(30, 41, 59, 0.35)';
           ctx.lineWidth = 1;
           for (let x = 40; x < w; x += 60) {
             ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
@@ -1967,26 +1997,34 @@
           return;
         }
 
-        // Layout margins
-        const padRight = 70;
+        // Adaptive candle slice for readability (prevent cramped barcode slivers on small phone screens)
+        const maxVisible = w < 480 ? 36 : w < 768 ? 50 : 75;
+        const data = allData.length > maxVisible ? allData.slice(-maxVisible) : allData;
+
+        // Dedicated layout margins
+        const padRight = w < 420 ? 64 : 74;
         const padBottom = 22;
-        const padTop = 15;
-        const padLeft = 10;
+        const padTop = 16;
+        const padLeft = 8;
         const chartW = w - padLeft - padRight;
         const chartH = h - padTop - padBottom;
 
-        // Min / max prices
+        // Dynamic price scale boundaries
         let minP = Infinity;
         let maxP = -Infinity;
-        for (const cd of data) {
-          if (cd.low < minP) minP = cd.low;
-          if (cd.high > maxP) maxP = cd.high;
+        let minIdx = -1;
+        let maxIdx = -1;
+
+        for (let i = 0; i < data.length; i++) {
+          const cd = data[i];
+          if (cd.low < minP) { minP = cd.low; minIdx = i; }
+          if (cd.high > maxP) { maxP = cd.high; maxIdx = i; }
         }
         if (minP === Infinity || maxP === -Infinity || minP === maxP) {
           minP -= 10; maxP += 10;
         }
         const range = maxP - minP;
-        const padP = range * 0.05;
+        const padP = range * 0.08; // 8% vertical padding
         const effMin = minP - padP;
         const effMax = maxP + padP;
         const effRange = effMax - effMin;
@@ -1995,86 +2033,165 @@
           return padTop + chartH - ((p - effMin) / effRange) * chartH;
         }
 
-        // Horizontal gridlines & price labels
-        ctx.strokeStyle = '#0f172a';
+        // Horizontal gridlines & Y-axis price labels
+        const gridSteps = h < 240 ? 4 : 5;
         ctx.lineWidth = 1;
-        ctx.fillStyle = '#64748b';
-        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.font = '500 9.5px "JetBrains Mono", monospace';
         ctx.textAlign = 'left';
 
-        const gridSteps = 5;
         for (let i = 0; i <= gridSteps; i++) {
           const p = effMin + (effRange / gridSteps) * i;
-          const y = getY(p);
+          const y = Math.round(getY(p)) + 0.5;
+
+          // Subtle dotted horizontal gridline
+          ctx.strokeStyle = 'rgba(30, 41, 59, 0.4)';
+          ctx.setLineDash([3, 4]);
           ctx.beginPath();
           ctx.moveTo(padLeft, y);
           ctx.lineTo(w - padRight, y);
           ctx.stroke();
-          ctx.fillText(p.toFixed(1), w - padRight + 6, y + 3);
-        }
 
-        // Candles
+          // Price label in right axis gutter
+          ctx.fillStyle = '#64748b';
+          ctx.fillText(p.toFixed(1), w - padRight + 7, y + 3.5);
+        }
+        ctx.setLineDash([]);
+
+        // Vertical axis divider line
+        ctx.strokeStyle = 'rgba(51, 65, 85, 0.4)';
+        ctx.beginPath();
+        ctx.moveTo(w - padRight, padTop - 6);
+        ctx.lineTo(w - padRight, h - padBottom);
+        ctx.stroke();
+
+        // Subtle volume bars at bottom (TradingView style)
         const count = data.length;
         const slotW = chartW / Math.max(count, 1);
-        const candleW = Math.max(2, Math.min(18, slotW * 0.7));
+        const candleW = Math.max(3.5, Math.min(15, slotW * 0.72));
+        const maxVol = Math.max(...data.map(cd => cd.volume || 1), 1);
+        const volMaxH = chartH * 0.16;
 
         data.forEach((cd, i) => {
           const cx = padLeft + i * slotW + slotW / 2;
+          const v = cd.volume || 0;
+          if (v > 0 && maxVol > 0) {
+            const vH = (v / maxVol) * volMaxH;
+            const vY = padTop + chartH - vH;
+            const isGreen = cd.close >= cd.open;
+            ctx.fillStyle = isGreen ? 'rgba(16, 185, 129, 0.18)' : 'rgba(244, 63, 94, 0.18)';
+            ctx.fillRect(Math.round(cx - candleW / 2), Math.round(vY), Math.round(candleW), Math.round(vH));
+          }
+        });
+
+        // Candlesticks (Pixel-crisp wicks & solid vibrant bodies)
+        data.forEach((cd, i) => {
+          const cx = padLeft + i * slotW + slotW / 2;
           const isGreen = cd.close >= cd.open;
-          const col = isGreen ? '#10b981' : '#ef4444';
+          const col = isGreen ? '#10b981' : '#f43f5e';
           ctx.strokeStyle = col;
           ctx.fillStyle = col;
 
-          // Wick
+          // Upper & lower wick (centered pixel for zero antialias blur)
+          const wickX = Math.round(cx) + 0.5;
           const yH = getY(cd.high);
           const yL = getY(cd.low);
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.moveTo(cx, yH);
-          ctx.lineTo(cx, yL);
+          ctx.moveTo(wickX, Math.round(yH));
+          ctx.lineTo(wickX, Math.round(yL));
           ctx.stroke();
 
-          // Body
+          // Candle body
           const yO = getY(cd.open);
           const yC = getY(cd.close);
           const topY = Math.min(yO, yC);
           const bodyH = Math.max(2, Math.abs(yC - yO));
-          ctx.fillRect(cx - candleW / 2, topY, candleW, bodyH);
+          const leftX = Math.round(cx - candleW / 2);
+          ctx.fillRect(leftX, Math.round(topY), Math.round(candleW), Math.round(bodyH));
+        });
 
-          // Timestamp label
-          if (i === count - 1 || i % Math.max(1, Math.floor(count / 6)) === 0) {
+        // High / Low markers on visible candles
+        if (minIdx >= 0 && maxIdx >= 0 && data.length > 5) {
+          const maxCx = padLeft + maxIdx * slotW + slotW / 2;
+          const maxY = getY(maxP);
+          ctx.fillStyle = '#34d399';
+          ctx.font = '8px "JetBrains Mono", monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(`▲ ${maxP.toFixed(1)}`, Math.max(padLeft + 25, Math.min(w - padRight - 25, maxCx)), Math.max(12, maxY - 4));
+
+          const minCx = padLeft + minIdx * slotW + slotW / 2;
+          const minY = getY(minP);
+          ctx.fillStyle = '#f87171';
+          ctx.fillText(`▼ ${minP.toFixed(1)}`, Math.max(padLeft + 25, Math.min(w - padRight - 25, minCx)), Math.min(h - padBottom - 3, minY + 11));
+        }
+
+        // X-axis timestamps with smart collision protection (labels never overlap)
+        let lastLabelX = -100;
+        const minLabelGap = w < 420 ? 54 : 68;
+
+        data.forEach((cd, i) => {
+          const cx = padLeft + i * slotW + slotW / 2;
+          if (cx - lastLabelX >= minLabelGap && (w - padRight - cx) >= 20) {
             let label = cd.timestamp || '';
-            if (label.includes('T')) label = label.split('T')[1].substring(0, 5);
-            else if (label.length > 8) label = label.substring(0, 5);
-            ctx.fillStyle = '#475569';
-            ctx.textAlign = 'center';
-            ctx.fillText(label, cx, h - 6);
+            if (label.includes('T')) {
+              label = label.split('T')[1].substring(0, 5);
+            } else if (label.length >= 5) {
+              label = label.substring(0, 5);
+            }
+            if (label) {
+              ctx.fillStyle = '#64748b';
+              ctx.font = '9px "JetBrains Mono", monospace';
+              ctx.textAlign = 'center';
+              ctx.fillText(label, Math.round(cx), h - 6);
+              lastLabelX = cx;
+            }
           }
         });
 
-        // Current price dashed line
+        // Current price (LTP) dashed line & glowing pill badge
         const lastCd = data[data.length - 1];
-        const lastY = getY(lastCd.close);
-        const lastCol = lastCd.close >= lastCd.open ? '#10b981' : '#ef4444';
+        const lastY = Math.round(getY(lastCd.close)) + 0.5;
+        const lastCol = lastCd.close >= lastCd.open ? '#10b981' : '#f43f5e';
+
+        // Dashed horizontal LTP line
         ctx.strokeStyle = lastCol;
-        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
         ctx.beginPath();
         ctx.moveTo(padLeft, lastY);
         ctx.lineTo(w - padRight, lastY);
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Current price badge on axis
+        // Glowing pill badge on price axis
+        const badgeW = padRight - 6;
+        const badgeH = 17;
+        const badgeX = w - padRight + 3;
+        const badgeY = Math.max(padTop - 2, Math.min(h - padBottom - badgeH + 2, lastY - badgeH / 2));
+
         ctx.fillStyle = lastCol;
-        ctx.fillRect(w - padRight + 2, lastY - 9, padRight - 4, 18);
+        const radius = 3;
+        ctx.beginPath();
+        ctx.moveTo(badgeX + radius, badgeY);
+        ctx.lineTo(badgeX + badgeW - radius, badgeY);
+        ctx.quadraticCurveTo(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + radius);
+        ctx.lineTo(badgeX + badgeW, badgeY + badgeH - radius);
+        ctx.quadraticCurveTo(badgeX + badgeW, badgeY + badgeH, badgeX + badgeW - radius, badgeY + badgeH);
+        ctx.lineTo(badgeX + radius, badgeY + badgeH);
+        ctx.quadraticCurveTo(badgeX, badgeY + badgeH, badgeX, badgeY + badgeH - radius);
+        ctx.lineTo(badgeX, badgeY + radius);
+        ctx.quadraticCurveTo(badgeX, badgeY, badgeX + radius, badgeY);
+        ctx.closePath();
+        ctx.fill();
+
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 10px "JetBrains Mono", monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText(lastCd.close.toFixed(1), w - padRight + 6, lastY + 4);
+        ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(lastCd.close.toFixed(1), badgeX + badgeW / 2, badgeY + 12);
       });
 
       // Toggle empty state cards
-      const hasData = data && data.length > 0;
+      const hasData = allData && allData.length > 0;
       const chEmpty = document.getElementById('chart-empty-state');
       if (chEmpty) chEmpty.style.display = hasData ? 'none' : 'block';
       const pEmpty = document.getElementById('primary-chart-empty');
@@ -2361,7 +2478,21 @@
       drawMarketChart();
       initBotLogsScrollListener();
       setInterval(fetchAllTelemetry, 3000);
-      window.addEventListener('resize', drawMarketChart);
+      // Anti-Fluctuation Window Resize Handler:
+      // Mobile Safari/Chrome scroll causes viewport height to change continuously as address bar hides/shows.
+      // We strictly ignore vertical height shifts and only trigger redraw if WIDTH changes (orientation change or desktop resize).
+      let lastWidth = window.innerWidth;
+      let resizeDebounce = null;
+      window.addEventListener('resize', () => {
+        const currentWidth = window.innerWidth;
+        if (Math.abs(currentWidth - lastWidth) > 8) {
+          lastWidth = currentWidth;
+          clearTimeout(resizeDebounce);
+          resizeDebounce = setTimeout(() => {
+            requestAnimationFrame(() => drawMarketChart());
+          }, 150);
+        }
+      }, { passive: true });
     });
   </script>
 </body>
