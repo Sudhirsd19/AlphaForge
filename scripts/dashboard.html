@@ -1638,12 +1638,13 @@
           <!-- Custom Price Filter -->
           <div class="fund-price-inputs">
             <span style="font-size: 11px; color: var(--text-dim); font-weight: 600;">Custom Range:</span>
-            <input type="number" id="fund-min-input" class="fund-price-input" placeholder="Min ₹" min="0" step="50">
+            <input type="number" id="fund-min-input" class="fund-price-input" placeholder="Min ₹" min="0" step="50" onkeydown="if(event.key==='Enter') applyCustomPriceFilter()">
             <span style="color: var(--text-dim); font-size: 11px;">to</span>
-            <input type="number" id="fund-max-input" class="fund-price-input" placeholder="Max ₹" min="0" step="50">
+            <input type="number" id="fund-max-input" class="fund-price-input" placeholder="Max ₹" min="0" step="50" onkeydown="if(event.key==='Enter') applyCustomPriceFilter()">
             <button class="fund-btn-apply" onclick="applyCustomPriceFilter()">Apply</button>
           </div>
         </div>
+
 
         <!-- Row 2: Sector Dropdown, Text Search & Live Counter -->
         <div class="fund-filter-row-bottom">

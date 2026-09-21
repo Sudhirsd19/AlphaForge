@@ -44,8 +44,10 @@ def calculate_fundamental_scores(
         p_score += 9
     elif roe >= 10.0:
         p_score += 6
-    else:
+    elif roe >= 0.0:
         p_score += 3
+    else:
+        p_score += 0
 
     if roce >= 25.0:
         p_score += 15
@@ -55,13 +57,18 @@ def calculate_fundamental_scores(
         p_score += 9
     elif roce >= 10.0:
         p_score += 6
-    else:
+    elif roce >= 0.0:
         p_score += 3
+    else:
+        p_score += 0
 
     # 2. Solvency & Balance Sheet (Max 25)
     s_score = 0
     is_financial = "bank" in sector.lower() or "financ" in sector.lower()
-    if is_financial:
+    if not is_financial and debt_to_equity < 0.0:
+        # Negative equity/net worth indicates severe solvency distress
+        s_score = 0
+    elif is_financial:
         # For banks/NBFCs, evaluate leverage prudently based on Capital Adequacy & NPA standards
         if debt_to_equity <= 1.0:
             s_score = 25
@@ -101,15 +108,16 @@ def calculate_fundamental_scores(
         # Negative / zero P/E represents loss-making operations
         v_score += 0
 
-
     if dividend_yield >= 3.0:
         v_score += 10
     elif dividend_yield >= 1.5:
         v_score += 7
     elif dividend_yield >= 0.8:
         v_score += 5
-    else:
+    elif dividend_yield >= 0.0:
         v_score += 3
+    else:
+        v_score += 0
 
     # 4. Growth Consistency (Max 20)
     g_score = 0
@@ -119,8 +127,10 @@ def calculate_fundamental_scores(
         g_score += 8
     elif profit_growth_3y >= 7.0:
         g_score += 6
-    else:
+    elif profit_growth_3y >= 0.0:
         g_score += 3
+    else:
+        g_score += 0
 
     if sales_growth_3y >= 18.0:
         g_score += 10
@@ -128,8 +138,11 @@ def calculate_fundamental_scores(
         g_score += 8
     elif sales_growth_3y >= 6.0:
         g_score += 6
-    else:
+    elif sales_growth_3y >= 0.0:
         g_score += 3
+    else:
+        g_score += 0
+
 
     total_score = p_score + s_score + v_score + g_score
     total_score = max(0, min(100, total_score))
@@ -2517,12 +2530,13 @@ def get_top_stocks(
     # Compute Leaderboard Summary for this specific filtered subset
     top_ranked: StockFundamental | None = ranked_stocks[0] if ranked_stocks else None
 
-    # Best Value: Lowest positive P/E with healthy ROE >= 14%
+    # Best Value: Lowest positive P/E with healthy ROE >= 14% (with fallback to lowest positive P/E in active slice)
     value_candidates = [s for s in ranked_stocks if s.roe >= 14.0 and s.pe_ratio > 0]
+    if not value_candidates:
+        value_candidates = [s for s in ranked_stocks if s.pe_ratio > 0]
     best_value: StockFundamental | None = (
         min(value_candidates, key=lambda x: x.pe_ratio) if value_candidates else None
     )
-
 
     # Safest Debt Free: Top ranked with 0.00 debt to equity
     debt_free_candidates = [s for s in ranked_stocks if s.debt_to_equity == 0.0]
@@ -2560,11 +2574,14 @@ def get_top_stocks(
     )
 
 
-
 def get_stock_by_symbol(symbol: str) -> StockFundamental | None:
-    """Lookup a single stock by its ticker symbol."""
-    sym = symbol.strip().upper()
+    """Lookup a single stock by its ticker symbol with prefix/suffix normalization."""
+    raw = symbol.strip().upper()
+    sym = raw.replace(".NS", "").replace(".BO", "")
+    if ":" in sym:
+        sym = sym.split(":")[-1]
     for s in COMPILED_UNIVERSE:
         if s.symbol.upper() == sym:
             return s
     return None
+
