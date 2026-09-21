@@ -398,6 +398,332 @@
       .chart-container.primary-chart { height: 290px; }
       .kv-grid { grid-template-columns: repeat(2, 1fr); }
     }
+
+    /* =====================================================================
+       FUNDAMENTALS TAB & DEEP-DIVE MODAL STYLING
+       ===================================================================== */
+    .fund-filter-toolbar {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .fund-filter-row-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .fund-presets-cluster {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .fund-chip {
+      background: #0b1426;
+      border: 1px solid var(--card-border-light);
+      color: var(--text-muted);
+      border-radius: 20px;
+      padding: 5px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .fund-chip:hover {
+      background: #15223c;
+      color: #fff;
+      border-color: #38bdf8;
+    }
+    .fund-chip.active {
+      background: rgba(6, 182, 212, 0.18);
+      border-color: var(--cyan);
+      color: var(--cyan);
+      box-shadow: 0 0 10px rgba(6, 182, 212, 0.25);
+    }
+    .fund-price-inputs {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .fund-price-input {
+      background: #081022;
+      border: 1px solid var(--card-border-light);
+      color: #fff;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      width: 105px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .fund-price-input:focus {
+      border-color: var(--cyan);
+    }
+    .fund-btn-apply {
+      background: linear-gradient(135deg, #0284c7, #06b6d4);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 5px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      transition: opacity 0.15s;
+    }
+    .fund-btn-apply:hover { opacity: 0.9; }
+
+    .fund-filter-row-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(36, 53, 86, 0.4);
+    }
+    .fund-search-input {
+      background: #081022;
+      border: 1px solid var(--card-border-light);
+      color: #fff;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      min-width: 240px;
+      outline: none;
+    }
+    .fund-search-input:focus { border-color: var(--cyan); }
+    .fund-sector-select {
+      background: #081022;
+      border: 1px solid var(--card-border-light);
+      color: #e2e8f0;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    /* Leaderboard Cards Grid */
+    .fund-lb-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    @media (max-width: 1024px) {
+      .fund-lb-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 600px) {
+      .fund-lb-grid { grid-template-columns: 1fr; }
+    }
+    .fund-lb-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      position: relative;
+      cursor: pointer;
+      transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+    .fund-lb-card:hover {
+      transform: translateY(-2px);
+      border-color: #38bdf8;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+    .fund-lb-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 6px;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .fund-lb-badge.rank1 { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .fund-lb-badge.value { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .fund-lb-badge.safe { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
+    .fund-lb-badge.growth { background: rgba(167, 139, 250, 0.2); color: #c084fc; border: 1px solid rgba(167, 139, 250, 0.4); }
+
+    .fund-lb-title { font-size: 15px; font-weight: 800; color: #fff; line-height: 1.2; margin-bottom: 2px; }
+    .fund-lb-sub { font-size: 10px; color: var(--text-dim); margin-bottom: 8px; }
+    .fund-lb-metrics { display: flex; justify-content: space-between; align-items: baseline; }
+    .fund-lb-val { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; color: var(--cyan); }
+    .fund-lb-score-pill {
+      background: #022c22;
+      border: 1px solid #059669;
+      color: #34d399;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Table Styles */
+    .fund-table-wrapper {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      margin-bottom: 16px;
+    }
+    .fund-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      text-align: left;
+    }
+    .fund-table th {
+      background: #081022;
+      padding: 10px 12px;
+      color: var(--text-dim);
+      font-weight: 700;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      border-bottom: 1px solid var(--card-border);
+      white-space: nowrap;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    .fund-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(27, 40, 66, 0.6);
+      white-space: nowrap;
+      font-feature-settings: "tnum";
+    }
+    .fund-table tr:hover {
+      background: rgba(14, 28, 56, 0.6);
+      cursor: pointer;
+    }
+    .fund-rank-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      font-weight: 800;
+      font-size: 11px;
+    }
+    .fund-rank-badge.top1 { background: #d97706; color: #fff; box-shadow: 0 0 8px rgba(217, 119, 6, 0.4); }
+    .fund-rank-badge.top2 { background: #64748b; color: #fff; }
+    .fund-rank-badge.top3 { background: #b45309; color: #fff; }
+    .fund-rank-badge.normal { background: #131d33; color: var(--text-muted); border: 1px solid var(--card-border-light); }
+
+    .fund-verdict-pill {
+      font-size: 9px;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .fund-verdict-pill.strong-buy { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.5); }
+    .fund-verdict-pill.buy { background: rgba(6, 182, 212, 0.2); color: #38bdf8; border: 1px solid rgba(6, 182, 212, 0.5); }
+    .fund-verdict-pill.accumulate { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); }
+    .fund-verdict-pill.fair-value { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+
+    /* DEEP-DIVE MODAL */
+    .fund-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(3, 7, 18, 0.85);
+      backdrop-filter: blur(5px);
+      z-index: 10000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      animation: fadeIn 0.18s ease-out;
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .fund-modal-content {
+      background: #0d1527;
+      border: 1px solid #243556;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 860px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8);
+      display: flex;
+      flex-direction: column;
+    }
+    .fund-modal-header {
+      padding: 16px 20px;
+      background: #091020;
+      border-bottom: 1px solid #1b2842;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .fund-modal-close-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      font-size: 22px;
+      cursor: pointer;
+      line-height: 1;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: color 0.15s;
+    }
+    .fund-modal-close-btn:hover { color: #fff; background: rgba(255,255,255,0.08); }
+    .fund-modal-body {
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .fund-pillar-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    @media (max-width: 650px) {
+      .fund-pillar-grid { grid-template-columns: 1fr; }
+    }
+    .fund-pillar-box {
+      background: #081022;
+      border: 1px solid #17243c;
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .fund-meter-track {
+      height: 6px;
+      background: #142036;
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 8px 0 10px 0;
+    }
+    .fund-meter-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #0284c7, #10b981);
+      border-radius: 3px;
+      transition: width 0.4s ease;
+    }
   </style>
 </head>
 <body>
@@ -498,6 +824,7 @@
         <button class="nav-btn" onclick="switchTab('observability')">System Logs</button>
         <button class="nav-btn" onclick="switchTab('backtest')">Backtest</button>
         <button class="nav-btn" onclick="switchTab('botlogs')">Bot Logs</button>
+        <button class="nav-btn" onclick="switchTab('fundamentals')">Fundamentals</button>
       </div>
     </div>
 
@@ -1219,6 +1546,117 @@
           </div>
         </div>
       </div>
+    <!-- ==================== TAB 12: FUNDAMENTALS ==================== -->
+    <div id="tab-fundamentals" class="tab-view">
+
+      <!-- Leaderboard Highlights (Top 4 Cards) -->
+      <div class="fund-lb-grid" id="fund-leaderboard-grid">
+        <div class="fund-lb-card" id="fund-card-rank1" onclick="onLeaderboardCardClick('rank1')">
+          <div class="fund-lb-badge rank1">🥇 #1 OVERALL BEST</div>
+          <div class="fund-lb-title" id="lb-rank1-title">Loading...</div>
+          <div class="fund-lb-sub" id="lb-rank1-sector">—</div>
+          <div class="fund-lb-metrics">
+            <span class="fund-lb-val" id="lb-rank1-price">—</span>
+            <span class="fund-lb-score-pill" id="lb-rank1-score">—</span>
+          </div>
+        </div>
+        <div class="fund-lb-card" id="fund-card-value" onclick="onLeaderboardCardClick('value')">
+          <div class="fund-lb-badge value">💎 BEST VALUE</div>
+          <div class="fund-lb-title" id="lb-value-title">Loading...</div>
+          <div class="fund-lb-sub" id="lb-value-sector">—</div>
+          <div class="fund-lb-metrics">
+            <span class="fund-lb-val" id="lb-value-price">—</span>
+            <span class="fund-lb-score-pill" id="lb-value-score">—</span>
+          </div>
+        </div>
+        <div class="fund-lb-card" id="fund-card-safe" onclick="onLeaderboardCardClick('safe')">
+          <div class="fund-lb-badge safe">🛡️ SAFEST (DEBT FREE)</div>
+          <div class="fund-lb-title" id="lb-safe-title">Loading...</div>
+          <div class="fund-lb-sub" id="lb-safe-sector">—</div>
+          <div class="fund-lb-metrics">
+            <span class="fund-lb-val" id="lb-safe-price">—</span>
+            <span class="fund-lb-score-pill" id="lb-safe-score">—</span>
+          </div>
+        </div>
+        <div class="fund-lb-card" id="fund-card-growth" onclick="onLeaderboardCardClick('growth')">
+          <div class="fund-lb-badge growth">🚀 GROWTH LEADER</div>
+          <div class="fund-lb-title" id="lb-growth-title">Loading...</div>
+          <div class="fund-lb-sub" id="lb-growth-sector">—</div>
+          <div class="fund-lb-metrics">
+            <span class="fund-lb-val" id="lb-growth-price">—</span>
+            <span class="fund-lb-score-pill" id="lb-growth-score">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filter & Price Range Toolbar -->
+      <div class="fund-filter-toolbar">
+        <!-- Row 1: Price Range Presets & Custom Range Inputs -->
+        <div class="fund-filter-row-top">
+          <div class="fund-presets-cluster">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; margin-right: 4px;">Price Presets:</span>
+            <button class="fund-chip active" id="chip-preset-all" onclick="setPricePreset('all')">All Stocks</button>
+            <button class="fund-chip" id="chip-preset-under500" onclick="setPricePreset('under500')">&lt; ₹500</button>
+            <button class="fund-chip" id="chip-preset-500-1500" onclick="setPricePreset('500-1500')">₹500 – ₹1,500</button>
+            <button class="fund-chip" id="chip-preset-1500-3000" onclick="setPricePreset('1500-3000')">₹1,500 – ₹3,000</button>
+            <button class="fund-chip" id="chip-preset-over3000" onclick="setPricePreset('over3000')">&gt; ₹3,000</button>
+          </div>
+
+          <!-- Custom Price Filter -->
+          <div class="fund-price-inputs">
+            <span style="font-size: 11px; color: var(--text-dim); font-weight: 600;">Custom Range:</span>
+            <input type="number" id="fund-min-input" class="fund-price-input" placeholder="Min ₹" min="0" step="50">
+            <span style="color: var(--text-dim); font-size: 11px;">to</span>
+            <input type="number" id="fund-max-input" class="fund-price-input" placeholder="Max ₹" min="0" step="50">
+            <button class="fund-btn-apply" onclick="applyCustomPriceFilter()">Apply</button>
+          </div>
+        </div>
+
+        <!-- Row 2: Sector Dropdown, Text Search & Live Counter -->
+        <div class="fund-filter-row-bottom">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <select id="fund-sector-select" class="fund-sector-select" onchange="onFundSectorChange(this.value)">
+              <option value="ALL">All Sectors</option>
+            </select>
+            <input type="text" id="fund-search-input" class="fund-search-input" placeholder="🔍 Search by Symbol or Company (e.g. TCS, Tata)..." oninput="onFundSearchInput(this.value)">
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="status-tag tag-cyan" id="fund-active-filter-badge">RANGE: ALL</span>
+            <span class="status-tag tag-green" id="fund-count-badge">TOP 20 STOCKS</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top 20 Interactive Ranking Table -->
+      <div class="fund-table-wrapper">
+        <table class="fund-table">
+          <thead>
+            <tr>
+              <th style="width: 50px; text-align: center;">Rank</th>
+              <th>Company &amp; Symbol</th>
+              <th>Sector</th>
+              <th style="text-align: right;">CMP (₹)</th>
+              <th style="text-align: center;">Quality Score</th>
+              <th style="text-align: right;">P/E (TTM)</th>
+              <th style="text-align: right;">ROE %</th>
+              <th style="text-align: right;">ROCE %</th>
+              <th style="text-align: center;">Debt / Equity</th>
+              <th style="text-align: right;">3Y Profit %</th>
+              <th style="text-align: center;">Verdict</th>
+              <th style="text-align: center;">Details</th>
+            </tr>
+          </thead>
+          <tbody id="fund-table-body">
+            <tr>
+              <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-dim);">
+                Loading institutional fundamental rankings...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
     </div>
 
   </div>
@@ -1484,7 +1922,7 @@
       const target = document.getElementById('tab-' + tabId);
       if (target) target.classList.add('active');
       const btns = document.querySelectorAll('.nav-btn');
-      const tabMap = ['overview','market','signals','risk','shadow','execution','evidence','security','observability','backtest','botlogs'];
+      const tabMap = ['overview','market','signals','risk','shadow','execution','evidence','security','observability','backtest','botlogs','fundamentals'];
       const idx = tabMap.indexOf(tabId);
       if (idx >= 0 && btns[idx]) btns[idx].classList.add('active');
 
@@ -1492,6 +1930,9 @@
       if (tabId === 'botlogs') {
         if (cachedBotLogs && cachedBotLogs.length > 0) renderBotLogs(cachedBotLogs);
         fetchAllTelemetry();
+      }
+      if (tabId === 'fundamentals') {
+        fetchFundamentals();
       }
     }
 
@@ -2477,6 +2918,7 @@
       loadLatestBacktestReport();
       drawMarketChart();
       initBotLogsScrollListener();
+      fetchFundamentals();
       setInterval(fetchAllTelemetry, 3000);
       // Anti-Fluctuation Window Resize Handler:
       // Mobile Safari/Chrome scroll causes viewport height to change continuously as address bar hides/shows.
@@ -2494,6 +2936,544 @@
         }
       }, { passive: true });
     });
+
+    // =====================================================================
+    // TAB 12: FUNDAMENTALS & RANKING ENGINE CONTROLLER
+    // =====================================================================
+    let fundMinPrice = 0;
+    let fundMaxPrice = 1000000;
+    let fundSector = 'ALL';
+    let fundQuery = '';
+    let fundStocksData = [];
+    let fundLeaderboardData = null;
+    let fundSearchDebounce = null;
+    let fundSectorsLoaded = false;
+
+    async function fetchFundamentals() {
+      try {
+        const url = `/api/fundamentals/top20?min_price=${fundMinPrice}&max_price=${fundMaxPrice}&sector=${encodeURIComponent(fundSector)}&q=${encodeURIComponent(fundQuery)}`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        fundStocksData = data.stocks || [];
+        fundLeaderboardData = data.leaderboard || null;
+
+        // Populate sector dropdown once
+        if (!fundSectorsLoaded && data.sectors_available) {
+          const sel = document.getElementById('fund-sector-select');
+          if (sel) {
+            data.sectors_available.forEach(s => {
+              const opt = document.createElement('option');
+              opt.value = s;
+              opt.textContent = s;
+              sel.appendChild(opt);
+            });
+            fundSectorsLoaded = true;
+          }
+        }
+
+        // Update active filter badge
+        const filterBadge = document.getElementById('fund-active-filter-badge');
+        if (filterBadge) {
+          if (fundMinPrice === 0 && fundMaxPrice >= 1000000) {
+            filterBadge.textContent = 'RANGE: ALL (₹0+)';
+          } else if (fundMinPrice === 0) {
+            filterBadge.textContent = `RANGE: < ₹${fundMaxPrice.toLocaleString('en-IN')}`;
+          } else if (fundMaxPrice >= 1000000) {
+            filterBadge.textContent = `RANGE: > ₹${fundMinPrice.toLocaleString('en-IN')}`;
+          } else {
+            filterBadge.textContent = `RANGE: ₹${fundMinPrice.toLocaleString('en-IN')} – ₹${fundMaxPrice.toLocaleString('en-IN')}`;
+          }
+        }
+        const countBadge = document.getElementById('fund-count-badge');
+        if (countBadge) {
+          countBadge.textContent = `TOP ${fundStocksData.length} (OF ${data.filtered_count || fundStocksData.length})`;
+        }
+
+        renderFundamentalsLeaderboard(fundLeaderboardData);
+        renderFundamentalsTable(fundStocksData);
+      } catch (err) {
+        console.error('Failed to fetch fundamentals:', err);
+      }
+    }
+
+    function setPricePreset(preset) {
+      document.querySelectorAll('.fund-chip').forEach(c => c.classList.remove('active'));
+      const chip = document.getElementById('chip-preset-' + preset);
+      if (chip) chip.classList.add('active');
+
+      const minIn = document.getElementById('fund-min-input');
+      const maxIn = document.getElementById('fund-max-input');
+
+      if (preset === 'all') {
+        fundMinPrice = 0;
+        fundMaxPrice = 1000000;
+        if (minIn) minIn.value = '';
+        if (maxIn) maxIn.value = '';
+      } else if (preset === 'under500') {
+        fundMinPrice = 0;
+        fundMaxPrice = 500;
+        if (minIn) minIn.value = '0';
+        if (maxIn) maxIn.value = '500';
+      } else if (preset === '500-1500') {
+        fundMinPrice = 500;
+        fundMaxPrice = 1500;
+        if (minIn) minIn.value = '500';
+        if (maxIn) maxIn.value = '1500';
+      } else if (preset === '1500-3000') {
+        fundMinPrice = 1500;
+        fundMaxPrice = 3000;
+        if (minIn) minIn.value = '1500';
+        if (maxIn) maxIn.value = '3000';
+      } else if (preset === 'over3000') {
+        fundMinPrice = 3000;
+        fundMaxPrice = 1000000;
+        if (minIn) minIn.value = '3000';
+        if (maxIn) maxIn.value = '';
+      }
+      fetchFundamentals();
+    }
+
+    function applyCustomPriceFilter() {
+      const minIn = document.getElementById('fund-min-input');
+      const maxIn = document.getElementById('fund-max-input');
+      const minVal = parseFloat(minIn?.value) || 0;
+      const maxVal = parseFloat(maxIn?.value) || 1000000;
+
+      if (minVal > maxVal && maxVal > 0) {
+        alert('Min price cannot be greater than Max price.');
+        return;
+      }
+
+      document.querySelectorAll('.fund-chip').forEach(c => c.classList.remove('active'));
+      fundMinPrice = Math.max(0, minVal);
+      fundMaxPrice = maxVal > 0 ? maxVal : 1000000;
+      fetchFundamentals();
+    }
+
+    function onFundSectorChange(val) {
+      fundSector = val;
+      fetchFundamentals();
+    }
+
+    function onFundSearchInput(val) {
+      clearTimeout(fundSearchDebounce);
+      fundSearchDebounce = setTimeout(() => {
+        fundQuery = val;
+        fetchFundamentals();
+      }, 200);
+    }
+
+    function renderFundamentalsLeaderboard(lb) {
+      if (!lb) return;
+      // 1. Rank 1
+      if (lb.top_ranked) {
+        document.getElementById('lb-rank1-title').textContent = lb.top_ranked.symbol;
+        document.getElementById('lb-rank1-sector').textContent = lb.top_ranked.sector;
+        document.getElementById('lb-rank1-price').textContent = '₹' + lb.top_ranked.cmp.toLocaleString('en-IN', {minimumFractionDigits: 2});
+        document.getElementById('lb-rank1-score').textContent = lb.top_ranked.score + '/100';
+      } else {
+        document.getElementById('lb-rank1-title').textContent = '—';
+        document.getElementById('lb-rank1-sector').textContent = 'None in range';
+        document.getElementById('lb-rank1-price').textContent = '—';
+        document.getElementById('lb-rank1-score').textContent = '—';
+      }
+
+      // 2. Best Value
+      if (lb.best_value) {
+        document.getElementById('lb-value-title').textContent = lb.best_value.symbol;
+        document.getElementById('lb-value-sector').textContent = `P/E ${lb.best_value.pe_ratio} • ROE ${lb.best_value.roe}%`;
+        document.getElementById('lb-value-price').textContent = '₹' + lb.best_value.cmp.toLocaleString('en-IN', {minimumFractionDigits: 2});
+        document.getElementById('lb-value-score').textContent = lb.best_value.score + '/100';
+      } else {
+        document.getElementById('lb-value-title').textContent = '—';
+        document.getElementById('lb-value-sector').textContent = 'None in range';
+        document.getElementById('lb-value-price').textContent = '—';
+        document.getElementById('lb-value-score').textContent = '—';
+      }
+
+      // 3. Safest Debt Free
+      if (lb.safest_debt_free) {
+        document.getElementById('lb-safe-title').textContent = lb.safest_debt_free.symbol;
+        document.getElementById('lb-safe-sector').textContent = `D/E: ${lb.safest_debt_free.debt_to_equity.toFixed(2)} (${lb.safest_debt_free.solvency_status})`;
+        document.getElementById('lb-safe-price').textContent = '₹' + lb.safest_debt_free.cmp.toLocaleString('en-IN', {minimumFractionDigits: 2});
+        document.getElementById('lb-safe-score').textContent = lb.safest_debt_free.score + '/100';
+      } else {
+        document.getElementById('lb-safe-title').textContent = '—';
+        document.getElementById('lb-safe-sector').textContent = 'None in range';
+        document.getElementById('lb-safe-price').textContent = '—';
+        document.getElementById('lb-safe-score').textContent = '—';
+      }
+
+      // 4. Growth Leader
+      if (lb.growth_leader) {
+        document.getElementById('lb-growth-title').textContent = lb.growth_leader.symbol;
+        document.getElementById('lb-growth-sector').textContent = `3Y Profit CAGR +${lb.growth_leader.profit_growth_3y}%`;
+        document.getElementById('lb-growth-price').textContent = '₹' + lb.growth_leader.cmp.toLocaleString('en-IN', {minimumFractionDigits: 2});
+        document.getElementById('lb-growth-score').textContent = lb.growth_leader.score + '/100';
+      } else {
+        document.getElementById('lb-growth-title').textContent = '—';
+        document.getElementById('lb-growth-sector').textContent = 'None in range';
+        document.getElementById('lb-growth-price').textContent = '—';
+        document.getElementById('lb-growth-score').textContent = '—';
+      }
+    }
+
+    function onLeaderboardCardClick(cardType) {
+      if (!fundLeaderboardData) return;
+      let stock = null;
+      if (cardType === 'rank1') stock = fundLeaderboardData.top_ranked;
+      else if (cardType === 'value') stock = fundLeaderboardData.best_value;
+      else if (cardType === 'safe') stock = fundLeaderboardData.safest_debt_free;
+      else if (cardType === 'growth') stock = fundLeaderboardData.growth_leader;
+
+      if (stock && stock.symbol) {
+        openStockDetailModal(stock.symbol);
+      }
+    }
+
+    function renderFundamentalsTable(stocks) {
+      const tbody = document.getElementById('fund-table-body');
+      if (!tbody) return;
+
+      if (!stocks || stocks.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="12" style="text-align: center; padding: 40px; color: var(--text-dim);">
+              No stocks found matching the selected price and sector criteria.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      let html = '';
+      stocks.forEach((s) => {
+        let rankBadgeClass = 'normal';
+        let rankDisplay = s.rank;
+        if (s.rank === 1) { rankBadgeClass = 'top1'; rankDisplay = '🥇'; }
+        else if (s.rank === 2) { rankBadgeClass = 'top2'; rankDisplay = '🥈'; }
+        else if (s.rank === 3) { rankBadgeClass = 'top3'; rankDisplay = '🥉'; }
+
+        // Verdict pill
+        let verdictClass = 'fair-value';
+        if (s.verdict === 'STRONG BUY') verdictClass = 'strong-buy';
+        else if (s.verdict === 'BUY') verdictClass = 'buy';
+        else if (s.verdict === 'ACCUMULATE') verdictClass = 'accumulate';
+
+        // Debt to equity styling
+        let deStyle = 'color: #34d399; font-weight: 700;';
+        let deText = s.debt_to_equity.toFixed(2);
+        if (s.debt_to_equity === 0.0) {
+          deText = '0.00 <span style="font-size: 9px; color: #34d399; background: rgba(16,185,129,0.15); padding: 1px 4px; border-radius: 3px;">CLEAN</span>';
+        } else if (s.debt_to_equity > 1.0) {
+          deStyle = 'color: #f59e0b;';
+        }
+
+        // PE color
+        let peColor = '#e2e8f0';
+        if (s.pe_ratio < 20) peColor = '#34d399';
+        else if (s.pe_ratio > 60) peColor = '#fbbf24';
+
+        // ROE color
+        let roeColor = s.roe >= 25 ? '#34d399' : (s.roe >= 15 ? '#38bdf8' : '#e2e8f0');
+
+        html += `
+          <tr onclick="openStockDetailModal('${s.symbol}')" title="Click to view full fundamental card for ${s.name}">
+            <td style="text-align: center;">
+              <span class="fund-rank-badge ${rankBadgeClass}">${rankDisplay}</span>
+            </td>
+            <td>
+              <div style="font-weight: 800; font-size: 13px; color: #38bdf8; letter-spacing: 0.3px;">${s.symbol}</div>
+              <div style="font-size: 10px; color: var(--text-dim); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${s.name}</div>
+            </td>
+            <td>
+              <span style="background: #0f172a; border: 1px solid #1e293b; padding: 2px 7px; border-radius: 4px; font-size: 10px; color: var(--text-muted);">${s.sector}</span>
+            </td>
+            <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 13px; color: #fff;">
+              ₹${s.cmp.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </td>
+            <td style="text-align: center;">
+              <span class="fund-lb-score-pill" style="font-size: 11px; padding: 3px 8px;">${s.score}/100</span>
+            </td>
+            <td style="text-align: right; font-family: 'JetBrains Mono', monospace; color: ${peColor};">
+              ${s.pe_ratio.toFixed(1)}
+            </td>
+            <td style="text-align: right; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: ${roeColor};">
+              ${s.roe.toFixed(1)}%
+            </td>
+            <td style="text-align: right; font-family: 'JetBrains Mono', monospace; color: var(--cyan);">
+              ${s.roce.toFixed(1)}%
+            </td>
+            <td style="text-align: center; font-family: 'JetBrains Mono', monospace; ${deStyle}">
+              ${deText}
+            </td>
+            <td style="text-align: right; font-family: 'JetBrains Mono', monospace; color: #c084fc; font-weight: 700;">
+              +${s.profit_growth_3y.toFixed(1)}%
+            </td>
+            <td style="text-align: center;">
+              <span class="fund-verdict-pill ${verdictClass}">${s.verdict}</span>
+            </td>
+            <td style="text-align: center;">
+              <button class="btn-action secondary" style="padding: 3px 8px; font-size: 10px; color: #38bdf8;" onclick="event.stopPropagation(); openStockDetailModal('${s.symbol}')">
+                Inspect ↗
+              </button>
+            </td>
+          </tr>
+        `;
+      });
+      tbody.innerHTML = html;
+    }
+
+    function openStockDetailModal(symbol) {
+      const stock = fundStocksData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
+      if (!stock) return;
+
+      // Header vitals
+      document.getElementById('modal-company-name').textContent = stock.name;
+      document.getElementById('modal-symbol-badge').textContent = stock.symbol;
+      document.getElementById('modal-sector-badge').textContent = stock.sector;
+      document.getElementById('modal-moat-badge').textContent = stock.moat_rating || 'WIDE MOAT';
+      document.getElementById('modal-cmp-val').textContent = '₹' + stock.cmp.toLocaleString('en-IN', {minimumFractionDigits: 2});
+      
+      const mcapText = stock.market_cap_cr >= 100000 
+        ? `₹${(stock.market_cap_cr / 100000).toFixed(2)} Lakh Cr` 
+        : `₹${stock.market_cap_cr.toLocaleString('en-IN')} Cr`;
+      document.getElementById('modal-mcap-val').textContent = mcapText;
+      document.getElementById('modal-52w-range').textContent = `₹${stock.low_52w.toLocaleString('en-IN')} – ₹${stock.high_52w.toLocaleString('en-IN')}`;
+
+      // Score banner
+      document.getElementById('modal-score-big').textContent = stock.score;
+      document.getElementById('modal-verdict-text').textContent = stock.verdict;
+      document.getElementById('modal-health-text').textContent = stock.health_rating;
+      document.getElementById('modal-solvency-status').textContent = stock.solvency_status;
+
+      // 4 Pillars Breakdown
+      document.getElementById('modal-pillar-profit-score').textContent = `${stock.profitability_score} / 30 pts`;
+      document.getElementById('modal-meter-profit').style.width = `${(stock.profitability_score / 30) * 100}%`;
+      document.getElementById('modal-roe').textContent = `${stock.roe.toFixed(1)}%`;
+      document.getElementById('modal-roce').textContent = `${stock.roce.toFixed(1)}%`;
+      document.getElementById('modal-margin').textContent = `${stock.operating_margin.toFixed(1)}%`;
+
+      document.getElementById('modal-pillar-solvency-score').textContent = `${stock.solvency_score} / 25 pts`;
+      document.getElementById('modal-meter-solvency').style.width = `${(stock.solvency_score / 25) * 100}%`;
+      document.getElementById('modal-de').textContent = stock.debt_to_equity.toFixed(2);
+      document.getElementById('modal-interest-cov').textContent = `${stock.interest_coverage.toFixed(0)}x`;
+      document.getElementById('modal-current-ratio').textContent = stock.current_ratio.toFixed(1);
+
+      document.getElementById('modal-pillar-val-score').textContent = `${stock.valuation_score} / 25 pts`;
+      document.getElementById('modal-meter-val').style.width = `${(stock.valuation_score / 25) * 100}%`;
+      document.getElementById('modal-pe').textContent = stock.pe_ratio.toFixed(1);
+      document.getElementById('modal-sec-pe').textContent = stock.industry_pe.toFixed(1);
+      document.getElementById('modal-div-yield').textContent = `${stock.dividend_yield.toFixed(1)}%`;
+
+      document.getElementById('modal-pillar-growth-score').textContent = `${stock.growth_score} / 20 pts`;
+      document.getElementById('modal-meter-growth').style.width = `${(stock.growth_score / 20) * 100}%`;
+      document.getElementById('modal-sales-growth').textContent = `+${stock.sales_growth_3y.toFixed(1)}%`;
+      document.getElementById('modal-profit-growth').textContent = `+${stock.profit_growth_3y.toFixed(1)}%`;
+
+      // Shareholding
+      document.getElementById('modal-promoter').textContent = `${stock.promoter_holding.toFixed(2)}%`;
+      document.getElementById('modal-pledge').textContent = stock.promoter_pledge > 0 ? `${stock.promoter_pledge.toFixed(1)}% (Pledged)` : '0.00% (Clean)';
+      document.getElementById('modal-pledge').style.color = stock.promoter_pledge > 0 ? '#ef4444' : '#34d399';
+      document.getElementById('modal-inst').textContent = `${stock.institutional_holding.toFixed(2)}%`;
+      document.getElementById('modal-public').textContent = `${stock.public_holding.toFixed(2)}%`;
+
+      // Summary & Moat
+      document.getElementById('modal-biz-summary').textContent = stock.business_summary;
+
+      // Strengths
+      const strengthsUl = document.getElementById('modal-strengths-list');
+      strengthsUl.innerHTML = (stock.strengths || []).map(s => `<li>${s}</li>`).join('');
+
+      // Considerations
+      const considerUl = document.getElementById('modal-considerations-list');
+      considerUl.innerHTML = (stock.considerations || []).map(c => `<li>${c}</li>`).join('');
+
+      // Open modal
+      const modal = document.getElementById('fund-detail-modal');
+      if (modal) {
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+      }
+    }
+
+    function closeStockDetailModal() {
+      const modal = document.getElementById('fund-detail-modal');
+      if (modal) {
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+      }
+    }
+
+    function onFundModalBackdropClick(e) {
+      if (e.target && e.target.id === 'fund-detail-modal') {
+        closeStockDetailModal();
+      }
+    }
+
+    // Keyboard shortcut to dismiss modal
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeStockDetailModal();
+    });
   </script>
+
+  <!-- ==================== FUNDAMENTAL DEEP-DIVE MODAL ==================== -->
+  <div id="fund-detail-modal" class="fund-modal-overlay" onclick="onFundModalBackdropClick(event)">
+    <div class="fund-modal-content" onclick="event.stopPropagation()">
+      <div class="fund-modal-header">
+        <div>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;">
+            <h2 id="modal-company-name" style="font-size: 18px; font-weight: 800; color: #fff;">Company Name</h2>
+            <span id="modal-symbol-badge" class="status-tag tag-cyan" style="font-size: 11px;">TCS</span>
+            <span id="modal-sector-badge" class="status-tag" style="background: #1e293b; color: #cbd5e1; font-size: 10px;">IT &amp; Software</span>
+            <span id="modal-moat-badge" class="status-tag tag-green" style="font-size: 10px;">WIDE MOAT</span>
+          </div>
+          <div style="font-size: 12px; color: var(--text-muted);">
+            CMP: <strong id="modal-cmp-val" style="color: #38bdf8; font-family: 'JetBrains Mono', monospace;">₹4,250.00</strong>
+            &nbsp;•&nbsp; MCap: <span id="modal-mcap-val">₹15.38 Lakh Cr</span>
+            &nbsp;•&nbsp; 52W Range: <span id="modal-52w-range" style="font-family: 'JetBrains Mono', monospace; color: var(--text-dim);">₹3,313 – ₹4,585</span>
+          </div>
+        </div>
+        <button class="fund-modal-close-btn" onclick="closeStockDetailModal()" title="Close (Esc)">&times;</button>
+      </div>
+
+      <div class="fund-modal-body">
+        <!-- Score & Verdict Banner -->
+        <div style="background: #091224; border: 1px solid #1c2b48; border-radius: 8px; padding: 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+          <div>
+            <div style="font-size: 10px; font-weight: 700; color: var(--text-dim); text-transform: uppercase;">Composite Fundamental Score</div>
+            <div style="display: flex; align-items: baseline; gap: 8px;">
+              <span id="modal-score-big" style="font-size: 28px; font-weight: 900; color: #34d399; font-family: 'JetBrains Mono', monospace;">95</span>
+              <span style="font-size: 14px; color: var(--text-dim); font-weight: 700;">/ 100</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <div style="background: #0b1830; border: 1px solid #1a2c4e; border-radius: 6px; padding: 6px 12px; text-align: center;">
+              <div style="font-size: 9px; color: var(--text-dim); text-transform: uppercase;">Verdict</div>
+              <div id="modal-verdict-text" style="font-size: 12px; font-weight: 800; color: #34d399;">STRONG BUY</div>
+            </div>
+            <div style="background: #0b1830; border: 1px solid #1a2c4e; border-radius: 6px; padding: 6px 12px; text-align: center;">
+              <div style="font-size: 9px; color: var(--text-dim); text-transform: uppercase;">Balance Sheet</div>
+              <div id="modal-health-text" style="font-size: 12px; font-weight: 800; color: #38bdf8;">EXCELLENT</div>
+            </div>
+            <div style="background: #0b1830; border: 1px solid #1a2c4e; border-radius: 6px; padding: 6px 12px; text-align: center;">
+              <div style="font-size: 9px; color: var(--text-dim); text-transform: uppercase;">Solvency</div>
+              <div id="modal-solvency-status" style="font-size: 12px; font-weight: 800; color: #a78bfa;">DEBT FREE</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4 Pillars Breakdown -->
+        <div class="fund-pillar-grid">
+          <!-- Pillar 1: Profitability -->
+          <div class="fund-pillar-box">
+            <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: #fff;">
+              <span>📈 1. Profitability &amp; Returns</span>
+              <span id="modal-pillar-profit-score" style="color: #34d399; font-family: 'JetBrains Mono', monospace;">30 / 30 pts</span>
+            </div>
+            <div class="fund-meter-track">
+              <div id="modal-meter-profit" class="fund-meter-fill" style="width: 100%;"></div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; font-size: 11px;">
+              <div><span style="color: var(--text-dim);">ROE:</span> <strong id="modal-roe" style="color: #fff; font-family: 'JetBrains Mono', monospace;">51.2%</strong></div>
+              <div><span style="color: var(--text-dim);">ROCE:</span> <strong id="modal-roce" style="color: #fff; font-family: 'JetBrains Mono', monospace;">64.8%</strong></div>
+              <div><span style="color: var(--text-dim);">Op Margin:</span> <strong id="modal-margin" style="color: #fff; font-family: 'JetBrains Mono', monospace;">26.2%</strong></div>
+            </div>
+          </div>
+
+          <!-- Pillar 2: Solvency -->
+          <div class="fund-pillar-box">
+            <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: #fff;">
+              <span>🛡️ 2. Solvency &amp; Debt Safety</span>
+              <span id="modal-pillar-solvency-score" style="color: #38bdf8; font-family: 'JetBrains Mono', monospace;">25 / 25 pts</span>
+            </div>
+            <div class="fund-meter-track">
+              <div id="modal-meter-solvency" class="fund-meter-fill" style="width: 100%;"></div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; font-size: 11px;">
+              <div><span style="color: var(--text-dim);">Debt/Equity:</span> <strong id="modal-de" style="color: #fff; font-family: 'JetBrains Mono', monospace;">0.00</strong></div>
+              <div><span style="color: var(--text-dim);">Interest Cov:</span> <strong id="modal-interest-cov" style="color: #fff; font-family: 'JetBrains Mono', monospace;">95x</strong></div>
+              <div><span style="color: var(--text-dim);">Current Ratio:</span> <strong id="modal-current-ratio" style="color: #fff; font-family: 'JetBrains Mono', monospace;">2.6</strong></div>
+            </div>
+          </div>
+
+          <!-- Pillar 3: Valuation -->
+          <div class="fund-pillar-box">
+            <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: #fff;">
+              <span>💎 3. Valuation &amp; Yield</span>
+              <span id="modal-pillar-val-score" style="color: #fbbf24; font-family: 'JetBrains Mono', monospace;">21 / 25 pts</span>
+            </div>
+            <div class="fund-meter-track">
+              <div id="modal-meter-val" class="fund-meter-fill" style="width: 84%; background: linear-gradient(90deg, #f59e0b, #fbbf24);"></div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; font-size: 11px;">
+              <div><span style="color: var(--text-dim);">P/E (TTM):</span> <strong id="modal-pe" style="color: #fff; font-family: 'JetBrains Mono', monospace;">31.5</strong></div>
+              <div><span style="color: var(--text-dim);">Sector P/E:</span> <strong id="modal-sec-pe" style="color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">29.5</strong></div>
+              <div><span style="color: var(--text-dim);">Div Yield:</span> <strong id="modal-div-yield" style="color: #34d399; font-family: 'JetBrains Mono', monospace;">1.4%</strong></div>
+            </div>
+          </div>
+
+          <!-- Pillar 4: Growth -->
+          <div class="fund-pillar-box">
+            <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: #fff;">
+              <span>🚀 4. Growth Track Record</span>
+              <span id="modal-pillar-growth-score" style="color: #c084fc; font-family: 'JetBrains Mono', monospace;">19 / 20 pts</span>
+            </div>
+            <div class="fund-meter-track">
+              <div id="modal-meter-growth" class="fund-meter-fill" style="width: 95%; background: linear-gradient(90deg, #8b5cf6, #c084fc);"></div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; font-size: 11px;">
+              <div><span style="color: var(--text-dim);">3Y Sales CAGR:</span> <strong id="modal-sales-growth" style="color: #fff; font-family: 'JetBrains Mono', monospace;">+12.8%</strong></div>
+              <div><span style="color: var(--text-dim);">3Y Profit CAGR:</span> <strong id="modal-profit-growth" style="color: #fff; font-family: 'JetBrains Mono', monospace;">+11.5%</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Shareholding Pattern -->
+        <div style="background: #081022; border: 1px solid #17243c; border-radius: 8px; padding: 12px 14px;">
+          <div style="font-size: 11px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px;">🏛️ Ownership &amp; Shareholding Pattern</div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 11px;">
+            <div style="background: #0d172e; padding: 8px; border-radius: 6px;">
+              <div style="color: var(--text-dim); font-size: 10px;">Promoter Holding</div>
+              <div id="modal-promoter" style="font-size: 13px; font-weight: 700; color: #38bdf8; font-family: 'JetBrains Mono', monospace;">71.77%</div>
+            </div>
+            <div style="background: #0d172e; padding: 8px; border-radius: 6px;">
+              <div style="color: var(--text-dim); font-size: 10px;">Promoter Pledge</div>
+              <div id="modal-pledge" style="font-size: 13px; font-weight: 700; color: #34d399; font-family: 'JetBrains Mono', monospace;">0.00% (Clean)</div>
+            </div>
+            <div style="background: #0d172e; padding: 8px; border-radius: 6px;">
+              <div style="color: var(--text-dim); font-size: 10px;">Institutions (FII+DII)</div>
+              <div id="modal-inst" style="font-size: 13px; font-weight: 700; color: #c084fc; font-family: 'JetBrains Mono', monospace;">22.80%</div>
+            </div>
+            <div style="background: #0d172e; padding: 8px; border-radius: 6px;">
+              <div style="color: var(--text-dim); font-size: 10px;">Retail / Public</div>
+              <div id="modal-public" style="font-size: 13px; font-weight: 700; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">5.43%</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Business Profile & Moat Summary -->
+        <div style="background: #081022; border: 1px solid #17243c; border-radius: 8px; padding: 12px 14px;">
+          <div style="font-size: 11px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 6px;">🏢 Business Moat &amp; Institutional Profile</div>
+          <p id="modal-biz-summary" style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">...</p>
+        </div>
+
+        <!-- Strengths vs Considerations -->
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+          <div style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 12px 14px;">
+            <div style="font-size: 11px; font-weight: 800; color: #34d399; text-transform: uppercase; margin-bottom: 6px;">✅ Key Strengths</div>
+            <ul id="modal-strengths-list" style="padding-left: 18px; font-size: 11px; color: #cbd5e1; line-height: 1.6;">
+            </ul>
+          </div>
+          <div style="background: rgba(245, 158, 11, 0.05); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 12px 14px;">
+            <div style="font-size: 11px; font-weight: 800; color: #fbbf24; text-transform: uppercase; margin-bottom: 6px;">⚠️ Key Watchouts &amp; Risks</div>
+            <ul id="modal-considerations-list" style="padding-left: 18px; font-size: 11px; color: #cbd5e1; line-height: 1.6;">
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

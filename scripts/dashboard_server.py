@@ -98,6 +98,7 @@ from alphaforge.security.config import SecurityConfig, TradingModeConfig
 from alphaforge.security.enums import KillSwitchStatus, TradingMode
 from alphaforge.security.kill_switch import KillSwitch
 from alphaforge.security.startup import SecurityStartupGate
+from alphaforge.fundamentals import get_stock_by_symbol, get_top_stocks
 from alphaforge.shadow_validation.contract_source import AuthoritativeContractSource
 from alphaforge.shadow_validation.shadow_guard import ShadowExecutionOnlyGuard
 from alphaforge.shadow_validation.upstox_adapter import (
@@ -1431,6 +1432,45 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                     self._send_json(500, {"success": False, "error": str(exc)})
                     return
             self._send_json(200, {"success": False, "message": "No backtest report found"})
+            return
+
+        if parsed.path == "/api/fundamentals/top20":
+            params = parse_qs(parsed.query)
+            try:
+                min_price = float(params.get("min_price", ["0.0"])[0])
+            except (ValueError, TypeError):
+                min_price = 0.0
+            try:
+                max_price = float(params.get("max_price", ["1000000.0"])[0])
+            except (ValueError, TypeError):
+                max_price = 1000000.0
+            sector = params.get("sector", ["ALL"])[0]
+            query = params.get("q", [""])[0]
+            try:
+                limit = int(params.get("limit", ["20"])[0])
+            except (ValueError, TypeError):
+                limit = 20
+
+            response = get_top_stocks(
+                min_price=min_price,
+                max_price=max_price,
+                sector=sector,
+                query=query,
+                limit=limit,
+            )
+            self._send_json(200, json.loads(response.model_dump_json()))
+            return
+
+        if parsed.path == "/api/fundamentals/stock":
+            params = parse_qs(parsed.query)
+            symbol = params.get("symbol", [""])[0]
+            stock = get_stock_by_symbol(symbol)
+            if stock:
+                self._send_json(200, json.loads(stock.model_dump_json()))
+            else:
+                self._send_json(
+                    404, {"error": f"Stock '{symbol}' not found in fundamentals database"}
+                )
             return
 
         if parsed.path.startswith("/api/"):
