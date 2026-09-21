@@ -87,6 +87,23 @@ def test_calculate_fundamental_scores_deterministic():
     assert health == HealthRating.EXCELLENT
 
 
+def test_negative_pe_loss_making_protection():
+    """Negative P/E (loss-making operations) must get 0 valuation score."""
+    p, s, v, g, total, verdict, health = calculate_fundamental_scores(
+        roe=10.0,
+        roce=10.0,
+        debt_to_equity=0.0,
+        pe_ratio=-15.0,  # Negative P/E (loss-making)
+        dividend_yield=0.0,
+        profit_growth_3y=5.0,
+        sales_growth_3y=5.0,
+        sector="IT & Software",
+    )
+    # v_score must only be based on dividend yield (0 pts for negative PE + 3 pts for dividend)
+    assert v == 3
+
+
+
 def test_get_top_stocks_default_limit_and_ranking():
     """Default screen must return Top 20 stocks ordered by score descending."""
     res = get_top_stocks()

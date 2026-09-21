@@ -87,16 +87,20 @@ def calculate_fundamental_scores(
 
     # 3. Valuation Attractiveness (Max 25)
     v_score = 0
-    if pe_ratio < 15.0:
+    if 0 < pe_ratio < 15.0:
         v_score += 15
-    elif pe_ratio < 25.0:
+    elif 0 < pe_ratio < 25.0:
         v_score += 12
-    elif pe_ratio < 38.0:
+    elif 0 < pe_ratio < 38.0:
         v_score += 9
-    elif pe_ratio < 60.0:
+    elif 0 < pe_ratio < 60.0:
         v_score += 6
-    else:
+    elif pe_ratio >= 60.0:
         v_score += 3
+    else:
+        # Negative / zero P/E represents loss-making operations
+        v_score += 0
+
 
     if dividend_yield >= 3.0:
         v_score += 10
@@ -2513,11 +2517,12 @@ def get_top_stocks(
     # Compute Leaderboard Summary for this specific filtered subset
     top_ranked: StockFundamental | None = ranked_stocks[0] if ranked_stocks else None
 
-    # Best Value: Lowest P/E with healthy ROE >= 14%
-    value_candidates = [s for s in ranked_stocks if s.roe >= 14.0]
+    # Best Value: Lowest positive P/E with healthy ROE >= 14%
+    value_candidates = [s for s in ranked_stocks if s.roe >= 14.0 and s.pe_ratio > 0]
     best_value: StockFundamental | None = (
         min(value_candidates, key=lambda x: x.pe_ratio) if value_candidates else None
     )
+
 
     # Safest Debt Free: Top ranked with 0.00 debt to equity
     debt_free_candidates = [s for s in ranked_stocks if s.debt_to_equity == 0.0]

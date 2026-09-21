@@ -3319,8 +3319,18 @@
       tbody.innerHTML = html;
     }
 
-    function openStockDetailModal(symbol) {
-      const stock = fundStocksData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
+    async function openStockDetailModal(symbol) {
+      let stock = fundStocksData.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
+      if (!stock) {
+        try {
+          const res = await fetch(`/api/fundamentals/stock?symbol=${encodeURIComponent(symbol)}`);
+          if (res.ok) {
+            stock = await res.json();
+          }
+        } catch (e) {
+          console.error('Failed to fetch stock detail for', symbol, e);
+        }
+      }
       if (!stock) return;
 
       // Header vitals
@@ -3338,9 +3348,24 @@
 
       // Score banner
       document.getElementById('modal-score-big').textContent = stock.score;
-      document.getElementById('modal-verdict-text').textContent = stock.verdict;
+
+      const verdictEl = document.getElementById('modal-verdict-text');
+      if (verdictEl) {
+        verdictEl.textContent = stock.verdict;
+        if (stock.verdict === 'STRONG BUY') verdictEl.style.color = '#34d399';
+        else if (stock.verdict === 'BUY') verdictEl.style.color = '#38bdf8';
+        else if (stock.verdict === 'ACCUMULATE') verdictEl.style.color = '#c084fc';
+        else verdictEl.style.color = '#fbbf24';
+      }
+
       document.getElementById('modal-health-text').textContent = stock.health_rating;
-      document.getElementById('modal-solvency-status').textContent = stock.solvency_status;
+      
+      const solvEl = document.getElementById('modal-solvency-status');
+      if (solvEl) {
+        solvEl.textContent = stock.solvency_status;
+        solvEl.style.color = stock.debt_to_equity === 0 ? '#34d399' : (stock.debt_to_equity <= 0.5 ? '#38bdf8' : '#fbbf24');
+      }
+
 
       // Quarterly Filing & Balance Sheet Provenance
       const periodEl = document.getElementById('modal-reporting-period');

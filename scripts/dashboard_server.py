@@ -722,7 +722,8 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline';")
         self.end_headers()
-        self.wfile.write(payload)
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+            self.wfile.write(payload)
 
     def _send_download(self, filename: str, content_type: str, data_bytes: bytes) -> None:
         self.send_response(200)
@@ -737,7 +738,9 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline';")
         self.end_headers()
-        self.wfile.write(data_bytes)
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+            self.wfile.write(data_bytes)
+
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(204)
@@ -1457,6 +1460,12 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                 limit = int(params.get("limit", ["20"])[0])
             except (ValueError, TypeError):
                 limit = 20
+
+            min_price = max(0.0, min_price)
+            if max_price < min_price:
+                max_price = min_price
+            limit = max(1, min(100, limit))
+
 
             response = get_top_stocks(
                 min_price=min_price,
