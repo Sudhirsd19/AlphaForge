@@ -1698,9 +1698,21 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                     sub3 = c3[-count:] if count < len(c3) else c3
                     t_start = sub3[0].exchange_timestamp
                     t_end = sub3[-1].exchange_timestamp + timedelta(minutes=3)
-                    sub15 = [c for c in c15 if t_start <= c.exchange_timestamp <= t_end]
+
+                    # Locate start_idx in confirmation candles and include up to 30 prior bars for indicator warmup
+                    start_idx = 0
+                    for idx, c in enumerate(c15):
+                        if c.exchange_timestamp >= t_start:
+                            start_idx = idx
+                            break
+                    warmup_start = max(0, start_idx - 30)
+                    sub15 = [c for c in c15[warmup_start:] if c.exchange_timestamp <= t_end]
                     if len(sub15) < 10:
-                        sub15 = c15[-max(20, count // 5):]
+                        sub15 = c15[-max(35, count // 5):]
+
+                    regime_filter_enabled = bool(
+                        payload.get("enable_regime_filter", payload.get("regime_filter", False))
+                    )
 
                     contract = ContractMaster(
                         exchange="NSE",
@@ -1742,12 +1754,21 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                         config=bt_cfg,
                         dataset=BacktestDataset(dataset_id=f"D3_{len(sub3)}", candles=sub3),
                         contract_master=contract,
-                        strategy_config=StrategyConfig(strategy_version="1.1.0"),
+                        strategy_config=StrategyConfig(
+                            strategy_version="1.1.0",
+                            enable_regime_filter=regime_filter_enabled,
+                        ),
                         risk_config=risk_cfg,
                         confirmation_dataset=BacktestDataset(dataset_id=f"D15_{len(sub15)}", candles=sub15),
                     )
                     result = engine.run()
                     run_id = result.backtest_run_id
+
+                    stops_targets: dict[str, dict[str, Any]] = {
+                        str(e.entity_id).upper(): e.metadata
+                        for e in engine.trace
+                        if str(getattr(e, "event_type", "")) == "SIGNAL_GENERATED" and getattr(e, "metadata", None)
+                    }
 
                     trades_data = [
                         {
@@ -1758,8 +1779,18 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                             "entry_timestamp": t.entry_timestamp.isoformat(),
                             "exit_timestamp": t.exit_timestamp.isoformat() if t.exit_timestamp else "",
                             "entry_price": str(t.entry_price),
-                            "stop_price": str(t.entry_price - Decimal("50.00")) if t.side.value == "LONG" else str(t.entry_price + Decimal("50.00")),
-                            "target_price": str(t.entry_price + Decimal("100.00")) if t.side.value == "LONG" else str(t.entry_price - Decimal("100.00")),
+                            "stop_price": str(
+                                stops_targets.get(t.entry_signal_id.upper(), {}).get(
+                                    "stop",
+                                    t.entry_price - Decimal("50.00") if t.side.value == "LONG" else t.entry_price + Decimal("50.00"),
+                                )
+                            ),
+                            "target_price": str(
+                                stops_targets.get(t.entry_signal_id.upper(), {}).get(
+                                    "target",
+                                    t.entry_price + Decimal("100.00") if t.side.value == "LONG" else t.entry_price - Decimal("100.00"),
+                                )
+                            ),
                             "exit_price": str(t.exit_price) if t.exit_price else "",
                             "gross_pnl": str(t.gross_pnl),
                             "net_pnl": str(t.net_pnl),

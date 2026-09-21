@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 import json
 import logging
@@ -151,29 +151,38 @@ def resample_1m_to_interval(
     contract_id: str,
     instrument_type: InstrumentType,
     interval_minutes: int,
+    filter_regular_session: bool = True,
 ) -> list[MarketCandle]:
     """
-    Resample 1-minute raw candle records into authoritative MarketCandle instances.
-    Enforces strict UTC timestamps, Decimal boundaries, and valid OHLCV.
+    Resample 1-minute raw candle records into authoritative, clock-aligned MarketCandle instances.
+    Enforces:
+    1. Regular NSE market hours (09:15 to 15:30 IST = 03:45 to 10:00 UTC) when filter_regular_session=True.
+    2. Strict clock-aligned boundaries ((minute // interval_minutes) * interval_minutes).
+    3. Session and day boundary isolation (zero cross-day or weekend bar bleeding).
+    4. Deterministic chronological sorting and Decimal precision.
     """
+    if not raw_candles:
+        return []
+
+    sorted_raw = sorted(raw_candles, key=lambda r: str(r[0]))
     aggregated: list[MarketCandle] = []
     chunk: list[tuple[datetime, Decimal, Decimal, Decimal, Decimal, int, int]] = []
+    current_bucket: datetime | None = None
     tf_str = f"{interval_minutes}m"
 
-    for r in raw_candles:
-        ts_str = str(r[0])
-        dt = datetime.fromisoformat(ts_str).astimezone(UTC)
-        o = Decimal(str(r[1]))
-        h = Decimal(str(r[2]))
-        l = Decimal(str(r[3]))
-        c = Decimal(str(r[4]))
-        v = int(r[5])
-        oi = int(r[6]) if len(r) > 6 and r[6] is not None else 0
+    for r in sorted_raw:
+        dt = datetime.fromisoformat(str(r[0])).astimezone(UTC)
+        t = dt.time()
 
-        chunk.append((dt, o, h, l, c, v, oi))
+        # Enforce regular NSE trading session: 03:45 UTC (09:15 IST) <= t < 10:00 UTC (15:30 IST)
+        if filter_regular_session and not (time(3, 45) <= t < time(10, 0)):
+            continue
 
-        if len(chunk) == interval_minutes:
-            bar_ts = chunk[0][0]
+        bucket_minute = (dt.minute // interval_minutes) * interval_minutes
+        bucket_ts = dt.replace(minute=bucket_minute, second=0, microsecond=0)
+
+        if current_bucket is not None and bucket_ts != current_bucket:
+            bar_ts = current_bucket
             bar_open = chunk[0][1]
             bar_high = max(item[2] for item in chunk)
             bar_low = min(item[3] for item in chunk)
@@ -192,7 +201,7 @@ def resample_1m_to_interval(
                 instrument_type=instrument_type,
                 contract_id=contract_id,
                 exchange_timestamp=bar_ts,
-                received_timestamp=bar_ts + timedelta(milliseconds=10),
+                received_timestamp=bar_ts + timedelta(minutes=interval_minutes),
                 timeframe=tf_str,
                 open=bar_open,
                 high=bar_high,
@@ -204,6 +213,48 @@ def resample_1m_to_interval(
             )
             aggregated.append(mc)
             chunk = []
+
+        current_bucket = bucket_ts
+        chunk.append((
+            dt,
+            Decimal(str(r[1])),
+            Decimal(str(r[2])),
+            Decimal(str(r[3])),
+            Decimal(str(r[4])),
+            int(r[5]),
+            int(r[6]) if len(r) > 6 and r[6] is not None else 0,
+        ))
+
+    if chunk and current_bucket is not None:
+        bar_ts = current_bucket
+        bar_open = chunk[0][1]
+        bar_high = max(item[2] for item in chunk)
+        bar_low = min(item[3] for item in chunk)
+        bar_close = chunk[-1][4]
+        bar_volume = sum(item[5] for item in chunk)
+        bar_oi = chunk[-1][6]
+
+        if bar_high < max(bar_open, bar_close):
+            bar_high = max(bar_open, bar_close)
+        if bar_low > min(bar_open, bar_close):
+            bar_low = min(bar_open, bar_close)
+
+        mc = MarketCandle(
+            symbol=symbol,
+            instrument_type=instrument_type,
+            contract_id=contract_id,
+            exchange_timestamp=bar_ts,
+            received_timestamp=bar_ts + timedelta(minutes=interval_minutes),
+            timeframe=tf_str,
+            open=bar_open,
+            high=bar_high,
+            low=bar_low,
+            close=bar_close,
+            volume=max(bar_volume, 1),
+            open_interest=bar_oi,
+            source="NSE",
+        )
+        aggregated.append(mc)
 
     return aggregated
 
