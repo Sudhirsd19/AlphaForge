@@ -54,12 +54,30 @@ def parse_args() -> argparse.Namespace:
 
 def notify_dashboard_server(server_url: str, quarter: str) -> bool:
     """Attempts to trigger server-side sync on the live dashboard process."""
+    csrf_token = ""
+    try:
+        csrf_url = f"{server_url.rstrip('/')}/api/security/csrf"
+        req_csrf = urllib.request.Request(csrf_url, method="GET")
+        with urllib.request.urlopen(req_csrf, timeout=2.0) as resp:
+            if resp.status == 200:
+                csrf_payload = json.loads(resp.read().decode("utf-8"))
+                csrf_token = csrf_payload.get("csrf_token", "")
+    except Exception:
+        pass
+
     api_url = f"{server_url.rstrip('/')}/api/fundamentals/sync"
     payload = json.dumps({"quarter": quarter}).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "X-Internal-Caller": "AlphaForgeCLI",
+    }
+    if csrf_token:
+        headers["X-CSRF-Token"] = csrf_token
+
     req = urllib.request.Request(
         api_url,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:

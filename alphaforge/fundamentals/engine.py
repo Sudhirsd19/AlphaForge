@@ -8,6 +8,8 @@ and generates leaderboard cards and comprehensive company deep-dive metrics.
 
 from __future__ import annotations
 
+import math
+
 from alphaforge.fundamentals.models import (
     FundamentalUniverseResponse,
     HealthRating,
@@ -65,8 +67,8 @@ def calculate_fundamental_scores(
     # 2. Solvency & Balance Sheet (Max 25)
     s_score = 0
     is_financial = "bank" in sector.lower() or "financ" in sector.lower()
-    if not is_financial and debt_to_equity < 0.0:
-        # Negative equity/net worth indicates severe solvency distress
+    if debt_to_equity < 0.0:
+        # Negative equity/net worth indicates severe solvency distress across all sectors
         s_score = 0
     elif is_financial:
         # For banks/NBFCs, evaluate leverage prudently based on Capital Adequacy & NPA standards
@@ -2443,6 +2445,8 @@ def _build_authoritative_universe() -> list[StockFundamental]:
     return result
 
 
+ACTIVE_EARNINGS_QUARTER: str = "Q1 FY25"
+
 # Cached compiled universe
 COMPILED_UNIVERSE = _build_authoritative_universe()
 
@@ -2453,7 +2457,8 @@ def sync_latest_quarter(target_quarter: str = "Q1 FY25", force_refresh: bool = F
     Marks newly reported earnings, updates QoQ profit delta, refreshes multi-factor scores,
     and returns a transparent audit record of synchronized stocks.
     """
-    global COMPILED_UNIVERSE
+    global COMPILED_UNIVERSE, ACTIVE_EARNINGS_QUARTER
+    ACTIVE_EARNINGS_QUARTER = target_quarter
     COMPILED_UNIVERSE = _build_authoritative_universe()
 
     recent_filings = [s for s in COMPILED_UNIVERSE if s.is_recent_filing]
@@ -2497,6 +2502,16 @@ def get_top_stocks(
     then sorts by composite Fundamental Score (descending) and returns the Top N stocks
     with re-computed rankings and leaderboard highlights.
     """
+    # Guard against NaN, Inf, and inverted ranges
+    if math.isnan(min_price) or math.isinf(min_price):
+        min_price = 0.0
+    if math.isnan(max_price) or math.isinf(max_price):
+        max_price = 1_000_000.0
+    min_price = max(0.0, min_price)
+    if max_price < min_price:
+        max_price = min_price
+    limit = max(1, min(100, limit))
+
     filtered: list[StockFundamental] = []
     q = query.strip().lower()
 
@@ -2538,12 +2553,17 @@ def get_top_stocks(
         min(value_candidates, key=lambda x: x.pe_ratio) if value_candidates else None
     )
 
-    # Safest Debt Free: Top ranked with 0.00 debt to equity
+    # Safest Debt Free: Top ranked with 0.00 debt to equity, or lowest non-negative debt to equity
     debt_free_candidates = [s for s in ranked_stocks if s.debt_to_equity == 0.0]
+    non_neg_debt_candidates = [s for s in ranked_stocks if s.debt_to_equity >= 0.0]
     safest_debt_free: StockFundamental | None = (
         debt_free_candidates[0]
         if debt_free_candidates
-        else (min(ranked_stocks, key=lambda x: x.debt_to_equity) if ranked_stocks else None)
+        else (
+            min(non_neg_debt_candidates, key=lambda x: x.debt_to_equity)
+            if non_neg_debt_candidates
+            else None
+        )
     )
 
     # Growth Leader: Highest 3-year profit growth CAGR
@@ -2567,7 +2587,7 @@ def get_top_stocks(
         sector_filter=sector,
         search_query=query,
         recent_filings_count=sum(1 for s in COMPILED_UNIVERSE if s.is_recent_filing),
-        active_earnings_quarter="Q1 FY25",
+        active_earnings_quarter=ACTIVE_EARNINGS_QUARTER,
         stocks=ranked_stocks,
         leaderboard=leaderboard,
         sectors_available=get_available_sectors(),

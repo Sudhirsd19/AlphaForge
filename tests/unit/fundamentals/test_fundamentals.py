@@ -290,3 +290,62 @@ def test_api_fundamentals_sync_endpoint(api_server_url: str):
         assert data["updated_count"] >= 14
         assert len(data["updated_stocks"]) > 0
 
+
+def test_nan_inf_price_filter_protection():
+    """get_top_stocks must sanitize NaN and Inf prices into clean finite bounds."""
+    res = get_top_stocks(min_price=float("nan"), max_price=float("inf"), limit=20)
+    assert res.min_price_filter == 0.0
+    assert res.max_price_filter == 1_000_000.0
+    assert len(res.stocks) == 20
+    # Inverted ranges must clamp cleanly
+    res_inv = get_top_stocks(min_price=5000.0, max_price=2000.0)
+    assert res_inv.max_price_filter >= res_inv.min_price_filter
+
+
+def test_api_top20_nan_param_sanitization(api_server_url: str):
+    """GET /api/fundamentals/top20?min_price=nan&max_price=nan returns sanitized RFC-compliant JSON."""
+    url = f"{api_server_url}/api/fundamentals/top20?min_price=nan&max_price=inf"
+    req = urllib.request.Request(url, method="GET")  # noqa: S310
+    with urllib.request.urlopen(req) as resp:  # noqa: S310
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["min_price_filter"] == 0.0
+        assert data["max_price_filter"] == 1000000.0
+        assert len(data["stocks"]) == 20
+
+
+def test_financial_negative_equity_solvency_zero():
+    """Financial companies with negative net worth (insolvency) must get 0 solvency points."""
+    p, s, v, g, total, verdict, health = calculate_fundamental_scores(
+        roe=12.0,
+        roce=12.0,
+        debt_to_equity=-2.5,  # Insolvent net worth
+        pe_ratio=15.0,
+        dividend_yield=1.5,
+        profit_growth_3y=10.0,
+        sales_growth_3y=10.0,
+        sector="Banking & Finance",
+    )
+    assert s == 0, "Negative equity in a bank/NBFC must result in 0 solvency points"
+
+
+def test_cli_loopback_sync_authorization(api_server_url: str):
+    """POST /api/fundamentals/sync from loopback CLI with X-Internal-Caller succeeds without CSRF."""
+    url = f"{api_server_url}/api/fundamentals/sync"
+    body = json.dumps({"quarter": "Q1 FY25"}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Internal-Caller": "AlphaForgeCLI",
+        },
+        method="POST",
+    )  # noqa: S310
+    with urllib.request.urlopen(req) as resp:  # noqa: S310
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["success"] is True
+        assert data["active_quarter"] == "Q1 FY25"
+
+

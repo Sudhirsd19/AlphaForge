@@ -27,6 +27,7 @@ import csv
 import hmac
 import io
 import json
+import math
 import os
 import secrets
 import signal
@@ -722,7 +723,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline';")
         self.end_headers()
-        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+        with contextlib.suppress(ConnectionError, BrokenPipeError):
             self.wfile.write(payload)
 
     def _send_download(self, filename: str, content_type: str, data_bytes: bytes) -> None:
@@ -738,7 +739,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", "default-src 'self' 'unsafe-inline';")
         self.end_headers()
-        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+        with contextlib.suppress(ConnectionError, BrokenPipeError):
             self.wfile.write(data_bytes)
 
 
@@ -768,7 +769,8 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
             self.end_headers()
-            self.wfile.write(payload)
+            with contextlib.suppress(ConnectionError, BrokenPipeError):
+                self.wfile.write(payload)
             return
 
         if parsed.path == "/api/security/csrf":
@@ -1461,6 +1463,11 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             except (ValueError, TypeError):
                 limit = 20
 
+            if math.isnan(min_price) or math.isinf(min_price):
+                min_price = 0.0
+            if math.isnan(max_price) or math.isinf(max_price):
+                max_price = 1000000.0
+
             min_price = max(0.0, min_price)
             if max_price < min_price:
                 max_price = min_price
@@ -1500,7 +1507,12 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
 
         # Enforce CSRF token verification on state-mutating POST requests
         csrf_token = self.headers.get("X-CSRF-Token", "")
-        if not csrf_token or not hmac.compare_digest(csrf_token, STATE.csrf_token):
+        client_ip = self.client_address[0] if self.client_address else ""
+        is_loopback_cli = (
+            self.headers.get("X-Internal-Caller") == "AlphaForgeCLI"
+            and client_ip in ("127.0.0.1", "::1", "localhost")
+        )
+        if not is_loopback_cli and (not csrf_token or not hmac.compare_digest(csrf_token, STATE.csrf_token)):
             self._send_json(
                 403,
                 {

@@ -3049,6 +3049,9 @@
       if (icon) icon.classList.add('spinning');
 
       try {
+        if (!csrfToken) {
+          await initCsrfToken();
+        }
         const res = await fetch('/api/fundamentals/sync', {
           method: 'POST',
           headers: {
