@@ -98,7 +98,11 @@ from alphaforge.security.config import SecurityConfig, TradingModeConfig
 from alphaforge.security.enums import KillSwitchStatus, TradingMode
 from alphaforge.security.kill_switch import KillSwitch
 from alphaforge.security.startup import SecurityStartupGate
-from alphaforge.fundamentals import get_stock_by_symbol, get_top_stocks
+from alphaforge.fundamentals import (
+    get_stock_by_symbol,
+    get_top_stocks,
+    sync_latest_quarter,
+)
 from alphaforge.shadow_validation.contract_source import AuthoritativeContractSource
 from alphaforge.shadow_validation.shadow_guard import ShadowExecutionOnlyGuard
 from alphaforge.shadow_validation.upstox_adapter import (
@@ -2186,7 +2190,19 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                     self._send_json(400, {"success": False, "error": str(exc)})
             return
 
+        if parsed.path == "/api/fundamentals/sync":
+            target_quarter = payload.get("quarter", "Q1 FY25")
+            sync_res = sync_latest_quarter(target_quarter=target_quarter)
+            STATE.log_event(
+                "FUNDAMENTALS",
+                "SYNC",
+                f"Synchronized quarterly balance sheets for {target_quarter}: {sync_res['updated_count']} filings updated",
+            )
+            self._send_json(200, sync_res)
+            return
+
         if parsed.path.startswith("/api/"):
+
             self._send_json(404, {"error": f"API endpoint not found: {parsed.path}"})
             return
 

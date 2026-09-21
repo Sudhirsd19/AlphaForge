@@ -19,6 +19,7 @@ from alphaforge.fundamentals import (
     get_available_sectors,
     get_stock_by_symbol,
     get_top_stocks,
+    sync_latest_quarter,
 )
 from alphaforge.fundamentals.models import (
     FundamentalUniverseResponse,
@@ -26,7 +27,8 @@ from alphaforge.fundamentals.models import (
     StockFundamental,
     VerdictType,
 )
-from scripts.dashboard_server import AlphaForgeRequestHandler
+from scripts.dashboard_server import STATE, AlphaForgeRequestHandler
+
 
 
 def test_compiled_universe_size_and_diversity():
@@ -225,3 +227,49 @@ def test_api_fundamentals_stock_endpoint(api_server_url: str):
         assert data["roe"] == 51.2
         assert "strengths" in data
         assert len(data["strengths"]) > 0
+        assert data["reporting_period"] == "Q1 FY25"
+        assert data["is_recent_filing"] is True
+        assert data["filing_date"] == "2026-07-11"
+        assert data["quarterly_profit_change"] == 8.7
+
+
+def test_quarterly_filings_provenance_and_sync():
+    """Verify quarterly provenance tracking and sync_latest_quarter execution."""
+    tcs = get_stock_by_symbol("TCS")
+    assert tcs is not None
+    assert tcs.is_recent_filing is True
+    assert tcs.reporting_period == "Q1 FY25"
+    assert "SEBI" in tcs.audit_status
+
+    res = get_top_stocks()
+    assert res.recent_filings_count >= 14
+    assert res.active_earnings_quarter == "Q1 FY25"
+
+    sync_data = sync_latest_quarter(target_quarter="Q1 FY25")
+    assert sync_data["success"] is True
+    assert sync_data["active_quarter"] == "Q1 FY25"
+    assert sync_data["updated_count"] >= 14
+    assert len(sync_data["updated_stocks"]) == sync_data["updated_count"]
+
+
+def test_api_fundamentals_sync_endpoint(api_server_url: str):
+    """POST /api/fundamentals/sync refreshes balance sheets and returns audit summary."""
+    url = f"{api_server_url}/api/fundamentals/sync"
+    body = json.dumps({"quarter": "Q1 FY25"}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-CSRF-Token": STATE.csrf_token,
+        },
+        method="POST",
+    )  # noqa: S310
+    with urllib.request.urlopen(req) as resp:  # noqa: S310
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["success"] is True
+        assert data["active_quarter"] == "Q1 FY25"
+        assert data["updated_count"] >= 14
+        assert len(data["updated_stocks"]) > 0
+

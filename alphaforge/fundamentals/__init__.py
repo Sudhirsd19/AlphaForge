@@ -8,6 +8,7 @@ from alphaforge.fundamentals.engine import (
     get_available_sectors,
     get_stock_by_symbol,
     get_top_stocks,
+    sync_latest_quarter,
 )
 from alphaforge.fundamentals.models import (
     FundamentalUniverseResponse,
@@ -28,4 +29,6 @@ __all__ = [
     "get_available_sectors",
     "get_stock_by_symbol",
     "get_top_stocks",
+    "sync_latest_quarter",
 ]
+

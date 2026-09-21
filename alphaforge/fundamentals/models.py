@@ -85,6 +85,13 @@ class StockFundamental(BaseModel):
     considerations: list[str] = Field(default_factory=list, description="Key risks and monitorables")
     moat_rating: str = Field(default="WIDE MOAT", description="Economic Moat Rating")
 
+    # Quarterly Provenance & Reporting Lifecycle
+    reporting_period: str = Field(default="Q1 FY25", description="Financial reporting period, e.g. Q1 FY25")
+    filing_date: str = Field(default="2026-08-15", description="SEBI filing / earnings release date")
+    is_recent_filing: bool = Field(default=False, description="Flagged true if reported in latest active filing cycle")
+    quarterly_profit_change: float = Field(default=0.0, description="Quarter-over-Quarter (QoQ) Net Profit Growth %")
+    audit_status: str = Field(default="SEBI AUDITED", description="Filing regulatory status (e.g. SEBI AUDITED, LIMITED REVIEW)")
+
 
 class LeaderboardSummary(BaseModel):
     """Highlight cards for the top tier stocks in the active filter."""
@@ -109,6 +116,9 @@ class FundamentalUniverseResponse(BaseModel):
     max_price_filter: float
     sector_filter: str
     search_query: str
+    recent_filings_count: int = 0
+    active_earnings_quarter: str = "Q1 FY25"
     stocks: list[StockFundamental]
     leaderboard: LeaderboardSummary
     sectors_available: list[str]
+
