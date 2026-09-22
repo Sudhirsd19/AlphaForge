@@ -534,6 +534,12 @@ class AlphaForgeState:
                 mode=PaperShadowMode.PAPER,
                 initial_capital=Decimal("1000000"),
             ),
+            risk_config=RiskConfig(
+                max_single_position_notional=Decimal("2.00"),
+                max_portfolio_notional=Decimal("5.00"),
+                max_risk_per_trade=Decimal("0.0200"),
+                max_portfolio_risk=Decimal("0.0500"),
+            ),
             broker=self.broker,
             kill_switch=self.kill_switch,
             contract_provider=self.contract_repo,

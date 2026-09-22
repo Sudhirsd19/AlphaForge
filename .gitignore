@@ -60,3 +60,4 @@ tokens/
 *.swo
 .DS_Store
 Thumbs.db
+scratch/

@@ -83,6 +83,7 @@ from alphaforge.data.models import MarketCandle
 from alphaforge.paper_shadow.engine import PaperShadowEngine
 from alphaforge.paper_shadow.enums import PaperShadowMode
 from alphaforge.paper_shadow.models import MarketEvent, PaperShadowConfig
+from alphaforge.risk.models import RiskConfig
 from alphaforge.shadow_validation.contract_source import AuthoritativeContractSource
 from alphaforge.shadow_validation.upstox_adapter import (
     UPSTOX_KNOWN_INSTRUMENT_KEYS,
@@ -412,9 +413,16 @@ def main() -> None:
         contract_multiplier=contract.contract_multiplier,
         initial_capital=Decimal("1000000"),
     )
+    risk_config = RiskConfig(
+        max_single_position_notional=Decimal("2.00"),
+        max_portfolio_notional=Decimal("5.00"),
+        max_risk_per_trade=Decimal("0.0200"),
+        max_portfolio_risk=Decimal("0.0500"),
+    )
     paper_broker = _ObservedPaperBroker()
     engine = PaperShadowEngine(
         config=config,
+        risk_config=risk_config,
         broker=paper_broker,
         contract_provider=contract_source.repository,
     )

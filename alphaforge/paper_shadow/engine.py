@@ -336,8 +336,9 @@ class PaperShadowEngine:
                     TradeSide.LONG if signal.direction == SignalDirection.LONG else TradeSide.SHORT
                 )
                 portfolio_state = self._pnl_tracker.get_portfolio_risk_state(self._current_candles)
+                sig_id = signal.signal_id.strip().upper()
                 risk_input = RiskInput(
-                    signal_id=signal.signal_id,
+                    signal_id=sig_id,
                     symbol=sym,
                     side=trade_side,
                     entry_price=signal.entry_reference,
@@ -362,7 +363,7 @@ class PaperShadowEngine:
                             event_type=RiskEventType.RISK_ACCEPTED.value,
                             severity=ObservabilitySeverity.INFO,
                             symbol=sym,
-                            correlation_id=signal.signal_id,
+                            correlation_id=sig_id,
                             message=f"Risk approved trade for {sym}",
                             attributes={"approved_qty": risk_decision.quantity},
                         )
@@ -384,7 +385,7 @@ class PaperShadowEngine:
                             event_type=RiskEventType.RISK_REJECTED.value,
                             severity=ObservabilitySeverity.WARNING,
                             symbol=sym,
-                            correlation_id=signal.signal_id,
+                            correlation_id=sig_id,
                             message=f"Risk rejected trade: {risk_decision.reason}",
                             attributes={"reason": risk_decision.reason},
                         )
@@ -423,13 +424,14 @@ class PaperShadowEngine:
         """
         Route order and simulate paper entry execution through authoritative FSM & broker guard.
         """
+        sig_id = signal.signal_id.strip().upper()
         # Create and route order through FSM & DeploymentBrokerGuard
         fsm_order, broker_order = self._order_router.create_and_route_order(
             strategy_id=signal.strategy_id,
             strategy_version=signal.strategy_version,
             symbol=symbol,
             role=OrderRole.ENTRY,
-            signal_id=signal.signal_id,
+            signal_id=sig_id,
             side=side,
             quantity=quantity,
             order_type=BrokerOrderType.MARKET,
@@ -471,7 +473,7 @@ class PaperShadowEngine:
             target_price=signal.target_reference,
             strategy_id=signal.strategy_id,
             strategy_version=signal.strategy_version,
-            signal_id=signal.signal_id,
+            signal_id=sig_id,
         )
 
         # Log to Authoritative Audit Ledger
@@ -479,8 +481,8 @@ class PaperShadowEngine:
             event_type=AuditEventType.ORDER_FILLED,
             entity_type="ORDER",
             entity_id=fsm_order.order_id,
-            correlation_id=signal.signal_id,
-            causation_id=signal.signal_id,
+            correlation_id=sig_id,
+            causation_id=sig_id,
             payload={
                 "symbol": symbol,
                 "side": side.value,
@@ -520,7 +522,7 @@ class PaperShadowEngine:
         if not is_triggered or bracket_type is None:
             return
 
-        exit_signal_id = f"EXIT-{active_pos.signal_id or active_pos.entry_order_id}"
+        exit_signal_id = f"EXIT-{active_pos.signal_id or active_pos.entry_order_id}".strip().upper()
         exit_side = TradeSide.SHORT if active_pos.side == TradeSide.LONG else TradeSide.LONG
 
         # 2. Create authoritative EXIT order: OrderRouter -> FSM -> BrokerGuard -> Broker
