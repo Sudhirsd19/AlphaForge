@@ -972,7 +972,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/shadow/market":
-            live_bot = get_live_bot_state()
+            live_bot = get_live_bot_state(only_active=True)
             with STATE.lock:
                 c = STATE.active_contract
                 cid = c.contract_id if c else "UNAVAILABLE"
@@ -996,14 +996,26 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
                         "overlays": None,
                     }
                 else:
-                    data = {
-                        "active": False,
-                        "message": "NO REAL-MARKET SESSION ACTIVE",
-                        "provider": UPSTOX_PROVIDER_NAME,
-                        "contract_id": cid,
-                        "candles": [],
-                        "overlays": None,
-                    }
+                    inactive_bot = get_live_bot_state(only_active=False)
+                    if inactive_bot and inactive_bot.get("candles"):
+                        data = {
+                            "active": False,
+                            "message": "SESSION STANDBY (CACHED DATA)",
+                            "provider": UPSTOX_PROVIDER_NAME,
+                            "contract_id": inactive_bot.get("contract_id", cid),
+                            "latest_price": inactive_bot.get("latest_price"),
+                            "candles": inactive_bot.get("candles", []),
+                            "overlays": None,
+                        }
+                    else:
+                        data = {
+                            "active": False,
+                            "message": "NO REAL-MARKET SESSION ACTIVE",
+                            "provider": UPSTOX_PROVIDER_NAME,
+                            "contract_id": cid,
+                            "candles": [],
+                            "overlays": None,
+                        }
             self._send_json(200, data)
             return
 

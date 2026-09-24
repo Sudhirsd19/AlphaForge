@@ -273,21 +273,81 @@
     table.forensic-tbl td { padding: 7px 9px; border-bottom: 1px solid #141d2e; font-family: "JetBrains Mono", monospace; font-size: 10.5px; white-space: nowrap; }
     table.forensic-tbl tr:hover td { background: rgba(255,255,255,0.02); }
 
-    /* Chart Canvas Container */
+    /* Chart Canvas Container & TradingView Crisp Styling */
     .chart-container {
-      background: #050812; border: 1px solid var(--card-border);
+      background: #090d16; border: 1px solid var(--card-border);
       border-radius: 6px; padding: 4px; position: relative;
-      height: 310px; display: flex; flex-direction: column;
-      touch-action: pan-y;
+      height: 380px; display: flex; flex-direction: column;
+      touch-action: none;
       overflow: hidden;
       user-select: none;
       -webkit-user-select: none;
     }
-    .chart-container.primary-chart { height: 380px; }
+    .chart-container.primary-chart { height: 460px; }
     .chart-canvas {
       width: 100%; height: 100%; flex-grow: 1; display: block;
-      touch-action: pan-y;
-      pointer-events: none;
+      touch-action: none;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+      cursor: crosshair;
+    }
+    .chart-ind-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      cursor: pointer;
+      user-select: none;
+      padding: 3px 6px;
+      border-radius: 4px;
+      transition: background 0.15s ease;
+    }
+    .chart-ind-toggle:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .chart-ind-toggle input[type="checkbox"] {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border: 1.5px solid currentColor;
+      border-radius: 3px;
+      background: transparent;
+      outline: none;
+      cursor: pointer;
+      display: inline-grid;
+      place-content: center;
+      margin: 0;
+      vertical-align: middle;
+      position: relative;
+    }
+    .chart-ind-toggle input[type="checkbox"]:checked {
+      background: currentColor;
+    }
+    .chart-ind-toggle input[type="checkbox"]:checked::after {
+      content: "";
+      width: 4px;
+      height: 7px;
+      border: solid #0b0f19;
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+      position: absolute;
+      top: 1px;
+      left: 3.5px;
+    }
+    .chart-badge-pill {
+      display: inline-flex;
+      align-items: center;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 4px;
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      white-space: nowrap;
     }
 
     .empty-state-card {
@@ -928,11 +988,26 @@
         <div>
           <!-- Live Market Chart Panel -->
           <div class="op-panel">
-            <div class="op-panel-header">
-              <span class="op-panel-title">NIFTY Futures &mdash; Live Feed</span>
-              <div style="display: flex; gap: 6px; align-items: center;">
+            <div class="op-panel-header" style="flex-wrap: wrap; gap: 8px; align-items: center;">
+              <div style="display: flex; gap: 10px; align-items: center;">
+                <span class="op-panel-title" style="letter-spacing: 0.6px; font-weight: 800; color: #f1f5f9;">TRADINGVIEW CANDLE CHART</span>
                 <span class="status-tag tag-slate" id="chart-session-status">SESSION: CHECKING</span>
-                <span class="status-tag tag-amber" id="chart-data-badge">LIVE STREAM</span>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <label class="chart-ind-toggle" style="color: #00b0ff;" title="Toggle 9-Period Exponential Moving Average">
+                  <input type="checkbox" id="toggle-ema-9" checked onchange="toggleIndicator('ema9', this.checked)">
+                  <span>EMA 9</span>
+                </label>
+                <label class="chart-ind-toggle" style="color: #ff6d00;" title="Toggle 21-Period Exponential Moving Average">
+                  <input type="checkbox" id="toggle-ema-21" checked onchange="toggleIndicator('ema21', this.checked)">
+                  <span>EMA 21</span>
+                </label>
+                <label class="chart-ind-toggle" style="color: #b388ff;" title="Toggle Volume-Weighted Average Price">
+                  <input type="checkbox" id="toggle-vwap" checked onchange="toggleIndicator('vwap', this.checked)">
+                  <span>VWAP</span>
+                </label>
+                <span class="chart-badge-pill" id="chart-htf-badge">Neutral HTF Trend</span>
+                <span class="chart-badge-pill" id="chart-fvg-badge">No FVG</span>
               </div>
             </div>
             <div class="chart-container">
@@ -1065,9 +1140,27 @@
       </div>
 
       <div class="op-panel">
-        <div class="op-panel-header">
-          <span class="op-panel-title">NIFTY Futures &mdash; Live Chart</span>
-          <span class="status-tag tag-slate" id="mkt-feed-source">UPSTOX WEBSOCKET</span>
+        <div class="op-panel-header" style="flex-wrap: wrap; gap: 8px; align-items: center;">
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <span class="op-panel-title" style="letter-spacing: 0.6px; font-weight: 800; color: #f1f5f9;">TRADINGVIEW CANDLE CHART</span>
+            <span class="status-tag tag-slate" id="mkt-feed-source">UPSTOX WEBSOCKET</span>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <label class="chart-ind-toggle" style="color: #00b0ff;" title="Toggle 9-Period Exponential Moving Average">
+              <input type="checkbox" id="toggle-mkt-ema-9" checked onchange="toggleIndicator('ema9', this.checked)">
+              <span>EMA 9</span>
+            </label>
+            <label class="chart-ind-toggle" style="color: #ff6d00;" title="Toggle 21-Period Exponential Moving Average">
+              <input type="checkbox" id="toggle-mkt-ema-21" checked onchange="toggleIndicator('ema21', this.checked)">
+              <span>EMA 21</span>
+            </label>
+            <label class="chart-ind-toggle" style="color: #b388ff;" title="Toggle Volume-Weighted Average Price">
+              <input type="checkbox" id="toggle-mkt-vwap" checked onchange="toggleIndicator('vwap', this.checked)">
+              <span>VWAP</span>
+            </label>
+            <span class="chart-badge-pill" id="primary-chart-htf-badge">Neutral HTF Trend</span>
+            <span class="chart-badge-pill" id="primary-chart-fvg-badge">No FVG</span>
+          </div>
         </div>
         <div class="chart-container primary-chart">
           <canvas id="primaryMarketChart" class="chart-canvas"></canvas>
@@ -2199,6 +2292,28 @@
           if (sigVol) sigVol.textContent = sigRes.volatility_state || 'NORMAL';
           const sigDec = document.getElementById('sig-tab-decision');
           if (sigDec) sigDec.textContent = sigRes.last_decision || 'NO TRADE';
+
+          window.latestSignalDecision = sigRes.last_decision || sigRes.decision || '';
+          window.latestSignalTrend = sigRes.trend || '';
+
+          // Update TradingView chart badges matching reference screenshot
+          const trendText = (sigRes.trend || 'NEUTRAL').toUpperCase();
+          const trendLabel = trendText === 'BULLISH' ? 'Bullish HTF Trend' : trendText === 'BEARISH' ? 'Bearish HTF Trend' : 'Neutral HTF Trend';
+          const trendColor = trendText === 'BULLISH' ? '#10b981' : trendText === 'BEARISH' ? '#f43f5e' : '#94a3b8';
+
+          ['chart-htf-badge', 'primary-chart-htf-badge'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+              el.textContent = trendLabel;
+              el.style.color = trendColor;
+            }
+          });
+
+          const fvgText = sigRes.fvg_status || (sigRes.breakout_status && sigRes.breakout_status.includes('CONFIRMED') ? 'Breakout FVG' : 'No FVG');
+          ['chart-fvg-badge', 'primary-chart-fvg-badge'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = fvgText;
+          });
         }
 
         // Decision History Explainer Table
@@ -2424,7 +2539,128 @@
       }
     }
 
-    // Chart Canvas Candlestick Rendering (High-DPI Retina, Anti-Jitter, TradingView Precision)
+    // =========================================================================
+    // TRADINGVIEW CANDLE CHART ENGINE (Ultra-Sharp High-DPI, Anti-Blur, Overlays)
+    // =========================================================================
+
+    const chartConfig = {
+      ema9: true,
+      ema21: true,
+      vwap: true
+    };
+
+    function toggleIndicator(ind, enabled) {
+      chartConfig[ind] = enabled;
+      const mktMap = {
+        'ema9': ['toggle-ema-9', 'toggle-mkt-ema-9'],
+        'ema21': ['toggle-ema-21', 'toggle-mkt-ema-21'],
+        'vwap': ['toggle-vwap', 'toggle-mkt-vwap']
+      };
+      if (mktMap[ind]) {
+        mktMap[ind].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.checked = enabled;
+        });
+      }
+      requestAnimationFrame(() => drawMarketChart());
+    }
+
+    function calculateEMA(data, period) {
+      if (!data || data.length === 0) return [];
+      const k = 2 / (period + 1);
+      const ema = new Array(data.length);
+      let sum = 0;
+      const seed = Math.min(period, data.length);
+      for (let i = 0; i < seed; i++) sum += data[i].close;
+      let prev = sum / seed;
+      ema[seed - 1] = prev;
+      for (let i = seed; i < data.length; i++) {
+        prev = (data[i].close - prev) * k + prev;
+        ema[i] = prev;
+      }
+      let rSum = 0;
+      for (let i = 0; i < seed - 1; i++) {
+        rSum += data[i].close;
+        ema[i] = rSum / (i + 1);
+      }
+      return ema;
+    }
+
+    function calculateVWAP(data) {
+      if (!data || data.length === 0) return [];
+      const vwap = new Array(data.length);
+      let cumVol = 0;
+      let cumPV = 0;
+      for (let i = 0; i < data.length; i++) {
+        const cd = data[i];
+        const typPrice = (cd.high + cd.low + cd.close) / 3;
+        const vol = (cd.volume && cd.volume > 0) ? cd.volume : 1;
+        cumVol += vol;
+        cumPV += typPrice * vol;
+        vwap[i] = cumVol > 0 ? (cumPV / cumVol) : cd.close;
+      }
+      return vwap;
+    }
+
+    // Interactive Hover State for crosshair & tooltip
+    let activeChartHover = {
+      canvasId: null,
+      x: -1,
+      y: -1
+    };
+
+    function attachChartInteractions(canvas) {
+      if (!canvas || canvas.dataset.hasHoverListener) return;
+      canvas.dataset.hasHoverListener = 'true';
+
+      const updatePos = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        activeChartHover.canvasId = canvas.id;
+        activeChartHover.x = clientX - rect.left;
+        activeChartHover.y = clientY - rect.top;
+        drawMarketChart();
+      };
+
+      const clearPos = () => {
+        if (activeChartHover.canvasId === canvas.id) {
+          activeChartHover.canvasId = null;
+          activeChartHover.x = -1;
+          activeChartHover.y = -1;
+          drawMarketChart();
+        }
+      };
+
+      canvas.addEventListener('mousemove', updatePos, { passive: true });
+      canvas.addEventListener('touchmove', updatePos, { passive: true });
+      canvas.addEventListener('mouseleave', clearPos, { passive: true });
+      canvas.addEventListener('touchend', clearPos, { passive: true });
+    }
+
+    function drawPillBadge(ctx, x, y, bw, bh, bgColor, textColor, text, fontSize = '9.5px') {
+      const by = Math.round(y - bh / 2);
+      ctx.fillStyle = bgColor;
+      const r = 3;
+      ctx.beginPath();
+      ctx.moveTo(x + r, by);
+      ctx.lineTo(x + bw - r, by);
+      ctx.quadraticCurveTo(x + bw, by, x + bw, by + r);
+      ctx.lineTo(x + bw, by + bh - r);
+      ctx.quadraticCurveTo(x + bw, by + bh, x + bw - r, by + bh);
+      ctx.lineTo(x + r, by + bh);
+      ctx.quadraticCurveTo(x, by + bh, x, by + bh - r);
+      ctx.lineTo(x, by + r);
+      ctx.quadraticCurveTo(x, by, x + r, by);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = textColor;
+      ctx.font = `bold ${fontSize} -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "JetBrains Mono", monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(text, Math.round(x + bw / 2), Math.round(by + bh * 0.72));
+    }
+
     function drawMarketChart(candles) {
       if (candles !== undefined) cachedCandles = candles;
       const allData = cachedCandles || [];
@@ -2433,77 +2669,96 @@
 
       [canvas1, canvas2].forEach(c => {
         if (!c) return;
-        // Don't render if element is hidden in an inactive tab
         if (c.offsetParent === null && c.clientWidth === 0) return;
+
+        attachChartInteractions(c);
 
         const rect = c.getBoundingClientRect();
         const w = Math.floor(rect.width || c.clientWidth || 340);
-        const h = Math.floor(rect.height || c.clientHeight || 270);
+        const h = Math.floor(rect.height || c.clientHeight || 280);
         if (w <= 0 || h <= 0) return;
 
-        // High-DPI / Retina display support (iPhone 3x, Retina 2x)
-        const dpr = Math.min(window.devicePixelRatio || 1, 3);
+        // Strict 1:1 CSS dimensions to lock out browser fractional stretching blur
+        c.style.width = w + 'px';
+        c.style.height = h + 'px';
+
+        // High-DPI / Retina buffer allocation (minimum 2x for razor-sharp candles)
+        const dpr = Math.max(window.devicePixelRatio || 1, 2);
         const targetW = Math.round(w * dpr);
         const targetH = Math.round(h * dpr);
 
-        // Crucial Anti-Fluctuation Check: Only re-allocate canvas GPU buffer if dimensions changed
         if (c.width !== targetW || c.height !== targetH) {
           c.width = targetW;
           c.height = targetH;
         }
 
         const ctx = c.getContext('2d');
-        ctx.resetTransform();
-        ctx.scale(dpr, dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-        // Smooth modern institutional gradient background
-        const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
-        bgGrad.addColorStop(0, '#070b18');
-        bgGrad.addColorStop(1, '#040711');
-        ctx.fillStyle = bgGrad;
+        // Dark obsidian TradingView background
+        ctx.fillStyle = '#0a0e17';
         ctx.fillRect(0, 0, w, h);
 
         if (!allData || allData.length === 0) {
-          // Subtle empty state grid
-          ctx.strokeStyle = 'rgba(30, 41, 59, 0.35)';
+          // Minimal empty state grid
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
           ctx.lineWidth = 1;
-          for (let x = 40; x < w; x += 60) {
-            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+          for (let x = 70; x < w; x += 60) {
+            ctx.beginPath(); ctx.moveTo(Math.floor(x) + 0.5, 0); ctx.lineTo(Math.floor(x) + 0.5, h); ctx.stroke();
           }
           for (let y = 30; y < h; y += 40) {
-            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, Math.floor(y) + 0.5); ctx.lineTo(w, Math.floor(y) + 0.5); ctx.stroke();
           }
           return;
         }
 
-        // Adaptive candle slice for readability (prevent cramped barcode slivers on small phone screens)
-        const maxVisible = w < 480 ? 36 : w < 768 ? 50 : 75;
+        // Compute full indicators before slicing
+        const fullEma9 = calculateEMA(allData, 9);
+        const fullEma21 = calculateEMA(allData, 21);
+        const fullVwap = calculateVWAP(allData);
+
+        // Layout margins matching reference screenshot (Price scale on LEFT)
+        const padLeft = w < 480 ? 68 : 82;
+        const padRight = 14;
+        const padTop = 26;
+        const padBottom = 26;
+        const chartW = Math.max(10, w - padLeft - padRight);
+        const chartH = Math.max(10, h - padTop - padBottom);
+
+        // Adaptive candle slice
+        const maxVisible = Math.max(20, Math.min(80, Math.floor(chartW / 12)));
         const data = allData.length > maxVisible ? allData.slice(-maxVisible) : allData;
+        const offset = allData.length - data.length;
+        const ema9 = fullEma9.slice(offset);
+        const ema21 = fullEma21.slice(offset);
+        const vwap = fullVwap.slice(offset);
 
-        // Dedicated layout margins
-        const padRight = w < 420 ? 64 : 74;
-        const padBottom = 22;
-        const padTop = 16;
-        const padLeft = 8;
-        const chartW = w - padLeft - padRight;
-        const chartH = h - padTop - padBottom;
-
-        // Dynamic price scale boundaries
+        // Price range boundaries
         let minP = Infinity;
         let maxP = -Infinity;
-        let minIdx = -1;
-        let maxIdx = -1;
-
         for (let i = 0; i < data.length; i++) {
           const cd = data[i];
-          if (cd.low < minP) { minP = cd.low; minIdx = i; }
-          if (cd.high > maxP) { maxP = cd.high; maxIdx = i; }
+          if (cd.low < minP) minP = cd.low;
+          if (cd.high > maxP) maxP = cd.high;
+          if (chartConfig.ema9 && ema9[i]) {
+            if (ema9[i] < minP) minP = ema9[i];
+            if (ema9[i] > maxP) maxP = ema9[i];
+          }
+          if (chartConfig.ema21 && ema21[i]) {
+            if (ema21[i] < minP) minP = ema21[i];
+            if (ema21[i] > maxP) maxP = ema21[i];
+          }
+          if (chartConfig.vwap && vwap[i]) {
+            if (vwap[i] < minP) minP = vwap[i];
+            if (vwap[i] > maxP) maxP = vwap[i];
+          }
         }
         if (minP === Infinity || maxP === -Infinity || minP === maxP) {
-          minP -= 10; maxP += 10;
+          minP -= 20; maxP += 20;
         }
-        const range = maxP - minP;
-        const padP = range * 0.08; // 8% vertical padding
+
+        const rawRange = maxP - minP;
+        const padP = rawRange * 0.08;
         const effMin = minP - padP;
         const effMax = maxP + padP;
         const effRange = effMax - effMin;
@@ -2511,45 +2766,94 @@
         function getY(p) {
           return padTop + chartH - ((p - effMin) / effRange) * chartH;
         }
+        function getPrice(y) {
+          return effMin + ((padTop + chartH - y) / chartH) * effRange;
+        }
 
-        // Horizontal gridlines & Y-axis price labels
-        const gridSteps = h < 240 ? 4 : 5;
+        const count = data.length;
+        const slotW = chartW / Math.max(count, 1);
+        const candleW = Math.max(4, Math.min(16, slotW * 0.72));
+
+        // Horizontal Gridlines & Left Price Axis Labels
+        const gridSteps = h < 280 ? 4 : h < 380 ? 6 : 8;
+        const rawStep = effRange / gridSteps;
+        const stepMag = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+        const norm = rawStep / stepMag;
+        let step = stepMag;
+        if (norm > 5) step = stepMag * 10;
+        else if (norm > 2) step = stepMag * 5;
+        else if (norm > 1) step = stepMag * 2;
+        else step = stepMag;
+
+        const startP = Math.ceil(effMin / step) * step;
+
         ctx.lineWidth = 1;
-        ctx.font = '500 9.5px "JetBrains Mono", monospace';
+        ctx.font = '500 10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "JetBrains Mono", monospace';
         ctx.textAlign = 'left';
 
-        for (let i = 0; i <= gridSteps; i++) {
-          const p = effMin + (effRange / gridSteps) * i;
-          const y = Math.round(getY(p)) + 0.5;
+        for (let p = startP; p <= effMax; p += step) {
+          const y = Math.floor(getY(p)) + 0.5;
 
-          // Subtle dotted horizontal gridline
-          ctx.strokeStyle = 'rgba(30, 41, 59, 0.4)';
-          ctx.setLineDash([3, 4]);
+          // Crisp horizontal gridline
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
           ctx.beginPath();
           ctx.moveTo(padLeft, y);
           ctx.lineTo(w - padRight, y);
           ctx.stroke();
 
-          // Price label in right axis gutter
+          // Left Y-axis price label (e.g. 84000.00 / 23220.00)
           ctx.fillStyle = '#64748b';
-          ctx.fillText(p.toFixed(1), w - padRight + 7, y + 3.5);
+          ctx.fillText(p.toFixed(2), 8, y + 3.5);
         }
-        ctx.setLineDash([]);
 
-        // Vertical axis divider line
-        ctx.strokeStyle = 'rgba(51, 65, 85, 0.4)';
+        // Vertical Time Gridlines & X-Axis Time Labels
+        const minLabelGap = 70;
+        let lastLabelX = -100;
+
+        data.forEach((cd, i) => {
+          const cx = padLeft + i * slotW + slotW / 2;
+          if (cx - lastLabelX >= minLabelGap && (w - padRight - cx) >= 20) {
+            let label = '';
+            if (cd.timestamp) {
+              const d = new Date(cd.timestamp);
+              if (!isNaN(d.getTime())) {
+                const hh = String(d.getHours()).padStart(2, '0');
+                const mm = String(d.getMinutes()).padStart(2, '0');
+                label = `${hh}:${mm}`;
+              } else if (cd.timestamp.includes('T')) {
+                label = cd.timestamp.split('T')[1].substring(0, 5);
+              } else {
+                label = cd.timestamp.substring(0, 5);
+              }
+            }
+
+            if (label) {
+              const vx = Math.floor(cx) + 0.5;
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+              ctx.beginPath();
+              ctx.moveTo(vx, padTop);
+              ctx.lineTo(vx, padTop + chartH);
+              ctx.stroke();
+
+              ctx.fillStyle = '#64748b';
+              ctx.font = '500 10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "JetBrains Mono", monospace';
+              ctx.textAlign = 'center';
+              ctx.fillText(label, Math.floor(cx), h - 8);
+              lastLabelX = cx;
+            }
+          }
+        });
+
+        // Vertical axis dividing line
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
         ctx.beginPath();
-        ctx.moveTo(w - padRight, padTop - 6);
-        ctx.lineTo(w - padRight, h - padBottom);
+        ctx.moveTo(Math.floor(padLeft) + 0.5, padTop - 6);
+        ctx.lineTo(Math.floor(padLeft) + 0.5, h - padBottom);
         ctx.stroke();
 
-        // Subtle volume bars at bottom (TradingView style)
-        const count = data.length;
-        const slotW = chartW / Math.max(count, 1);
-        const candleW = Math.max(3.5, Math.min(15, slotW * 0.72));
+        // Subtle volume bars at bottom
         const maxVol = Math.max(...data.map(cd => cd.volume || 1), 1);
-        const volMaxH = chartH * 0.16;
-
+        const volMaxH = chartH * 0.14;
         data.forEach((cd, i) => {
           const cx = padLeft + i * slotW + slotW / 2;
           const v = cd.volume || 0;
@@ -2557,21 +2861,21 @@
             const vH = (v / maxVol) * volMaxH;
             const vY = padTop + chartH - vH;
             const isGreen = cd.close >= cd.open;
-            ctx.fillStyle = isGreen ? 'rgba(16, 185, 129, 0.18)' : 'rgba(244, 63, 94, 0.18)';
+            ctx.fillStyle = isGreen ? 'rgba(8, 153, 129, 0.22)' : 'rgba(242, 54, 69, 0.22)';
             ctx.fillRect(Math.round(cx - candleW / 2), Math.round(vY), Math.round(candleW), Math.round(vH));
           }
         });
 
-        // Candlesticks (Pixel-crisp wicks & solid vibrant bodies)
+        // Candlesticks (Pixel-Crisp Wicks & Solid Bodies)
         data.forEach((cd, i) => {
           const cx = padLeft + i * slotW + slotW / 2;
           const isGreen = cd.close >= cd.open;
-          const col = isGreen ? '#10b981' : '#f43f5e';
+          const col = isGreen ? '#089981' : '#f23645';
           ctx.strokeStyle = col;
           ctx.fillStyle = col;
 
-          // Upper & lower wick (centered pixel for zero antialias blur)
-          const wickX = Math.round(cx) + 0.5;
+          // Centered 1px wick snapped to integer+0.5
+          const wickX = Math.floor(cx) + 0.5;
           const yH = getY(cd.high);
           const yL = getY(cd.low);
           ctx.lineWidth = 1;
@@ -2580,59 +2884,104 @@
           ctx.lineTo(wickX, Math.round(yL));
           ctx.stroke();
 
-          // Candle body
+          // Body
           const yO = getY(cd.open);
           const yC = getY(cd.close);
           const topY = Math.min(yO, yC);
-          const bodyH = Math.max(2, Math.abs(yC - yO));
+          const bodyH = Math.max(1.5, Math.abs(yC - yO));
           const leftX = Math.round(cx - candleW / 2);
           ctx.fillRect(leftX, Math.round(topY), Math.round(candleW), Math.round(bodyH));
         });
 
-        // High / Low markers on visible candles
-        if (minIdx >= 0 && maxIdx >= 0 && data.length > 5) {
-          const maxCx = padLeft + maxIdx * slotW + slotW / 2;
-          const maxY = getY(maxP);
-          ctx.fillStyle = '#34d399';
-          ctx.font = '8px "JetBrains Mono", monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText(`▲ ${maxP.toFixed(1)}`, Math.max(padLeft + 25, Math.min(w - padRight - 25, maxCx)), Math.max(12, maxY - 4));
-
-          const minCx = padLeft + minIdx * slotW + slotW / 2;
-          const minY = getY(minP);
-          ctx.fillStyle = '#f87171';
-          ctx.fillText(`▼ ${minP.toFixed(1)}`, Math.max(padLeft + 25, Math.min(w - padRight - 25, minCx)), Math.min(h - padBottom - 3, minY + 11));
+        // Overlay: EMA 9 (Cyan #00b0ff)
+        if (chartConfig.ema9) {
+          ctx.strokeStyle = '#00b0ff';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          let started = false;
+          data.forEach((cd, i) => {
+            if (ema9[i] !== undefined && !isNaN(ema9[i])) {
+              const cx = padLeft + i * slotW + slotW / 2;
+              const cy = getY(ema9[i]);
+              if (!started) { ctx.moveTo(cx, cy); started = true; }
+              else { ctx.lineTo(cx, cy); }
+            }
+          });
+          ctx.stroke();
         }
 
-        // X-axis timestamps with smart collision protection (labels never overlap)
-        let lastLabelX = -100;
-        const minLabelGap = w < 420 ? 54 : 68;
+        // Overlay: EMA 21 (Orange #ff6d00)
+        if (chartConfig.ema21) {
+          ctx.strokeStyle = '#ff6d00';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          let started = false;
+          data.forEach((cd, i) => {
+            if (ema21[i] !== undefined && !isNaN(ema21[i])) {
+              const cx = padLeft + i * slotW + slotW / 2;
+              const cy = getY(ema21[i]);
+              if (!started) { ctx.moveTo(cx, cy); started = true; }
+              else { ctx.lineTo(cx, cy); }
+            }
+          });
+          ctx.stroke();
+        }
 
-        data.forEach((cd, i) => {
-          const cx = padLeft + i * slotW + slotW / 2;
-          if (cx - lastLabelX >= minLabelGap && (w - padRight - cx) >= 20) {
-            let label = cd.timestamp || '';
-            if (label.includes('T')) {
-              label = label.split('T')[1].substring(0, 5);
-            } else if (label.length >= 5) {
-              label = label.substring(0, 5);
+        // Overlay: VWAP (Purple #b388ff, Dashed)
+        if (chartConfig.vwap) {
+          ctx.strokeStyle = '#b388ff';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          let started = false;
+          data.forEach((cd, i) => {
+            if (vwap[i] !== undefined && !isNaN(vwap[i])) {
+              const cx = padLeft + i * slotW + slotW / 2;
+              const cy = getY(vwap[i]);
+              if (!started) { ctx.moveTo(cx, cy); started = true; }
+              else { ctx.lineTo(cx, cy); }
             }
-            if (label) {
-              ctx.fillStyle = '#64748b';
-              ctx.font = '9px "JetBrains Mono", monospace';
-              ctx.textAlign = 'center';
-              ctx.fillText(label, Math.round(cx), h - 6);
-              lastLabelX = cx;
-            }
+          });
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        // Signal Marker Annotation (Matching screenshot: "ML: SELL BIAS")
+        const sigDecision = (window.latestSignalDecision || '').toUpperCase();
+        const sigTrend = (window.latestSignalTrend || '').toUpperCase();
+        const isSellBias = sigDecision.includes('SELL') || sigTrend.includes('BEARISH');
+        const isBuyBias = sigDecision.includes('BUY') || sigTrend.includes('BULLISH');
+
+        if (isSellBias || isBuyBias) {
+          const targetIdx = Math.max(0, data.length - 2);
+          const targetCd = data[targetIdx];
+          const cx = padLeft + targetIdx * slotW + slotW / 2;
+
+          if (isSellBias) {
+            const cy = getY(targetCd.low) + 18;
+            ctx.fillStyle = '#ff5722';
+            ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('↓', Math.round(cx), Math.round(cy - 2));
+            ctx.fillText('ML: SELL BIAS', Math.round(cx + 28), Math.round(cy + 10));
+          } else if (isBuyBias) {
+            const cy = getY(targetCd.high) - 18;
+            ctx.fillStyle = '#10b981';
+            ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('↑', Math.round(cx), Math.round(cy + 2));
+            ctx.fillText('ML: BUY BIAS', Math.round(cx + 28), Math.round(cy - 10));
           }
-        });
+        }
 
-        // Current price (LTP) dashed line & glowing pill badge
+        // Left Y-Axis Badges & Guidelines
         const lastCd = data[data.length - 1];
         const lastY = Math.round(getY(lastCd.close)) + 0.5;
-        const lastCol = lastCd.close >= lastCd.open ? '#10b981' : '#f43f5e';
+        const lastCol = lastCd.close >= lastCd.open ? '#089981' : '#f23645';
 
-        // Dashed horizontal LTP line
+        // 1. Current Price (LTP) Guideline & Pill
         ctx.strokeStyle = lastCol;
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 3]);
@@ -2641,35 +2990,125 @@
         ctx.lineTo(w - padRight, lastY);
         ctx.stroke();
         ctx.setLineDash([]);
+        drawPillBadge(ctx, 4, lastY, padLeft - 8, 18, lastCol, '#ffffff', lastCd.close.toFixed(2));
 
-        // Glowing pill badge on price axis
-        const badgeW = padRight - 6;
-        const badgeH = 17;
-        const badgeX = w - padRight + 3;
-        const badgeY = Math.max(padTop - 2, Math.min(h - padBottom - badgeH + 2, lastY - badgeH / 2));
+        // 2. EMA 9 Pill & Guideline
+        if (chartConfig.ema9 && ema9.length > 0) {
+          const val = ema9[ema9.length - 1];
+          if (val !== undefined && !isNaN(val)) {
+            const ey = Math.round(getY(val)) + 0.5;
+            ctx.strokeStyle = 'rgba(0, 176, 255, 0.45)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath(); ctx.moveTo(padLeft, ey); ctx.lineTo(w - padRight, ey); ctx.stroke();
+            ctx.setLineDash([]);
+            drawPillBadge(ctx, 4, ey, padLeft - 24, 16, '#00b0ff', '#000000', 'EMA 9');
+          }
+        }
 
-        ctx.fillStyle = lastCol;
-        const radius = 3;
-        ctx.beginPath();
-        ctx.moveTo(badgeX + radius, badgeY);
-        ctx.lineTo(badgeX + badgeW - radius, badgeY);
-        ctx.quadraticCurveTo(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + radius);
-        ctx.lineTo(badgeX + badgeW, badgeY + badgeH - radius);
-        ctx.quadraticCurveTo(badgeX + badgeW, badgeY + badgeH, badgeX + badgeW - radius, badgeY + badgeH);
-        ctx.lineTo(badgeX + radius, badgeY + badgeH);
-        ctx.quadraticCurveTo(badgeX, badgeY + badgeH, badgeX, badgeY + badgeH - radius);
-        ctx.lineTo(badgeX, badgeY + radius);
-        ctx.quadraticCurveTo(badgeX, badgeY, badgeX + radius, badgeY);
-        ctx.closePath();
-        ctx.fill();
+        // 3. EMA 21 Pill & Guideline
+        if (chartConfig.ema21 && ema21.length > 0) {
+          const val = ema21[ema21.length - 1];
+          if (val !== undefined && !isNaN(val)) {
+            const ey = Math.round(getY(val)) + 0.5;
+            ctx.strokeStyle = 'rgba(255, 109, 0, 0.45)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath(); ctx.moveTo(padLeft, ey); ctx.lineTo(w - padRight, ey); ctx.stroke();
+            ctx.setLineDash([]);
+            drawPillBadge(ctx, 4, ey, padLeft - 24, 16, '#ff6d00', '#000000', 'EMA 21');
+          }
+        }
 
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 9.5px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(lastCd.close.toFixed(1), badgeX + badgeW / 2, badgeY + 12);
+        // 4. VWAP Pill & Guideline
+        if (chartConfig.vwap && vwap.length > 0) {
+          const val = vwap[vwap.length - 1];
+          if (val !== undefined && !isNaN(val)) {
+            const vy = Math.round(getY(val)) + 0.5;
+            ctx.strokeStyle = 'rgba(179, 136, 255, 0.45)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath(); ctx.moveTo(padLeft, vy); ctx.lineTo(w - padRight, vy); ctx.stroke();
+            ctx.setLineDash([]);
+            drawPillBadge(ctx, 4, vy, padLeft - 24, 16, '#b388ff', '#000000', 'VWAP');
+          }
+        }
+
+        // Top Status Header Ribbon (OHLCV + Live Indicator values)
+        let hoveredCd = lastCd;
+        let hoveredEma9 = ema9[ema9.length - 1];
+        let hoveredEma21 = ema21[ema21.length - 1];
+        let hoveredVwap = vwap[vwap.length - 1];
+
+        // Interactive Crosshair & Tooltip Overlay
+        if (activeChartHover.canvasId === c.id && activeChartHover.x >= padLeft && activeChartHover.x <= w - padRight && activeChartHover.y >= padTop && activeChartHover.y <= padTop + chartH) {
+          const mx = activeChartHover.x;
+          const my = activeChartHover.y;
+          const hIdx = Math.max(0, Math.min(count - 1, Math.floor((mx - padLeft) / slotW)));
+          hoveredCd = data[hIdx];
+          hoveredEma9 = ema9[hIdx];
+          hoveredEma21 = ema21[hIdx];
+          hoveredVwap = vwap[hIdx];
+
+          const crossX = Math.floor(padLeft + hIdx * slotW + slotW / 2) + 0.5;
+          const crossY = Math.floor(my) + 0.5;
+
+          // Crosshair lines
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 2]);
+
+          ctx.beginPath();
+          ctx.moveTo(padLeft, crossY);
+          ctx.lineTo(w - padRight, crossY);
+          ctx.moveTo(crossX, padTop);
+          ctx.lineTo(crossX, padTop + chartH);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Cursor Price Badge on Left Axis
+          const curPrice = getPrice(my);
+          drawPillBadge(ctx, 4, crossY, padLeft - 8, 17, '#334155', '#f8fafc', curPrice.toFixed(2));
+
+          // Cursor Time Badge on Bottom Axis
+          let timeLbl = '';
+          if (hoveredCd.timestamp) {
+            const dt = new Date(hoveredCd.timestamp);
+            timeLbl = !isNaN(dt.getTime()) ? `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}` : hoveredCd.timestamp.substring(11, 16);
+          }
+          if (timeLbl) {
+            drawPillBadge(ctx, crossX - 22, h - 10, 44, 15, '#334155', '#f8fafc', timeLbl, '9px');
+          }
+        }
+
+        // Render Top OHLCV Data Bar
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '500 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "JetBrains Mono", monospace';
+        ctx.textAlign = 'left';
+
+        const oCol = hoveredCd.close >= hoveredCd.open ? '#089981' : '#f23645';
+        let barX = padLeft + 6;
+        ctx.fillText(`O: ${hoveredCd.open.toFixed(1)}`, barX, 16); barX += 68;
+        ctx.fillText(`H: ${hoveredCd.high.toFixed(1)}`, barX, 16); barX += 68;
+        ctx.fillText(`L: ${hoveredCd.low.toFixed(1)}`, barX, 16); barX += 68;
+        ctx.fillStyle = oCol;
+        ctx.fillText(`C: ${hoveredCd.close.toFixed(1)}`, barX, 16); barX += 74;
+
+        if (chartConfig.ema9 && hoveredEma9 !== undefined) {
+          ctx.fillStyle = '#00b0ff';
+          ctx.fillText(`EMA9: ${hoveredEma9.toFixed(1)}`, barX, 16); barX += 76;
+        }
+        if (chartConfig.ema21 && hoveredEma21 !== undefined) {
+          ctx.fillStyle = '#ff6d00';
+          ctx.fillText(`EMA21: ${hoveredEma21.toFixed(1)}`, barX, 16); barX += 78;
+        }
+        if (chartConfig.vwap && hoveredVwap !== undefined) {
+          ctx.fillStyle = '#b388ff';
+          ctx.fillText(`VWAP: ${hoveredVwap.toFixed(1)}`, barX, 16);
+        }
       });
 
-      // Toggle empty state cards
+      // Empty state visibility
       const hasData = allData && allData.length > 0;
       const chEmpty = document.getElementById('chart-empty-state');
       if (chEmpty) chEmpty.style.display = hasData ? 'none' : 'block';
