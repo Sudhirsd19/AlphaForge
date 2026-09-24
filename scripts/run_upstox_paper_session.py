@@ -562,6 +562,28 @@ def main() -> None:
             cache_dir=_repo_root / "runtime" / "historical_data",
         )
         if raw_warmup:
+            warmup_3m = resample_1m_to_interval(
+                raw_candles=raw_warmup,
+                symbol=contract.underlying_symbol,
+                contract_id=contract.contract_id,
+                instrument_type=contract.instrument_type,
+                interval_minutes=3,
+            )
+            sym = contract.underlying_symbol.strip().upper()
+            if sym not in engine._candle_history:
+                engine._candle_history[sym] = []
+            for mc in warmup_3m[-100:]:
+                engine._candle_history[sym].append(mc.to_strategy_candle())
+                closed_3m_candles.append({
+                    "open": float(mc.open),
+                    "high": float(mc.high),
+                    "low": float(mc.low),
+                    "close": float(mc.close),
+                    "volume": mc.volume,
+                    "timestamp": mc.exchange_timestamp.isoformat(),
+                })
+            closed_3m_candles = closed_3m_candles[-100:]
+
             warmup_15m = resample_1m_to_interval(
                 raw_candles=raw_warmup,
                 symbol=contract.underlying_symbol,
@@ -571,9 +593,18 @@ def main() -> None:
             )
             for mc in warmup_15m:
                 confirmation_history.append(mc.to_strategy_candle())
+            confirmation_history = confirmation_history[-200:]
             strategy_bridge.set_confirmation_candles(confirmation_history)
-            logger.info("Preloaded %d historical 15m confirmation bars for Day-1 ADX warmup.", len(confirmation_history))
-            log_bot_activity("WARMUP", "REGIME", f"Preloaded {len(confirmation_history)} historical 15m confirmation bars for ADX warmup")
+            logger.info(
+                "Preloaded %d historical 3m execution bars and %d 15m confirmation bars for zero-lag warmup.",
+                len(engine._candle_history[sym]),
+                len(confirmation_history),
+            )
+            log_bot_activity(
+                "WARMUP",
+                "REGIME",
+                f"Preloaded {len(engine._candle_history[sym])} 3m bars and {len(confirmation_history)} 15m bars for zero-lag warmup",
+            )
     except Exception as e:
         logger.warning("Could not preload historical confirmation warmup: %s", e)
         log_bot_activity("WARN", "WARMUP", f"Confirmation warmup warning: {e}")
