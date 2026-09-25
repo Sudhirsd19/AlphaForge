@@ -77,6 +77,13 @@ class StrategyConfig(BaseModel):
         description="Minimum percentage spread between EMA fast and slow",
     )
 
+    # Afternoon Entry Cutoff Parameters
+    enable_entry_cutoff: bool = False
+    entry_cutoff_time_ist: str = Field(
+        default="14:30",
+        description="Cutoff time in IST (HH:MM) after which new entry signals are rejected",
+    )
+
     def compute_config_hash(self) -> str:
         """
         Produce a deterministic SHA-256 hash of the canonical JSON representation.

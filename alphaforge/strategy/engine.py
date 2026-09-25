@@ -5,7 +5,7 @@ Completely side-effect-free, zero network/broker dependencies, 100% deterministi
 """
 
 import hashlib
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 from alphaforge.core.enums import (
@@ -106,6 +106,33 @@ class DeterministicStrategyEngine:
                 decision=StrategyDecision.REJECT,
                 rejection_code=RejectionCode.REJECT_DATA_STALE,
             )
+
+        # 3.5 Afternoon Entry Cutoff Guard (No new entries after configured cutoff time)
+        if self.config.enable_entry_cutoff:
+            ist_offset = timedelta(hours=5, minutes=30)
+            eval_ist = (
+                evaluation_timestamp.astimezone(UTC) + ist_offset
+                if evaluation_timestamp.tzinfo
+                else evaluation_timestamp + ist_offset
+            )
+            cutoff_hour, cutoff_minute = map(int, self.config.entry_cutoff_time_ist.split(":"))
+            eval_time_of_day = eval_ist.time()
+            cutoff_time = time(cutoff_hour, cutoff_minute)
+            if eval_time_of_day > cutoff_time:
+                return self._build_rejection(
+                    direction=SignalDirection.FLAT,
+                    signal_ts=signal_timestamp,
+                    eval_ts=evaluation_timestamp,
+                    entry=trigger_candle.close,
+                    stop=Decimal("0"),
+                    target=Decimal("0"),
+                    risk_dist=Decimal("0"),
+                    trend=TrendState.NEUTRAL,
+                    futures_status=futures_status,
+                    volume_status="NOT_EVALUATED",
+                    decision=StrategyDecision.REJECT,
+                    rejection_code=RejectionCode.REJECT_ENTRY_CUTOFF,
+                )
 
         # 4. Multi-Timeframe Alignment: Filter closed confirmation candles
         # Only candles fully closed on or before trigger candle close timestamp are eligible.

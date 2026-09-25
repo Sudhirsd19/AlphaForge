@@ -22,6 +22,7 @@ from alphaforge.paper_shadow.models import (
     PaperPerformanceMetrics,
     PaperTradeRecord,
 )
+from alphaforge.risk.enums import TradeSide
 from alphaforge.risk.models import PortfolioRiskState
 
 if TYPE_CHECKING:
@@ -29,7 +30,6 @@ if TYPE_CHECKING:
 
     from alphaforge.backtest.fills import SimulatedFill
     from alphaforge.data.models import MarketCandle
-    from alphaforge.risk.enums import TradeSide
 
 
 class ActivePositionState:
@@ -49,6 +49,7 @@ class ActivePositionState:
         strategy_id: str = "",
         strategy_version: str = "",
         signal_id: str = "",
+        initial_stop_price: Decimal | None = None,
     ) -> None:
         self.symbol = symbol
         self.side = side
@@ -62,6 +63,8 @@ class ActivePositionState:
         self.strategy_id = strategy_id
         self.strategy_version = strategy_version
         self.signal_id = signal_id
+        self.initial_stop_price = initial_stop_price if initial_stop_price is not None else stop_price
+        self.is_breakeven_trailed: bool = False
         self.accumulated_entry_fee = Decimal("0")
         self.accumulated_entry_slippage = Decimal("0")
 
@@ -129,6 +132,7 @@ class PaperPnLTracker:
                     strategy_id=strategy_id,
                     strategy_version=strategy_version,
                     signal_id=signal_id,
+                    initial_stop_price=stop_price,
                 )
                 pos.accumulated_entry_fee += fill.fee
                 pos.accumulated_entry_slippage += fill.slippage_loss
@@ -328,6 +332,49 @@ class PaperPnLTracker:
         """Return shallow copy of active positions."""
         with self._lock:
             return dict(self._active_positions)
+
+    def update_trailing_stop_to_breakeven(
+        self,
+        symbol: str,
+        candle: MarketCandle,
+    ) -> tuple[bool, Decimal | None, Decimal | None]:
+        """
+        Check if active position achieved +1R profit during the candle.
+        If yes, trail stop_price to entry_price (Breakeven).
+        Returns (trailed, old_stop, new_stop).
+        """
+        with self._lock:
+            pos = self._active_positions.get(symbol)
+            if pos is None or pos.is_breakeven_trailed:
+                return False, None, None
+            if pos.initial_stop_price is None or pos.stop_price is None:
+                return False, None, None
+
+            old_stop = pos.stop_price
+
+            if pos.side == TradeSide.LONG:
+                risk_dist = pos.entry_price - pos.initial_stop_price
+                if risk_dist <= Decimal("0"):
+                    return False, None, None
+                # If candle high reached entry + 1R
+                if candle.high >= (pos.entry_price + risk_dist):
+                    if pos.stop_price < pos.entry_price:
+                        pos.stop_price = pos.entry_price
+                        pos.is_breakeven_trailed = True
+                        return True, old_stop, pos.stop_price
+
+            elif pos.side == TradeSide.SHORT:
+                risk_dist = pos.initial_stop_price - pos.entry_price
+                if risk_dist <= Decimal("0"):
+                    return False, None, None
+                # If candle low reached entry - 1R
+                if candle.low <= (pos.entry_price - risk_dist):
+                    if pos.stop_price > pos.entry_price:
+                        pos.stop_price = pos.entry_price
+                        pos.is_breakeven_trailed = True
+                        return True, old_stop, pos.stop_price
+
+            return False, None, None
 
     def get_portfolio_risk_state(
         self, current_candles: dict[str, MarketCandle] | None = None

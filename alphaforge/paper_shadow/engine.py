@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from alphaforge.broker.models import BrokerOrderType
@@ -23,6 +23,7 @@ from alphaforge.core.enums import (
     SignalDirection,
     StrategyDecision,
 )
+from alphaforge.core.models import Candle
 from alphaforge.execution.enums import OrderSide
 from alphaforge.execution.idempotency import OrderRole
 from alphaforge.ledger.ledger import AuditLedger
@@ -300,7 +301,19 @@ class PaperShadowEngine:
 
             # Step 4: Strategy Evaluation (Causal: closed candles [1], [2], ... quarantined [0])
             history = self._candle_history[sym]
-            exec_candles = [strat_candle] + list(reversed(history[:-1]))
+            if strat_candle.is_closed:
+                forming_quarantine = Candle(
+                    timestamp=strat_candle.timestamp + timedelta(minutes=3),
+                    open=strat_candle.close,
+                    high=strat_candle.close,
+                    low=strat_candle.close,
+                    close=strat_candle.close,
+                    volume=0,
+                    is_closed=False,
+                )
+                exec_candles = [forming_quarantine] + list(reversed(history))
+            else:
+                exec_candles = [strat_candle] + list(reversed(history[:-1]))
             conf_candles = exec_candles
 
             eval_start = time.perf_counter_ns()
@@ -505,6 +518,28 @@ class PaperShadowEngine:
         active_pos = self._pnl_tracker.get_active_positions().get(symbol)
         if active_pos is None:
             return
+
+        # Trailing Stop: Check if position reached +1R and trail to Breakeven
+        trailed, old_stop, new_stop = self._pnl_tracker.update_trailing_stop_to_breakeven(symbol, candle)
+        if trailed:
+            observe_event(
+                ObservabilityEvent(
+                    category=ObservabilityCategory.STRATEGY,
+                    event_type=StrategyEventType.SIGNAL_GENERATED.value,
+                    severity=ObservabilitySeverity.INFO,
+                    symbol=symbol,
+                    message=f"Trailing Stop moved to Breakeven for {symbol} ({old_stop} -> {new_stop})",
+                    attributes={
+                        "symbol": symbol,
+                        "old_stop": str(old_stop),
+                        "new_stop": str(new_stop),
+                        "entry_price": str(active_pos.entry_price),
+                    },
+                )
+            )
+            active_pos = self._pnl_tracker.get_active_positions().get(symbol)
+            if active_pos is None:
+                return
 
         # Use authoritative strategy-provided exit levels
         stop_p = active_pos.stop_price
