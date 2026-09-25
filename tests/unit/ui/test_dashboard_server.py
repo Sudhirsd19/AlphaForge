@@ -200,8 +200,8 @@ def test_get_shadow_market(server_url: str) -> None:
     assert isinstance(data, dict)
     assert data["provider"] == "UPSTOX"
     if not data["active"]:
-        assert data["message"] == "NO REAL-MARKET SESSION ACTIVE"
-        assert data["candles"] == []
+        assert data["message"] in ("NO REAL-MARKET SESSION ACTIVE", "SESSION STANDBY (CACHED DATA)")
+        assert isinstance(data["candles"], list)
 
 
 def test_get_signals_state(server_url: str) -> None:

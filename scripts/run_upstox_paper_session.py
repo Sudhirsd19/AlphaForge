@@ -47,15 +47,15 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from alphaforge.strategy.config import StrategyConfig
-
 _repo_root = Path(__file__).resolve().parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
+from alphaforge.strategy.config import StrategyConfig
 
-def load_dotenv(path: Path | None = None) -> None:
-    """Load key-value pairs from .env into os.environ if not already set."""
+
+def load_dotenv(path: Path | None = None, override: bool = True) -> None:
+    """Load key-value pairs from .env into os.environ."""
     env_file = path or (_repo_root / ".env")
     if not env_file.is_file():
         return
@@ -68,11 +68,12 @@ def load_dotenv(path: Path | None = None) -> None:
             k, v = k.strip(), v.strip()
             if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
                 v = v[1:-1]
-            if k and k not in os.environ:
-                os.environ[k] = v
+            if k:
+                if override or k not in os.environ:
+                    os.environ[k] = v
 
 
-load_dotenv()
+load_dotenv(override=True)
 
 from alphaforge.broker.models import BrokerOrder, BrokerOrderRequest
 from alphaforge.broker.paper import PaperBroker
@@ -347,9 +348,9 @@ def main() -> None:
     if contract is None:
         raise RuntimeError("No active authoritative NIFTY Futures contract; failing closed.")
 
-    inst_key = os.environ.get(
-        "UPSTOX_INSTRUMENT_KEY",
-        UPSTOX_KNOWN_INSTRUMENT_KEYS.get(contract.contract_id, f"NSE_FO|{contract.contract_id}"),
+    inst_key = UPSTOX_KNOWN_INSTRUMENT_KEYS.get(
+        contract.contract_id,
+        os.environ.get("UPSTOX_INSTRUMENT_KEY", f"NSE_FO|{contract.contract_id}"),
     )
     adapter = UpstoxMarketDataAdapter(contract=contract, instrument_key=inst_key)
 

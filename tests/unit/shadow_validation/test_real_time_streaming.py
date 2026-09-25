@@ -40,12 +40,12 @@ def active_contract() -> ContractMaster:
         exchange="NSE",
         segment="NFO",
         underlying_symbol="NIFTY",
-        contract_id="NIFTY26SEPFUT",
+        contract_id="NIFTY26OCTFUT",
         instrument_type=InstrumentType.FUTURES,
-        expiry_datetime=datetime(2026, 9, 24, 10, 0, tzinfo=UTC),
+        expiry_datetime=datetime(2026, 10, 29, 10, 0, tzinfo=UTC),
         listing_datetime=datetime(2026, 6, 1, 3, 45, tzinfo=UTC),
         trading_start_datetime=datetime(2026, 6, 1, 3, 45, tzinfo=UTC),
-        trading_end_datetime=datetime(2026, 9, 24, 10, 0, tzinfo=UTC),
+        trading_end_datetime=datetime(2026, 10, 29, 10, 0, tzinfo=UTC),
         lot_size=50,
         tick_size=Decimal("0.05"),
         contract_multiplier=Decimal("1"),
@@ -179,7 +179,7 @@ def test_metadata_contains_ingestion_sequence_no_and_provenance(
     assert event is not None
     assert event.ingestion_sequence_no == 1
     assert event.provider == "UPSTOX"
-    assert event.instrument_key == "NSE_FO|NIFTY26SEPFUT"
+    assert event.instrument_key == f"NSE_FO|{active_contract.contract_id}"
     assert event.raw_payload_hash == hashlib.sha256(payload_bytes).hexdigest()
     assert event.provenance is not None
     assert event.provenance.provider_authenticated is False  # dry token

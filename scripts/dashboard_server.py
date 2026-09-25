@@ -49,8 +49,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
-def load_dotenv(path: Path | None = None) -> None:
-    """Load key-value pairs from .env into os.environ if not already set."""
+def load_dotenv(path: Path | None = None, override: bool = True) -> None:
+    """Load key-value pairs from .env into os.environ."""
     env_file = path or (REPO_ROOT / ".env")
     if not env_file.is_file():
         return
@@ -63,11 +63,12 @@ def load_dotenv(path: Path | None = None) -> None:
             k, v = k.strip(), v.strip()
             if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
                 v = v[1:-1]
-            if k and k not in os.environ:
-                os.environ[k] = v
+            if k:
+                if override or k not in os.environ:
+                    os.environ[k] = v
 
 
-load_dotenv()
+load_dotenv(override=True)
 
 if TYPE_CHECKING:
     from alphaforge.contract.models import ContractMaster
@@ -168,8 +169,16 @@ def get_live_bot_state(only_active: bool = True) -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(state_file.read_text(encoding="utf-8"))
-        if not only_active or data.get("status") in ("RUNNING", "CONNECTED", "STARTING"):
-            return data
+        if only_active:
+            st = data.get("status")
+            if st not in ("RUNNING", "CONNECTED", "STARTING"):
+                return None
+            last_up = data.get("last_update")
+            if last_up:
+                dt_up = datetime.fromisoformat(str(last_up))
+                if (datetime.now(UTC) - dt_up).total_seconds() > 60:
+                    return None
+        return data
     except Exception:
         pass
     return None
@@ -314,6 +323,7 @@ class BotManager:
             self.status = BotStatus.STARTING
             self.error_message = None
             self.stop_flag_file.unlink(missing_ok=True)
+            load_dotenv(override=True)
 
             cmd = (
                 self._command
@@ -687,10 +697,10 @@ def load_real_historical_candles() -> tuple[list[MarketCandle], list[MarketCandl
         return None
     try:
         raw = json.loads(json_files[0].read_text(encoding="utf-8"))
-        if not isinstance(raw, list) or not raw:
-            return None
-        c3 = resample_1m_to_interval(raw, "NIFTY", "NIFTY26SEPFUT", InstrumentType.FUTURES, 3)
-        c15 = resample_1m_to_interval(raw, "NIFTY", "NIFTY26SEPFUT", InstrumentType.FUTURES, 15)
+        active_c = STATE.active_contract
+        cid = active_c.contract_id if active_c else "NIFTY26OCTFUT"
+        c3 = resample_1m_to_interval(raw, "NIFTY", cid, InstrumentType.FUTURES, 3)
+        c15 = resample_1m_to_interval(raw, "NIFTY", cid, InstrumentType.FUTURES, 15)
         with STATE.lock:
             STATE._cached_candles_3m = c3
             STATE._cached_candles_15m = c15
@@ -2184,7 +2194,7 @@ class AlphaForgeRequestHandler(BaseHTTPRequestHandler):
 
                 try:
                     c = STATE.active_contract
-                    default_sym = c.contract_id if c else "NIFTY26SEPFUT"
+                    default_sym = c.contract_id if c else "NIFTY26OCTFUT"
                     symbol = payload.get("symbol", default_sym)
                     side = OrderSide(payload.get("side", "BUY"))
                     quantity = int(payload.get("quantity", 50))
