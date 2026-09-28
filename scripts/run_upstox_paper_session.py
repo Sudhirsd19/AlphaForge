@@ -281,14 +281,16 @@ class _ObservedPaperBroker(PaperBroker):
         self.total_submitted = 0
         self.total_filled = 0
         self.recent_orders: list[dict[str, Any]] = []
+        self.log_fn: Any | None = None
 
     def submit_order(self, request: BrokerOrderRequest) -> BrokerOrder:
         order = super().submit_order(request)
         self.total_submitted += 1
+        side_val = order.side.value if hasattr(order.side, "value") else str(order.side)
         self.recent_orders.insert(0, {
             "client_order_id": order.client_order_id,
             "symbol": order.symbol,
-            "side": order.side.value if hasattr(order.side, "value") else str(order.side),
+            "side": side_val,
             "quantity": order.quantity,
             "price": str(order.average_price or request.price or "0.00"),
             "state": order.status.value if hasattr(order.status, "value") else str(order.status),
@@ -296,15 +298,20 @@ class _ObservedPaperBroker(PaperBroker):
         })
         if len(self.recent_orders) > 30:
             self.recent_orders.pop()
+        if self.log_fn:
+            self.log_fn("ORDER", "BROKER", f"Paper order SUBMITTED: {side_val} {order.quantity} @ {request.price or 'MARKET'}")
         return order
 
     def simulate_full_fill(self, client_order_id: str, fill_price: Decimal) -> BrokerOrder:
         order = super().simulate_full_fill(client_order_id, fill_price)
         self.total_filled += 1
+        side_val = order.side.value if hasattr(order.side, "value") else str(order.side)
         for o in self.recent_orders:
             if o.get("client_order_id") == client_order_id:
                 o["state"] = order.status.value if hasattr(order.status, "value") else str(order.status)
                 o["price"] = str(fill_price)
+        if self.log_fn:
+            self.log_fn("FILL", "BROKER", f"Paper order FILLED: {side_val} {order.quantity} @ {fill_price}")
         return order
 
 
@@ -408,11 +415,13 @@ def main() -> None:
     )
     stop_watcher.start()
 
+    stale_threshold = int(os.environ.get("STALE_DATA_THRESHOLD_SECONDS", "180"))
     config = PaperShadowConfig(
         mode=PaperShadowMode.PAPER,
         lot_size=contract.lot_size,
         contract_multiplier=contract.contract_multiplier,
         initial_capital=Decimal("1000000"),
+        stale_data_threshold_seconds=stale_threshold,
     )
     risk_config = RiskConfig(
         max_single_position_notional=Decimal("2.00"),
@@ -421,6 +430,7 @@ def main() -> None:
         max_portfolio_risk=Decimal("0.0500"),
     )
     paper_broker = _ObservedPaperBroker()
+    paper_broker.log_fn = log_bot_activity
     engine = PaperShadowEngine(
         config=config,
         risk_config=risk_config,
@@ -513,6 +523,7 @@ def main() -> None:
 
     def _heartbeat_worker() -> None:
         last_heartbeat = time.monotonic()
+        last_offhours_log = 0.0
         while not stop_requested and not stop_flag_file.exists():
             time.sleep(1.0)
             now_mono = time.monotonic()
@@ -533,12 +544,16 @@ def main() -> None:
                         f"Heartbeat OK | Uptime: {uptime_str} | Feed: STREAMING | Market: OPEN "
                         f"| Ticks: {t_events} | 3m Bars: {e_bars} | 15m Bars: {c_bars}"
                     )
+                    log_bot_activity("HEARTBEAT", "HEALTH", msg)
                 else:
                     msg = (
                         f"Heartbeat OK | Uptime: {uptime_str} | Feed: CONNECTED | Market: {session_status} "
                         f"(Waiting for next session) | 0 Real Orders Enforced"
                     )
-                log_bot_activity("HEARTBEAT", "HEALTH", msg)
+                    if now_mono - last_offhours_log >= 300.0:
+                        last_offhours_log = now_mono
+                        log_bot_activity("HEARTBEAT", "HEALTH", msg)
+
                 flush_live_state(force=True)
 
     heartbeat_thread = threading.Thread(
@@ -690,7 +705,18 @@ def main() -> None:
 
             # PaperShadowEngine remains authoritative for validation, risk,
             # routing/FSM, deterministic fill simulation, P&L, and reconciliation.
-            engine.process_event(event)
+            val_res = engine.process_event(event)
+            if not val_res.is_valid:
+                ano_str = val_res.anomaly.value if hasattr(val_res.anomaly, "value") else str(val_res.anomaly)
+                logger.warning("3m candle rejected by validator: %s (%s)", ano_str, val_res.reason)
+                log_bot_activity(
+                    "WARN",
+                    "VALIDATION",
+                    f"3m candle #{counts['execution_3m_bars'] + 1} rejected: {ano_str} ({val_res.reason})",
+                )
+                flush_live_state(force=True)
+                continue
+
             counts["execution_3m_bars"] += 1
 
             sig = strategy_bridge.last_signal
