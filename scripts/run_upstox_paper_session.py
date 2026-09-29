@@ -268,7 +268,7 @@ class _ConfirmationAwareStrategyEngine(DeterministicStrategyEngine):
             "category": "SIGNAL" if decision_val == "ACCEPT" else "WAIT",
             "reason": reason_str,
         })
-        if len(self.decision_history) > 50:
+        if len(self.decision_history) > 200:
             self.decision_history.pop()
         return sig
 
@@ -382,8 +382,16 @@ def main() -> None:
                 "message": msg,
             }
             bot_activity_logs.append(entry)
-            if len(bot_activity_logs) > 300:
-                bot_activity_logs.pop(0)
+            if len(bot_activity_logs) > 2000:
+                # Prioritize keeping critical order/fill/signal events
+                pruned = False
+                for i, log_item in enumerate(bot_activity_logs[:500]):
+                    if log_item.get("level") in ("HEARTBEAT", "TICK"):
+                        bot_activity_logs.pop(i)
+                        pruned = True
+                        break
+                if not pruned:
+                    bot_activity_logs.pop(0)
 
     def _trigger_graceful_stop(reason: str = "stop requested") -> None:
         nonlocal stop_requested
@@ -512,7 +520,7 @@ def main() -> None:
                     }
                     for p in paper_broker.get_positions()
                 ],
-                "bot_logs": list(bot_activity_logs[-250:]),
+                "bot_logs": list(bot_activity_logs[-500:]),
             }
             tmp = live_state_file.with_suffix(".tmp")
             try:

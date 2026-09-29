@@ -933,7 +933,8 @@
           <div class="kpi-main-val" id="ov-risk-equity">₹1,000,000.00</div>
           <div class="kpi-subrow">
             <span>Reserved: <strong id="ov-risk-reserved">₹0.00</strong></span>
-            <span>Open Trades: <strong id="ov-risk-positions">0 / 5</strong></span>
+            <span>Active: <strong id="ov-risk-positions">0 / 5</strong></span>
+            <span>Today's Fills: <strong id="ov-orders-count" style="color: #38bdf8;">0</strong></span>
           </div>
         </div>
 
@@ -1120,6 +1121,19 @@
               </div>
             </div>
           </div>
+
+          <!-- Today's Executed Paper Orders Card -->
+          <div class="op-panel" id="ov-recent-orders-panel">
+            <div class="op-panel-header">
+              <span class="op-panel-title">Today's Paper Orders</span>
+              <span class="status-tag tag-cyan" id="ov-recent-orders-badge">0 ORDERS</span>
+            </div>
+            <div id="ov-recent-orders-list" style="max-height: 180px; overflow-y: auto;">
+              <div style="color: var(--text-dim); text-align: center; padding: 14px 0; font-size: 11px;">
+                No paper orders placed yet today.
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1303,22 +1317,18 @@
           <table class="forensic-tbl">
             <thead>
               <tr>
+                <th>Time (UTC)</th>
                 <th>Order ID</th>
-                <th>Trade ID</th>
-                <th>Causation ID</th>
                 <th>Symbol</th>
                 <th>Side</th>
-                <th>Qty</th>
-                <th>Ref Price</th>
-                <th>Fill Price</th>
-                <th>Slippage</th>
-                <th>Fees</th>
-                <th>State</th>
+                <th>Quantity</th>
+                <th>Execution Price</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody id="tbl-shadow-orders">
               <tr>
-                <td colspan="11" style="text-align: center; color: var(--text-dim); padding: 20px;">
+                <td colspan="7" style="text-align: center; color: var(--text-dim); padding: 20px;">
                   NO PAPER ORDERS SUBMITTED
                 </td>
               </tr>
@@ -2341,9 +2351,10 @@
 
             if (fullBody) {
               const trFull = document.createElement('tr');
+              const activeCid = (contractRes && contractRes.contract_id) || 'NIFTY26OCTFUT';
               trFull.innerHTML = `
                 <td>${item.timestamp || '—'}</td>
-                <td>NIFTY26SEPFUT</td>
+                <td>${activeCid}</td>
                 <td><span class="status-tag tag-slate">${item.final_decision}</span></td>
                 <td><span class="status-tag tag-amber">${item.category || 'WAIT'}</span></td>
                 <td>${item.reason}</td>
@@ -2351,6 +2362,66 @@
               fullBody.appendChild(trFull);
             }
           });
+        }
+
+        // Orders & Fills Table & Overview Badge
+        const ordersList = (statusRes && statusRes.orders) || [];
+        const ordCountEl = document.getElementById('ov-orders-count');
+        if (ordCountEl) ordCountEl.textContent = statusRes.orders_count !== undefined ? statusRes.orders_count : ordersList.length;
+
+        const shwFillsEl = document.getElementById('shw-fills');
+        if (shwFillsEl) {
+          const filledCount = ordersList.filter(o => (o.state || '').toUpperCase() === 'FILLED').length;
+          shwFillsEl.textContent = `${ordersList.length} / ${filledCount}`;
+        }
+
+        // Render Overview Mini-Panel for Orders
+        const ovOrdersBadge = document.getElementById('ov-recent-orders-badge');
+        if (ovOrdersBadge) ovOrdersBadge.textContent = `${ordersList.length} ORDERS`;
+        const ovOrdersList = document.getElementById('ov-recent-orders-list');
+        if (ovOrdersList) {
+          if (ordersList.length === 0) {
+            ovOrdersList.innerHTML = '<div style="color: var(--text-dim); text-align: center; padding: 14px 0; font-size: 11px;">No paper orders placed yet today.</div>';
+          } else {
+            ovOrdersList.innerHTML = ordersList.map(o => {
+              const sideColor = o.side === 'BUY' ? '#10b981' : '#f43f5e';
+              const sideBg = o.side === 'BUY' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)';
+              return `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 11px;">
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <span style="font-family: monospace; color: var(--text-muted);">${escapeHtml(o.time || '—')}</span>
+                    <span style="padding: 2px 6px; border-radius: 3px; font-weight: 800; font-size: 10px; background: ${sideBg}; color: ${sideColor};">${escapeHtml(o.side || '—')}</span>
+                    <strong style="color: #f1f5f9;">${escapeHtml(o.symbol || 'NIFTY')}</strong>
+                    <span style="color: var(--text-dim);">(${o.quantity} Qty)</span>
+                  </div>
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <span style="font-family: monospace; font-weight: 800; color: #38bdf8;">@ ${escapeHtml(String(o.price || '0.00'))}</span>
+                    <span class="status-tag ${o.state === 'FILLED' ? 'tag-green' : 'tag-amber'}" style="font-size: 9px; padding: 1px 5px;">${escapeHtml(o.state || 'FILLED')}</span>
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
+        }
+
+        // Render Orders & Fills Table in Execution Tab
+        const tblOrders = document.getElementById('tbl-shadow-orders');
+        if (tblOrders) {
+          if (ordersList.length === 0) {
+            tblOrders.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 20px;">NO PAPER ORDERS SUBMITTED</td></tr>';
+          } else {
+            tblOrders.innerHTML = ordersList.map(o => `
+              <tr>
+                <td style="font-family: monospace; color: var(--text-muted);">${escapeHtml(o.time || '—')}</td>
+                <td style="font-family: monospace; font-size: 11px; color: #a78bfa;">${escapeHtml(o.client_order_id || '—')}</td>
+                <td><strong>${escapeHtml(o.symbol || 'NIFTY')}</strong></td>
+                <td><span class="status-tag ${o.side === 'BUY' ? 'tag-green' : 'tag-red'}">${escapeHtml(o.side || '—')}</span></td>
+                <td>${o.quantity || 0}</td>
+                <td style="font-family: monospace; color: #38bdf8;">${escapeHtml(String(o.price || '0.00'))}</td>
+                <td><span class="status-tag ${o.state === 'FILLED' ? 'tag-green' : 'tag-amber'}">${escapeHtml(o.state || 'PENDING')}</span></td>
+              </tr>
+            `).join('');
+          }
         }
 
         // Logs
