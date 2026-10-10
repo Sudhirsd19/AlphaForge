@@ -40,6 +40,7 @@ from alphaforge.data.models import MarketCandle
 from alphaforge.risk.models import RiskConfig
 from alphaforge.shadow_validation.contract_source import get_current_active_contract
 from alphaforge.strategy.config import StrategyConfig
+from alphaforge.strategy.config_high_winrate import HighWinRateStrategyConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -314,6 +315,13 @@ def run_real_backtest(
         logger.error("Insufficient 3m candles for backtesting (%d bars). Minimum 30 required.", len(candles_3m))
         sys.exit(1)
 
+    # Contract expiry resolution
+    expiry_dt = (
+        datetime(2026, 10, 29, 10, 0, tzinfo=UTC)
+        if "OCT" in contract_id
+        else datetime(2026, 9, 24, 10, 0, tzinfo=UTC)
+    )
+
     # Construct authoritative ContractMaster
     contract = ContractMaster(
         exchange="NSE",
@@ -323,8 +331,8 @@ def run_real_backtest(
         instrument_type=InstrumentType.FUTURES,
         listing_datetime=datetime(2026, 6, 1, 3, 45, tzinfo=UTC),
         trading_start_datetime=datetime(2026, 6, 1, 3, 45, tzinfo=UTC),
-        trading_end_datetime=datetime(2026, 9, 24, 10, 0, tzinfo=UTC),
-        expiry_datetime=datetime(2026, 9, 24, 10, 0, tzinfo=UTC),
+        trading_end_datetime=expiry_dt,
+        expiry_datetime=expiry_dt,
         lot_size=lot_size,
         tick_size=Decimal("0.05"),
         contract_multiplier=Decimal("1"),
@@ -354,10 +362,24 @@ def run_real_backtest(
     )
 
     strat_cfg = StrategyConfig(
-        strategy_version="1.1.0",
-        enable_regime_filter=regime_filter,
-        min_adx_threshold=Decimal(str(min_adx)),
-        min_ema_spread_pct=Decimal(str(min_spread)),
+        strategy_version="1.5.0-PREMIUM-55-65",
+        # Premium Quality Trades - Strongest Setups Only
+        # Target: 55-65% win rate with 15-20 trades
+        breakout_lookback=22,                    # Very strong levels
+        min_body_ratio=Decimal("0.60"),          # Very strong candles
+        min_close_location_ratio=Decimal("0.75"), # Very strong closes
+        min_relative_volume=Decimal("1.35"),     # Strong volume
+        rsi_long_min=Decimal("50.0"),            # Balanced
+        rsi_long_max=Decimal("75.0"),
+        rsi_short_min=Decimal("25.0"),
+        rsi_short_max=Decimal("50.0"),
+        atr_stop_multiplier=Decimal("1.1"),      # Moderate stops
+        atr_min_pct=Decimal("0.0004"),
+        atr_max_pct=Decimal("0.0140"),
+        min_risk_distance_pct=Decimal("0.0010"),
+        max_risk_distance_pct=Decimal("0.0280"),
+        enable_regime_filter=False,              # Focus on other filters
+        enable_entry_cutoff=False,               # Full day trading
     )
 
     # Derivatives / Futures Risk Sizing:
