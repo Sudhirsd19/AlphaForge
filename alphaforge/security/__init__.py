@@ -38,6 +38,11 @@ from alphaforge.security.invariants import (
 from alphaforge.security.kill_switch import KillSwitch, KillSwitchAuditEvent
 from alphaforge.security.redaction import RedactionFormatter, redact_text
 from alphaforge.security.startup import SecurityStartupGate, StartupSecurityReport
+from alphaforge.security.env_guard import (
+    CredentialGuard,
+    check_env_permissions,
+    load_secure_env,
+)
 
 __all__ = [
     # Authorizer & Broker
@@ -81,4 +86,8 @@ __all__ = [
     # Startup
     "SecurityStartupGate",
     "StartupSecurityReport",
+    # Environment Guard
+    "CredentialGuard",
+    "check_env_permissions",
+    "load_secure_env",
 ]

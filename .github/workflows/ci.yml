@@ -1,0 +1,153 @@
+name: AlphaForge CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ "3.11", "3.12" ]
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for version detection
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install -e ".[dev]"
+
+    - name: Run Ruff Linter
+      run: ruff check alphaforge tests --output-format=github
+      continue-on-error: false
+
+    - name: Run MyPy Type Checker
+      run: mypy alphaforge
+      continue-on-error: false
+
+    - name: Run pytest with Coverage
+      run: |
+        pytest --cov=alphaforge --cov-report=xml --cov-report=term-missing --cov-fail-under=85
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: true
+        verbose: true
+
+    - name: Generate coverage badge
+      if: matrix.python-version == '3.11'
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-report
+        path: htmlcov/
+
+  security-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Run Bandit Security Scan
+      uses: gaurav-nelson/github-action-bandit@v1
+      with:
+        path: "alphaforge"
+        level: medium
+        confidence: high
+
+    - name: Check for hardcoded secrets
+      run: |
+        if grep -r "UPSTOX_API_KEY\|UPSTOX_API_SECRET\|api_key\s*=\s*['\"]" alphaforge/ --include="*.py" | grep -v "os.environ"; then
+          echo "ERROR: Potential hardcoded credentials detected"
+          exit 1
+        else
+          echo "✓ No hardcoded credentials found"
+        fi
+
+    - name: Verify .env is ignored
+      run: |
+        if git ls-files | grep -E "^\.env$"; then
+          echo "ERROR: .env file is tracked in git"
+          exit 1
+        else
+          echo "✓ .env file is properly ignored"
+        fi
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: test-and-lint
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+
+    - name: Run integration tests
+      run: pytest tests/integration/ -v --tb=short
+
+  property-based-tests:
+    runs-on: ubuntu-latest
+    needs: test-and-lint
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+
+    - name: Run property-based tests
+      run: pytest tests/property/ -v --tb=short
+      timeout-minutes: 30
+
+  build-artifacts:
+    runs-on: ubuntu-latest
+    needs: [ test-and-lint, security-check ]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Build distribution
+      run: |
+        python -m pip install --upgrade build
+        python -m build
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-package-distributions
+        path: dist/
+        retention-days: 30

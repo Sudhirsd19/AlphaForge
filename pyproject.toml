@@ -88,5 +88,5 @@ ignore_errors = true
 minversion = "8.0"
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-ra -q --strict-markers --import-mode=importlib"
+addopts = "-ra -q --strict-markers --import-mode=importlib --cov=alphaforge --cov-report=term-missing --cov-report=html --cov-fail-under=85"
 

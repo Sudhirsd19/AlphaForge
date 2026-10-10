@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AlphaForge Project Audit Report</title>
+<style>
+:root { color-scheme: light; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8f9fa; color: #1a1a2e; line-height: 1.6; padding: 24px; }
+.container { max-width: 900px; margin: 0 auto; }
+h1 { font-size: 1.6em; font-weight: 700; margin-bottom: 4px; color: #0f172a; }
+.subtitle { color: #64748b; font-size: 0.95em; margin-bottom: 28px; }
+h2 { font-size: 1.15em; font-weight: 600; color: #1e293b; margin: 28px 0 12px 0; padding-bottom: 6px; border-bottom: 2px solid #e2e8f0; }
+h3 { font-size: 1.0em; font-weight: 600; color: #334155; margin: 16px 0 8px 0; }
+
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 28px; }
+.stat-card { background: #fff; border-radius: 10px; padding: 16px; border: 1px solid #e2e8f0; }
+.stat-label { font-size: 0.78em; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.stat-value { font-size: 1.5em; font-weight: 700; margin-top: 4px; }
+.stat-sub { font-size: 0.78em; color: #94a3b8; margin-top: 2px; }
+
+.severity-critical { color: #dc2626; }
+.severity-high { color: #ea580c; }
+.severity-medium { color: #d97706; }
+.severity-low { color: #2563eb; }
+.severity-info { color: #059669; }
+
+.finding { background: #fff; border-radius: 10px; padding: 16px 18px; margin-bottom: 12px; border-left: 4px solid #e2e8f0; }
+.finding.critical { border-left-color: #dc2626; background: #fef2f2; }
+.finding.high { border-left-color: #ea580c; background: #fff7ed; }
+.finding.medium { border-left-color: #d97706; background: #fffbeb; }
+.finding.low { border-left-color: #2563eb; background: #eff6ff; }
+.finding.positive { border-left-color: #059669; background: #f0fdf4; }
+
+.finding-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.finding-title { font-weight: 600; font-size: 0.95em; }
+.badge { font-size: 0.7em; font-weight: 700; padding: 2px 8px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.5px; }
+.badge-critical { background: #fecaca; color: #991b1b; }
+.badge-high { background: #fed7aa; color: #9a3412; }
+.badge-medium { background: #fde68a; color: #92400e; }
+.badge-low { background: #bfdbfe; color: #1e40af; }
+.badge-ok { background: #bbf7d0; color: #166534; }
+
+.finding p { font-size: 0.88em; color: #475569; margin-top: 4px; }
+.recommendation { font-size: 0.85em; color: #1e40af; margin-top: 6px; font-style: italic; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.85em; margin: 12px 0; }
+th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+th { background: #f1f5f9; font-weight: 600; color: #475569; }
+tr:hover { background: #f8fafc; }
+
+.score-bar { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.score-track { flex: 1; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+.score-fill { height: 100%; border-radius: 4px; }
+.score-label { font-size: 0.82em; font-weight: 600; min-width: 40px; }
+
+.section-note { font-size: 0.85em; color: #64748b; font-style: italic; margin: 8px 0 16px 0; }
+
+.arch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 12px 0; }
+.arch-module { background: #f1f5f9; border-radius: 8px; padding: 10px 12px; text-align: center; font-size: 0.82em; font-weight: 600; color: #334155; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>AlphaForge Project Audit Report</h1>
+<p class="subtitle">Comprehensive forensic audit &mdash; 10 October 2026 &bull; Repository: Sudhirsd19/AlphaForge</p>
+
+<!-- Executive Summary -->
+<div class="summary-grid">
+  <div class="stat-card">
+    <div class="stat-label">Source Files</div>
+    <div class="stat-value">154</div>
+    <div class="stat-sub">Python modules in alphaforge/</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Lines of Code</div>
+    <div class="stat-value">35,865</div>
+    <div class="stat-sub">Production code</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Test Files</div>
+    <div class="stat-value">136</div>
+    <div class="stat-sub">1,030 tests (100% pass at Phase 18)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Subsystems</div>
+    <div class="stat-value">18</div>
+    <div class="stat-sub">Modular architecture</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Uncommitted Changes</div>
+    <div class="stat-value severity-high">181</div>
+    <div class="stat-sub">Modified files on disk vs HEAD</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Overall Health</div>
+    <div class="stat-value severity-medium">7.5 / 10</div>
+    <div class="stat-sub">See findings below</div>
+  </div>
+</div>
+
+<h2>1. Architecture Overview</h2>
+<p class="section-note">AlphaForge is a deterministic, auditable quantitative NIFTY futures trading system at Phase 18 (Institutional Hardening). Currently operating in PAPER / SHADOW mode only.</p>
+<div class="arch-grid">
+  <div class="arch-module">core</div>
+  <div class="arch-module">strategy</div>
+  <div class="arch-module">data</div>
+  <div class="arch-module">contract</div>
+  <div class="arch-module">basis</div>
+  <div class="arch-module">risk</div>
+  <div class="arch-module">cost</div>
+  <div class="arch-module">execution</div>
+  <div class="arch-module">broker</div>
+  <div class="arch-module">ledger</div>
+  <div class="arch-module">backtest</div>
+  <div class="arch-module">replay</div>
+  <div class="arch-module">fault_injection</div>
+  <div class="arch-module">security</div>
+  <div class="arch-module">observability</div>
+  <div class="arch-module">deployment</div>
+  <div class="arch-module">paper_shadow</div>
+  <div class="arch-module">shadow_validation</div>
+</div>
+
+<h2>2. Critical & High-Priority Findings</h2>
+
+<div class="finding critical">
+  <div class="finding-header">
+    <span class="finding-title">SEC-01: Plain-Text Credentials in .env File</span>
+    <span class="badge badge-critical">Critical</span>
+  </div>
+  <p>The <code>.env</code> file contains highly sensitive credentials in plain text: Upstox API key, API secret, mobile number, PIN, TOTP secret key, and a JWT access token. While <code>.gitignore</code> correctly excludes <code>.env</code> and git history shows it was never committed, these credentials sit unprotected on disk with no encryption at rest.</p>
+  <p>The TOTP secret key (<code>UPSTOX_TOTP_KEY</code>) is particularly dangerous &mdash; it allows generating valid 2FA codes indefinitely, meaning a single file leak compromises the entire brokerage account.</p>
+  <p class="recommendation">Recommendation: Migrate secrets to OS keyring (Windows Credential Manager), encrypted vault, or at minimum set file permissions to owner-only (chmod 600). Consider rotating all credentials since they are now visible in this audit context.</p>
+</div>
+
+<div class="finding critical">
+  <div class="finding-header">
+    <span class="finding-title">SEC-02: 181 Uncommitted Changed Files (Whitespace-Only)</span>
+    <span class="badge badge-critical">Critical</span>
+  </div>
+  <p>There are 181 modified files shown by <code>git status</code>, spanning every subsystem &mdash; source, tests, docs, golden fixtures, and pyproject.toml. However, <code>git diff -w</code> (ignore whitespace) produces zero output, meaning all 181 changes are <strong>whitespace/line-ending modifications only</strong> (likely CRLF &harr; LF conversion on Windows).</p>
+  <p>This makes <code>git diff</code> and <code>git blame</code> nearly useless for code review, and masks any real future changes in noise. It also means the working tree does NOT match the Phase 18 certified commit (<code>0a74822</code>).</p>
+  <p class="recommendation">Recommendation: Add <code>* text=auto eol=lf</code> to a <code>.gitattributes</code> file, run <code>git add --renormalize .</code>, and commit. This permanently fixes cross-platform line ending issues.</p>
+</div>
+
+<div class="finding high">
+  <div class="finding-header">
+    <span class="finding-title">SEC-03: Dashboard Server Binds to Localhost Without Authentication</span>
+    <span class="badge badge-high">High</span>
+  </div>
+  <p>The 2,273-line <code>dashboard_server.py</code> runs on <code>localhost:8080</code> using Python's built-in <code>http.server</code>. While binding to localhost limits network exposure, there is no authentication, no CORS restrictions, and direct access to kill switch controls, order routing, and market data APIs. Any local process or browser tab can interact with it.</p>
+  <p class="recommendation">Recommendation: Add HMAC-based session tokens (the <code>hmac</code> and <code>secrets</code> imports are present but verify they gate all mutable endpoints), and consider binding to 127.0.0.1 explicitly with a CSRF token on state-changing operations.</p>
+</div>
+
+<div class="finding high">
+  <div class="finding-header">
+    <span class="finding-title">CODE-01: Large Monolithic Script Files</span>
+    <span class="badge badge-high">High</span>
+  </div>
+  <p><code>dashboard_server.py</code> (2,273 lines), <code>dashboard.html</code> (194K), and <code>run_upstox_paper_session.py</code> (33K) are extremely large single files. These are difficult to test, review, and maintain. The server mixes HTTP routing, business logic, UI rendering, and broker integration in one file.</p>
+  <p class="recommendation">Recommendation: Refactor dashboard_server.py into a proper module with separated route handlers, data access layer, and template rendering. Extract dashboard.html into components.</p>
+</div>
+
+<div class="finding medium">
+  <div class="finding-header">
+    <span class="finding-title">SEC-04: ruff noqa Suppressions on Security-Sensitive Scripts</span>
+    <span class="badge badge-medium">Medium</span>
+  </div>
+  <p>Both <code>refresh_upstox_token.py</code> and <code>dashboard_server.py</code> use broad <code># ruff: noqa: S603, S607</code> suppressions, disabling bandit's subprocess security checks. The token refresh script calls <code>systemctl</code> via <code>subprocess.run</code>, and the dashboard server also uses subprocess. These are legitimate use cases but blanket suppression hides potential future issues.</p>
+  <p class="recommendation">Recommendation: Use line-level <code># noqa: S603</code> only on the specific subprocess calls rather than file-level blanket suppression.</p>
+</div>
+
+<h2>3. Code Quality Assessment</h2>
+
+<h3>Static Analysis Configuration</h3>
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="finding-title">Excellent Linting & Type Safety Setup</span>
+    <span class="badge badge-ok">Strong</span>
+  </div>
+  <p>Ruff is configured with 10 rule families including security (S/bandit), bugbear (B), and type-checking (TCH). Mypy runs in <code>strict</code> mode with all strictness flags enabled. At Phase 18 certification: 0 ruff errors, 0 mypy issues across 149 source files.</p>
+</div>
+
+<h3>Quality Scores</h3>
+<div class="score-bar">
+  <span class="score-label">Type Safety</span>
+  <div class="score-track"><div class="score-fill" style="width:95%;background:#059669"></div></div>
+  <span class="score-label">9.5/10</span>
+</div>
+<div class="score-bar">
+  <span class="score-label">Lint Clean</span>
+  <div class="score-track"><div class="score-fill" style="width:92%;background:#059669"></div></div>
+  <span class="score-label">9.2/10</span>
+</div>
+<div class="score-bar">
+  <span class="score-label">Test Cov.</span>
+  <div class="score-track"><div class="score-fill" style="width:88%;background:#2563eb"></div></div>
+  <span class="score-label">8.8/10</span>
+</div>
+<div class="score-bar">
+  <span class="score-label">Architecture</span>
+  <div class="score-track"><div class="score-fill" style="width:90%;background:#059669"></div></div>
+  <span class="score-label">9.0/10</span>
+</div>
+<div class="score-bar">
+  <span class="score-label">Security</span>
+  <div class="score-track"><div class="score-fill" style="width:65%;background:#d97706"></div></div>
+  <span class="score-label">6.5/10</span>
+</div>
+<div class="score-bar">
+  <span class="score-label">Git Hygiene</span>
+  <div class="score-track"><div class="score-fill" style="width:40%;background:#dc2626"></div></div>
+  <span class="score-label">4.0/10</span>
+</div>
+
+<h2>4. Safety & Trading Controls Audit</h2>
+
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="finding-title">Dual-Key Live Trading Protection</span>
+    <span class="badge badge-ok">Strong</span>
+  </div>
+  <p>Live trading requires both <code>TRADING_MODE=LIVE</code> and <code>live_trading_enabled=True</code> (dual opt-in). The <code>SecurityConfig</code> uses Pydantic frozen models with <code>extra="forbid"</code>, preventing injection of unknown fields. Kill switch cannot be disabled &mdash; the validator raises <code>SecurityConfigurationError</code> if <code>kill_switch_enabled=False</code> is attempted. Risk controls, reconciliation gate, and startup gate are all non-relaxable.</p>
+</div>
+
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="finding-title">Broker Guard Layer</span>
+    <span class="badge badge-ok">Strong</span>
+  </div>
+  <p>The <code>DeploymentBrokerGuard</code> unwraps decorator layers to identify the core broker, uses a 4-tier detection system (PaperBroker check → explicit capability attribute → class name heuristics → fail-closed default), and guarantees PAPER/SHADOW modes can never route to a live broker.</p>
+</div>
+
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="finding-title">Shadow Execution Guard</span>
+    <span class="badge badge-ok">Strong</span>
+  </div>
+  <p><code>ShadowExecutionOnlyGuard</code> independently checks <code>live_trading_enabled</code> context and blocks live execution. This provides defense-in-depth separate from the security config layer.</p>
+</div>
+
+<h2>5. Dependency & Technology Audit</h2>
+
+<table>
+  <thead>
+    <tr><th>Dependency</th><th>Version</th><th>Purpose</th><th>Risk</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>pydantic</td><td>&ge;2.7.0</td><td>Data validation, config models</td><td style="color:#059669">Low</td></tr>
+    <tr><td>numpy</td><td>&ge;1.26.0</td><td>Numerical computation</td><td style="color:#059669">Low</td></tr>
+    <tr><td>pandas</td><td>&ge;2.2.0</td><td>Data manipulation</td><td style="color:#059669">Low</td></tr>
+    <tr><td>polars</td><td>&ge;0.20.0</td><td>High-perf dataframes</td><td style="color:#059669">Low</td></tr>
+    <tr><td>duckdb</td><td>&ge;0.10.0</td><td>Analytical queries</td><td style="color:#059669">Low</td></tr>
+    <tr><td>httpx</td><td>&ge;0.27.0</td><td>HTTP client (broker API)</td><td style="color:#2563eb">Medium</td></tr>
+    <tr><td>websockets</td><td>&ge;12.0</td><td>Market data streaming</td><td style="color:#2563eb">Medium</td></tr>
+    <tr><td>structlog</td><td>&ge;24.1.0</td><td>Structured logging</td><td style="color:#059669">Low</td></tr>
+    <tr><td>hypothesis</td><td>&ge;6.100.0</td><td>Property-based testing (dev)</td><td style="color:#059669">Low</td></tr>
+  </tbody>
+</table>
+<p class="section-note">Python &ge;3.11 required. Dependencies are pinned with minimum versions (&ge;) but lack upper bounds, which could introduce breaking changes on upgrade. Consider pinning exact versions in a lockfile.</p>
+
+<h2>6. Testing Architecture Audit</h2>
+
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="finding-title">Comprehensive Multi-Tier Test Suite</span>
+    <span class="badge badge-ok">Strong</span>
+  </div>
+  <p>136 test files across 4 test categories: unit tests (per-module), integration tests (pipeline tests, crash recovery), property-based tests (Hypothesis for 13 subsystems), adversarial tests (paper shadow attack scenarios), and golden fixture tests (14 deterministic scenarios). At Phase 18 certification: 1,030/1,030 passing.</p>
+</div>
+
+<div class="finding medium">
+  <div class="finding-header">
+    <span class="finding-title">TEST-01: No Coverage Reporting Configured</span>
+    <span class="badge badge-medium">Medium</span>
+  </div>
+  <p>While <code>pytest-cov</code> is listed as a dev dependency, the pytest configuration does not include <code>--cov</code> in <code>addopts</code>. There is no evidence of a coverage report or minimum coverage threshold enforcement. Without this, dead code and untested paths go undetected.</p>
+  <p class="recommendation">Recommendation: Add <code>--cov=alphaforge --cov-report=term-missing --cov-fail-under=85</code> to pytest addopts.</p>
+</div>
+
+<div class="finding low">
+  <div class="finding-header">
+    <span class="finding-title">TEST-02: scripts/ Directory Lacks Test Coverage</span>
+    <span class="badge badge-low">Low</span>
+  </div>
+  <p>The <code>scripts/</code> directory contains 10 operational scripts (13 files, ~430K total) including the critical dashboard server and paper trading session runner, but only <code>test_upstox_paper_session_bridge.py</code> and <code>test_dashboard_server.py</code> cover parts of them. The 2,273-line dashboard server likely has significant untested code paths.</p>
+</div>
+
+<h2>7. Git & Repository Hygiene</h2>
+
+<div class="finding medium">
+  <div class="finding-header">
+    <span class="finding-title">GIT-01: Multiple Divergent Branches</span>
+    <span class="badge badge-medium">Medium</span>
+  </div>
+  <p>Active branches: <code>master</code> (current), <code>main</code>, <code>agents/read-only-audit-report-generation</code>, <code>phase6-implementation-check</code>. The existence of both <code>master</code> and <code>main</code> can cause confusion. Old feature branches should be cleaned up.</p>
+  <p class="recommendation">Recommendation: Consolidate to a single default branch, delete merged/stale branches.</p>
+</div>
+
+<div class="finding medium">
+  <div class="finding-header">
+    <span class="finding-title">GIT-02: No CI/CD Pipeline Detected</span>
+    <span class="badge badge-medium">Medium</span>
+  </div>
+  <p>No <code>.github/workflows/</code>, <code>.gitlab-ci.yml</code>, or equivalent CI configuration files were found. Tests, linting, and type-checking rely entirely on manual local execution. For a financial trading system, automated quality gates are essential.</p>
+  <p class="recommendation">Recommendation: Add a GitHub Actions workflow that runs pytest, ruff, and mypy on every push and PR.</p>
+</div>
+
+<h2>8. Documentation Audit</h2>
+
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="finding-title">Exceptional Documentation Coverage</span>
+    <span class="badge badge-ok">Strong</span>
+  </div>
+  <p>The <code>docs/</code> directory contains 50+ specification documents covering every phase, acceptance reports, forensic reviews, architecture blueprints, requirement traceability, and open design decisions. The <code>OPEN_DESIGN_DECISIONS.md</code> formally catalogs 11 architectural decisions with status tracking. This is unusually thorough for a personal project.</p>
+</div>
+
+<h2>9. Risk Assessment Summary</h2>
+
+<table>
+  <thead>
+    <tr><th>Finding</th><th>Severity</th><th>Status</th><th>Effort to Fix</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>SEC-01: Plain-text credentials in .env</td><td class="severity-critical">Critical</td><td>Open</td><td>1-2 hours</td></tr>
+    <tr><td>SEC-02: 181 whitespace-only uncommitted changes</td><td class="severity-critical">Critical</td><td>Open</td><td>30 min</td></tr>
+    <tr><td>SEC-03: Unauthenticated dashboard server</td><td class="severity-high">High</td><td>Open</td><td>2-4 hours</td></tr>
+    <tr><td>CODE-01: Monolithic script files</td><td class="severity-high">High</td><td>Open</td><td>1-2 days</td></tr>
+    <tr><td>SEC-04: Broad noqa suppressions</td><td class="severity-medium">Medium</td><td>Open</td><td>30 min</td></tr>
+    <tr><td>TEST-01: No coverage threshold</td><td class="severity-medium">Medium</td><td>Open</td><td>15 min</td></tr>
+    <tr><td>GIT-01: Branch hygiene</td><td class="severity-medium">Medium</td><td>Open</td><td>15 min</td></tr>
+    <tr><td>GIT-02: No CI/CD</td><td class="severity-medium">Medium</td><td>Open</td><td>1-2 hours</td></tr>
+    <tr><td>TEST-02: Scripts lack test coverage</td><td class="severity-low">Low</td><td>Open</td><td>1-2 days</td></tr>
+  </tbody>
+</table>
+
+<h2>10. Strengths Highlights</h2>
+
+<div class="finding positive">
+  <div class="finding-header"><span class="finding-title">Institutional-Grade Safety Design</span><span class="badge badge-ok">Excellent</span></div>
+  <p>Dual-key live trading guard, non-disablable kill switch, fail-closed security defaults, immutable Pydantic config models, SHA-256 tamper-evident audit ledger, and 8-state reconnect FSM. This is production-grade safety engineering rarely seen in personal trading systems.</p>
+</div>
+<div class="finding positive">
+  <div class="finding-header"><span class="finding-title">Rigorous Separation of Concerns</span><span class="badge badge-ok">Excellent</span></div>
+  <p>Clean modular decomposition: Strategy &ne; Risk &ne; Execution &ne; Broker &ne; Reconciliation &ne; Audit Ledger. Frozen logic isolation verified &mdash; Phase 18 changes touched 0 files in strategy, risk, execution, ledger, security, or deployment modules.</p>
+</div>
+<div class="finding positive">
+  <div class="finding-header"><span class="finding-title">Credential Hygiene in Source Code</span><span class="badge badge-ok">Good</span></div>
+  <p>No hardcoded credentials found anywhere in the 154 Python source files. All secrets are loaded from environment variables via <code>os.environ.get()</code>. The <code>.env</code> file was never committed to git history. Credential redaction module exists for log scrubbing.</p>
+</div>
+
+<div style="margin-top:32px;padding:16px;background:#f1f5f9;border-radius:10px;font-size:0.85em;color:#64748b;text-align:center;">
+  AlphaForge Forensic Audit Report &bull; Generated 10 October 2026 &bull; Auditor: Claude AI Agent
+</div>
+
+</div>
+</body>
+</html>
