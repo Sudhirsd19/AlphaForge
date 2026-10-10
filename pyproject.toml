@@ -90,3 +90,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra -q --strict-markers --import-mode=importlib --cov=alphaforge --cov-report=term-missing --cov-report=html --cov-fail-under=85"
 
+[tool.setuptools.packages.find]
+include = ["alphaforge*"]
+
+
