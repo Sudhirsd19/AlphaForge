@@ -1,0 +1,37 @@
+# Normalize line endings across all platforms to LF (Unix)
+# See: https://help.github.com/en/articles/dealing-with-line-endings
+
+* text=auto eol=lf
+
+# Python files
+*.py text eol=lf
+*.pyi text eol=lf
+
+# Shell scripts
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Markdown & Documentation
+*.md text eol=lf
+*.markdown text eol=lf
+*.txt text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+
+# Windows batch & PowerShell (keep CRLF if needed for Windows execution)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.sqlite binary
+*.db binary
+*.exe binary
